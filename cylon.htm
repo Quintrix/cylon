@@ -614,9 +614,13 @@ function keyboard() {
         if (on) el.classList.add(cls); else el.classList.remove(cls);
     };
 
-    window.showFullKeyboard = function() {
+    window.updatePrompt = function() {
         document.getElementById('kb-prompt').textContent = cwd + "> ";
         renderInputLine();
+    };
+
+    window.showFullKeyboard = function() {
+        updatePrompt();
         document.getElementById('kb-overlay').classList.add('is-open');
         document.body.classList.add('kb-open');
     };
@@ -624,6 +628,15 @@ function keyboard() {
     window.hideFullKeyboard = function() {
         document.getElementById('kb-overlay').classList.remove('is-open');
         document.body.classList.remove('kb-open');
+    };
+
+    window.isVirtualKeyboardOpen = function() {
+        return document.body.classList.contains('kb-open');
+    };
+
+    window.toggleFullKeyboard = function() {
+        if (window.isVirtualKeyboardOpen()) { window.hideFullKeyboard(); }
+        else { window.showFullKeyboard(); }
     };
 
     // Prompt toggles the keyboard when tapped
@@ -765,7 +778,8 @@ function loadNext() {
     print("<p><font color=lime>Qandy Pocket Computer v2029<br>Quintrix and Crew Software</font>");
     print("<p><font color=cyan>Alpha Testing Prototype Release<br>Free Public Domain Software</font>");
     
-    showFullKeyboard();
+    updatePrompt(); // Terminal is shown first; prompt sits at the bottom.
+                     // Virtual keyboard stays closed until tapped or ~ is pressed.
 
     // Hides keyboard whenever the terminal text area itself is tapped
     document.getElementById('video-layer').addEventListener('click', function() {
@@ -803,8 +817,16 @@ function loadNext() {
         else if (e.key === 'End') { window.press({id: 'end', shift: e.shiftKey}); e.preventDefault(); }
         else if (e.key === 'Insert') { window.press({id: 'ins', shift: e.shiftKey}); e.preventDefault(); }
         else if (e.key === 'Delete') { window.press({id: 'del', shift: e.shiftKey}); e.preventDefault(); }
-        else if (e.key === 'Escape') { window.press({id: 'esc'}); }
-        else if (e.key.length === 1) { window.press({char: e.key}); e.preventDefault(); }
+        else if (e.key === '`' || e.key === '~') {
+            // Console-style toggle (as in many games): show/hide the virtual
+            // keyboard. Physical typing itself never needs it open - chars
+            // are echoed straight into the prompt bar either way - so this
+            // is purely for when the user wants the on-screen keys/nav pad.
+            e.preventDefault();
+            window.toggleFullKeyboard();
+        } else if (e.key === 'Escape') {
+            if (window.isVirtualKeyboardOpen()) { window.press({id: 'esc'}); }
+        } else if (e.key.length === 1) { window.press({char: e.key}); e.preventDefault(); }
     });
 
     document.addEventListener('keyup', function(e) {
