@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "Qandy Virtual Keyboard",
+  "version": "0.1.0",
+  "description": "Full-screen slide-up virtual keyboard that injects keystrokes into the focused field of any page.",
+  "host_permissions": ["<all_urls>"],
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "all_frames": true,
+      "run_at": "document_idle",
+      "js": ["content.js"]
+    }
+  ]
+}

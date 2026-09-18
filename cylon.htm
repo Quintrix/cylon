@@ -200,6 +200,17 @@ let cmdHistory = [];
 let historyIdx = -1;
 let cwd = "/";
 
+const PAGES = Object.freeze({
+    'capflag.htm',
+    'gfx-tileset.htm',
+    'gfx-create.htm',
+    'gfx-itemid.htm',
+    'gfx-mods.htm',
+    'gfx-tileset.htm',
+    'gfx-viewer.htm'    
+});
+
+// used for mock operatingh system that will be replaced with real one
 const vfs = {
     '/': ['system', 'docs', 'boot.sys'],
     '/system': ['kernel.bin', 'config.txt', 'qandy.sys'],
@@ -283,6 +294,14 @@ function navigateHistory(direction) {
     } else {
         inputBuffer = cmdHistory[cmdHistory.length - 1 - historyIdx];
     }
+}
+
+function PageOpen() {
+  // open a new page
+}
+
+function PageClose() {
+  // close an open page
 }
 
 // ============================================================================

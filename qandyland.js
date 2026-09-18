@@ -2229,7 +2229,7 @@ function _proceedWithStartup() {
   _proceedWithStartup();
 
   // Start the HTTP server
-  server.listen(PORT, '0.0.0.0.', function () {
+  server.listen(PORT, '0.0.0.0', function () {
     var publicIP = '127.0.0.1'; 
     displayStartupBanner(publicIP, null, null);
     

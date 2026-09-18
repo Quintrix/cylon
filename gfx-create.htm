@@ -92,16 +92,16 @@
 <div id="toolPopup" style="display:none; position:fixed; left:200px; top:100px; background:#333; border:2px solid #0af; color:#eee; border-radius:8px; z-index:1000; min-width:250px; min-height:120px; box-shadow:0 6px 32px #000a"></div>
 
 <script>
-    const SECTORS_WIDE = 8, SECTORS_TALL = 8;
-    const SECTOR_TILE_WIDTH = 8, SECTOR_TILE_HEIGHT = 12;
+    const SECTORS_WIDE = 10, SECTORS_TALL = 11;
+    const SECTOR_TILE_WIDTH = 14, SECTOR_TILE_HEIGHT = 10;
 
-    const DEFAULT_MAP_URL = 'capflag.gfx'; // The name of your default map file
+    const DEFAULT_MAP_URL = 'queville.gfx'; // The name of your default map file
 
     let copiedSectorData = null; // Stores an array of 96 tile codes when a sector is copied
     let copiedSectorLabel = null; // Stores the label of the copied sector (e.g., "A1")
 
-    var TILE_W = 64;
-    var TILE_H = 96; 
+    var TILE_W = SECTORS_WIDE * SECTOR_TILE_WIDTH;
+    var TILE_H = SECTORS_TALL * SECTOR_TILE_HEIGHT;
     var TILE_SIZE = 32; 
     var NOISE_TILES = ['Fa', 'Gb', 'Gc', 'Gd', 'Ge', 'Gf', 'Gg'];
 
@@ -889,55 +889,23 @@ function drawSectorBorders(ctx, tileSize, sectorsWide, sectorsTall, sectorTileWi
     ctx.restore();
 }
 
-function showLOSTool() {
-    activeTool = 'terrain';
-    const terrains = { "Ga": "Grass (Clear)", "Ra": "Forest (Dense)", "Sa": "Mountain (High)", "Ta": "Swamp (Low)", "Ya": "Wall (Block)" };
-    
-    let gridHtml = `<div style="display:grid; grid-template-columns:repeat(${SECTORS_WIDE}, 30px); gap:2px; background:#111; padding:5px;">`;
-    
-    for (let r = 0; r < SECTORS_TALL; r++) {
-        for (let c = 0; c < SECTORS_WIDE; c++) {
-            const label = `${UPPER[r]}${LOWER[c]}`;
-            const type = sectorLOS[label] || "Ga";
-            gridHtml += `<div onclick="cycleLOS('${label}')" title="${label}: ${terrains[type]}" 
-                style="width:30px; height:30px; cursor:pointer; background:url('t/${type}.png'); background-size:cover; border:1px solid #444; font-size:9px; color:white; text-shadow:1px 1px black;">${label}</div>`;
-        }
-    }
-    gridHtml += `</div>`;
 
-    const popup = document.getElementById('toolPopup');
-    popup.innerHTML = `
-        <div id="toolPopupHeader" style="cursor:move; background:#2c3e50; padding:8px; border-radius:6px 6px 0 0; font-weight:bold;">
-            World Lines of Sight
-            <span style="float:right;cursor:pointer;" onclick="document.getElementById('toolPopup').style.display='none'">✕</span>
-        </div>
-        <div style="padding:15px;">
-            <p style="font-size:0.8em; color:#aaa; margin-top:0;">Click a sector to cycle terrain type:</p>
-            ${gridHtml}
-            <div style="margin-top:10px; font-size:0.75em; color:#0af;">Ga: Grass | Ra: Forest | Sa: Mtn | Ta: Swamp | Ya: Wall</div>
-            <button onclick="document.getElementById('toolPopup').style.display='none'" style="margin-top:10px; width:100%;">Done</button>
-        </div>
-    `;
-    popup.style.display = "block";
-    makeDraggable(popup, document.getElementById('toolPopupHeader'));
+function drawTile(x, y) {
+    if (x < 0 || x >= TILE_W || y < 0 || y >= TILE_H) return;
+    const code = mapData[y][x];
+    const img = getTileImage(code); // Get from preloaded cache
+    ctx.fillStyle = '#000';
+    ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+    if (img && img.complete && img.naturalWidth !== 0) { // Check img exists and is complete
+        ctx.drawImage(img, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+    } else {
+        // Placeholder for missing/broken images
+        ctx.strokeStyle = '#333';
+        ctx.strokeRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
+    }
 }
 
-    function drawTile(x, y) {
-        if (x < 0 || x >= TILE_W || y < 0 || y >= TILE_H) return;
-        const code = mapData[y][x];
-        const img = getTileImage(code); // Get from preloaded cache
-        ctx.fillStyle = '#000';
-        ctx.fillRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-        if (img && img.complete && img.naturalWidth !== 0) { // Check img exists and is complete
-            ctx.drawImage(img, x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-        } else {
-            // Placeholder for missing/broken images
-            ctx.strokeStyle = '#333';
-            ctx.strokeRect(x * TILE_SIZE, y * TILE_SIZE, TILE_SIZE, TILE_SIZE);
-        }
-    }
-
-    let isPainting = false;
+let isPainting = false;
 
 function handlePaintAction(clientX, clientY) {
     const rect = canvas.getBoundingClientRect();
@@ -1120,12 +1088,14 @@ canvas.addEventListener('mousedown', (e) => {
         const sectorY = Math.floor(ty / SECTOR_TILE_HEIGHT);
         const label = `${UPPER[sectorY]}${LOWER[sectorX]}`;    
     
-        // Calculate 0-95 index
+        // Calculate 0-139 index (for 14x10)
         const localX = tx % SECTOR_TILE_WIDTH;
         const localY = ty % SECTOR_TILE_HEIGHT;
         const zIndex = (localY * SECTOR_TILE_WIDTH) + localX;
-        const zStr = zIndex.toString().padStart(2, '0');
-
+        
+        // Convert to 2-character Hexadecimal (00 to 8B)
+        const zStr = zIndex.toString(16).toUpperCase().padStart(2, '0');
+        
         if (!sectorItems[label]) sectorItems[label] = [];
 
         // Toggle: If item exists at this Z, remove it. Otherwise, add.
@@ -1417,9 +1387,11 @@ async function importMap() {
 async function processMap(text) {
     console.log('processMap=' + text);
     const lines = text.split('\n');
-    const SECTOR_W = 8;
-    const SECTOR_H = 12;
 
+    const SECTOR_W = SECTOR_TILE_WIDTH;
+    const SECTOR_H = SECTOR_TILE_HEIGHT;
+    const TILES_PER_SECTOR = SECTOR_W * SECTOR_H; // 140
+    
     mapData = []; 
     for (let y = 0; y < TILE_H; y++) { 
         mapData[y] = Array(TILE_W).fill('Ga'); 
@@ -1455,13 +1427,13 @@ async function processMap(text) {
         const mainData = parts[0];     
         const objectData = parts[1] || ""; 
 
-        const tilesLength = 96 * 2; 
+        const tilesLength = TILES_PER_SECTOR * 2; 
         const tilesString = mainData.substring(0, tilesLength);
         
         const exitString = mainData.substring(tilesLength);
         sectorExits[label] = exitString;
 
-        for (let i = 0; i < 96; i++) {
+        for (let i = 0; i < TILES_PER_SECTOR; i++) {
             const tileCode = tilesString.substring(i * 2, (i * 2) + 2);
             const sx = i % SECTOR_W;
             const sy = Math.floor(i / SECTOR_W);
@@ -1514,8 +1486,8 @@ async function processMap(text) {
 }
 
 function exportMap() {
-    const SECTOR_W = 8;
-    const SECTOR_H = 12;
+    const SECTOR_W = SECTOR_TILE_WIDTH;
+    const SECTOR_H = SECTOR_TILE_HEIGHT;
     let output = "";
 
     for (let r = 0; r < SECTORS_TALL; r++) { 
