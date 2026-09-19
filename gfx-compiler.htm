@@ -178,7 +178,8 @@ canvas { background: #000; box-shadow: 0 0 20px rgba(0,0,0,0.5); cursor: crossha
 <body>
 <div id="main">
 <div id="viewport">
-<canvas id="sectorCanvas" width="256" height="384"></canvas>
+<!-- Updated canvas to 14 tiles wide (448px) and 10 tiles high (320px) -->
+<canvas id="sectorCanvas" width="448" height="320"></canvas>
 <div id="tooltip">Z:00</div>
     <div class="tool-box" id="brushBox">
         <div id="tileBrushRow">
@@ -292,7 +293,10 @@ const UPPER = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 const LOWER = "abcdefghijklmnopqrstuvwxyz";
 const CITY_SYMBOLS = "0123456789%()+,-:;=@[]^_{}";
 
-const COLS = 8;
+const COLS = 14;
+const ROWS = 10;
+const TOTAL_TILES = COLS * ROWS; // 140
+
 const tileCache = {}, itemCache = {};
 const canvas = document.getElementById('sectorCanvas');
 const ctx = canvas.getContext('2d');
@@ -364,10 +368,10 @@ qpcData = {};
 for(let x = 0; x < 26; x++) {
 for(let y = 0; y < 26; y++) {
 let sec = UPPER[x] + LOWER[y];
-mapSectors[sec] = { tiles: "Ga".repeat(96), exits: "", objects: [] };
+mapSectors[sec] = { tiles: "Ga".repeat(TOTAL_TILES), exits: "", objects: [] };
 
 let citySec = UPPER[x] + CITY_SYMBOLS[y];
-mapSectors[citySec] = { tiles: "Ga".repeat(96), exits: "", objects: [] };
+mapSectors[citySec] = { tiles: "Ga".repeat(TOTAL_TILES), exits: "", objects: [] };
 }
 }
 currentSector = "Aa";
@@ -476,9 +480,9 @@ if (document.activeElement) { document.activeElement.blur(); }
 const rect = canvas.getBoundingClientRect();
 const x = Math.floor((clientX - rect.left) / 32);
 const y = Math.floor((clientY - rect.top) / 32);
-const tileIndex = y * 8 + x;
+const tileIndex = y * COLS + x;
 
-if (tileIndex < 0 || tileIndex >= 96) return;
+if (tileIndex < 0 || tileIndex >= TOTAL_TILES) return;
 
 startPointerX = clientX;
 startPointerY = clientY;
@@ -545,13 +549,14 @@ checkPointerMove(e.clientX, e.clientY);
 const rect = canvas.getBoundingClientRect();
 const x = Math.floor((e.clientX - rect.left) / 32);
 const y = Math.floor((e.clientY - rect.top) / 32);
-const tileIndex = y * 8 + x;
+const tileIndex = y * COLS + x;
 
-if (tileIndex >= 0 && tileIndex < 96) {
+if (tileIndex >= 0 && tileIndex < TOTAL_TILES) {
 tooltip.style.display = 'block';
 tooltip.style.left = (e.clientX - rect.left + 25) + 'px';
 tooltip.style.top = (e.clientY - rect.top - 15) + 'px';
-tooltip.innerText = `${tileIndex.toString().padStart(2, '0')}`;
+// Formatted in HEX to seamlessly match the new Item Z-index logic
+tooltip.innerText = `${tileIndex.toString(16).toUpperCase().padStart(2, '0')}`;
 } else {
 tooltip.style.display = 'none';
 }
@@ -608,19 +613,19 @@ return img;
 function render() {
 const sec = mapSectors[currentSector];
 if(!sec) return;
-ctx.clearRect(0,0,256,384);
+ctx.clearRect(0, 0, 448, 320);
 
-for(let i=0; i<96; i++) {
+for(let i=0; i<TOTAL_TILES; i++) {
 let code = sec.tiles.substring(i*2, i*2+2);
 let img = getImg(`t/${code}.png`, tileCache);
-if(img.complete) ctx.drawImage(img, (i%8)*32, Math.floor(i/8)*32, 32, 32);
+if(img.complete) ctx.drawImage(img, (i%COLS)*32, Math.floor(i/COLS)*32, 32, 32);
 }
 
 sec.objects.forEach(obj => {
 let img = getImg(`i/${obj.id}.png`, itemCache);
-let z = parseInt(obj.z);
-let targetX = (z % 8) * 32;
-let targetY = Math.floor(z / 8) * 32;
+let z = parseInt(obj.z, 16); // Parse as Hexadecimal
+let targetX = (z % COLS) * 32;
+let targetY = Math.floor(z / COLS) * 32;
 
 if(img.complete) {
 if (obj.id.startsWith('T') || obj.id.startsWith('U')) {
@@ -764,12 +769,12 @@ const idStr = document.getElementById('newID').value.trim();
 const zStr = document.getElementById('newZ').value.trim();
 const dataStr = document.getElementById('newDATA').value.trim();
 if (idStr.length !== 2 || zStr.length !== 2) {
-alert("ID and Z must be exactly 2 characters (e.g., ID: 'Bd', Z: '05')");
+alert("ID and Z must be exactly 2 characters (e.g., ID: 'Bd', Z: '0A')");
 return;
 }
 const obj = mapSectors[currentSector].objects[editingIndex];
 obj.id = idStr;
-obj.z = zStr;
+obj.z = zStr.toUpperCase();
 obj.data = (dataStr.length === 2) ? dataStr : "";
 document.getElementById('editingObjID').innerText = obj.id + "@" + obj.z;
 const labelEl = document.getElementById('logicLabel');
@@ -949,7 +954,7 @@ const zStr = document.getElementById('newZ').value.trim();
 const dataStr = document.getElementById('newDATA').value.trim();
 
 if (idStr.length !== 2 || zStr.length !== 2) {
-alert("ID and Z must be exactly 2 characters (e.g., ID: 'Bd', Z: '05')");
+alert("ID and Z must be exactly 2 characters (e.g., ID: 'Bd', Z: '0A')");
 return;
 }
 
@@ -960,7 +965,7 @@ closeEditor();
 
 const newObject = {
 id: idStr,
-z: zStr,
+z: zStr.toUpperCase(),
 data: (dataStr.length === 2) ? dataStr : "",
 logic: ""
 };
@@ -1141,26 +1146,26 @@ initBlank();
 try {
 // 1. Attempt to load the GFX file
 try {
-const responseGfx = await fetch('capflag.gfx');
+const responseGfx = await fetch('queville.gfx');
 if (responseGfx.ok) {
 const textGfx = await responseGfx.text();
 parseGfxData(textGfx);
-console.log("Successfully loaded capflag.gfx");
+console.log("Successfully loaded queville.gfx");
 }
 } catch (e) {
-console.warn("Could not load capflag.gfx automatically.");
+console.warn("Could not load queville.gfx automatically.");
 }
 
 // 2. Attempt to load the QPC file
 try {
-const responseQpc = await fetch('capflag.qpc');
+const responseQpc = await fetch('queville.qpc');
 if (responseQpc.ok) {
 const textQpc = await responseQpc.text();
 parseQpcData(textQpc); // Uses our new specific parser
-console.log("Successfully loaded capflag.qpc");
+console.log("Successfully loaded queville.qpc");
 }
 } catch (e) {
-console.warn("Could not load capflag.qpc automatically.");
+console.warn("Could not load queville.qpc automatically.");
 }
 
 // Update UI
@@ -1203,7 +1208,7 @@ function exportGfx() {
     }
   }
 
-  const defaultTiles = "Ga".repeat(96);
+  const defaultTiles = "Ga".repeat(TOTAL_TILES);
 
   for (const label in mapSectors) {
     if (validLabels.has(label)) {
@@ -1279,7 +1284,8 @@ objs.push({ id: m.substring(0,2), z: m.substring(2,4), data: "", logic: l || "" 
 }
 }
 });
-mapSectors[label] = { tiles: map.substring(0,192), exits: map.substring(192), objects: objs };
+// Updated map tile string length to match the new 140-tile structure (280 characters string)
+mapSectors[label] = { tiles: map.substring(0,280), exits: map.substring(280), objects: objs };
 });
 updateGlobalLabels();
 render();
