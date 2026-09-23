@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Cylon Desktop Environment</title>
+    <style>
+        body { margin: 0; background-color: #000; color: #0f0; overflow: hidden; }
+        /* Include necessary GFX CSS here */
+    </style>
+    <!-- Include the graphics engine -->
+    <script src="qandy-sound.js"></script>
+    <script src="gfx.js"></script>
+</head>
+<body>
+    <!-- The graphics engine will inject its DOM elements here -->
+
+<script>
+    // 1. Configure the GFX Engine for the Desktop
+    window.gfxDrive = 'cylon.gfx'; // The virtual drive holding your desktop map
+    
+    // 2. Client Hooks required by gfx.js
+    
+    // Called when the user clicks a static object (like a desk, computer, etc.)
+    window.objdown = function(code) {
+        // code = itemID + z-location (e.g., 'Yj44')
+        let itemId = code.substring(0, 2);
+        
+        switch(itemId) {
+            case 'Ta': // Let's pretend 'Ta' is an Arcade Cabinet graphic
+                // Tell the outer Qandy Pocket Computer shell to launch Lunar Lander
+                if (window.parent && window.parent.loadUrl) {
+                    window.parent.loadUrl('lunar.htm');
+                }
+                break;
+            case 'Tb': // Let's pretend 'Tb' is a Calculator on a desk
+                if (window.parent && window.parent.loadUrl) {
+                    window.parent.loadUrl('calc.htm');
+                }
+                break;
+            // Add more objects here!
+        }
+    };
+
+    window.itemdown = function(code) {
+        // Handle dynamic item clicks (picking up files/apps)
+        window.gfxClick("ID" + code); 
+    };
+
+    window.serverdown = function(code) {
+        // Handle custom punch-code server responses (UNIVAC plugins)
+        console.log("UNIVAC sent to desktop:", code);
+    };
+
+    // 3. Boot the connection
+    window.onload = async function() {
+        // Set map dimensions to fit nicely inside the pocket computer screen
+        window.mapx = 7;
+        window.mapy = 11;
+        
+        // Connect to the Qandyland Server
+        await gfxConnect(1); 
+    };
+</script>
+</body>
+</html>

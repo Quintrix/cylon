@@ -2184,7 +2184,7 @@ if (process.stdin.isTTY) {
 
 function _proceedWithStartup() {
 
-  var driveList = ['capflag.gfx']; // HARDCODED: Add all desired initial drive names here.
+  var driveList = ['capflag.gfx', 'cylon.gfx']; // HARDCODED: Add all desired initial drive names here.
   
   for (var i = 0; i < driveList.length; i++) {
     var dn = normName(driveList[i]);

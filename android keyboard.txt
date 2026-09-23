@@ -1,0 +1,7 @@
+How to actually build this: The Next Steps
+When you are ready to tackle the Android side, here is the roadmap:
+Download Android Studio: It's free and handles all the messy SDK/compiling stuff.
+Create a "New Project" with No Activity.
+I will give you the AndroidManifest.xml file (which registers the app as a keyboard) and the QandyIME.kt file (the wrapper).
+You drop your keyboard.html, style.css, and keyboard.js into the Android project's assets/ folder.
+Hit "Build APK", install it on your phone, go to Android Settings -> Keyboards, and enable "Qandy Board".

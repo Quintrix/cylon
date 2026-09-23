@@ -98,7 +98,7 @@ window.gfxConnect = async function(serverIndex) {
   try {
     await gfxFetchMap(gfxDrive);
   } catch (e) {
-    await print("Error: " + e.message + "\n\n");
+    // await print("Error: " + e.message + "\n\n");
     dosExit();
     return;
   }
@@ -115,7 +115,7 @@ window.gfxConnect = async function(serverIndex) {
     return;
   }
 
-  await print("Error: No session token\n\n");
+  // await print("Error: No session token\n\n");
   dosExit;
 };
 
@@ -458,7 +458,7 @@ var tiles = [];
 async function gfxFetchMap(filename) {
   filename = filename || "capflag.gfx";
   try {
-    await print("Loading " + filename + "...\n");
+    // await print("Loading " + filename + "...\n");
     
     var gfxContent = await qdosLoad(filename);
     if (!gfxContent) { throw new Error("Failed to load " + filename); }
@@ -504,7 +504,7 @@ async function gfxFetchMap(filename) {
     return true;
     
   } catch (e) {
-    await print("Error loading " + filename + ": " + e.message + "\n");
+    // await print("Error loading " + filename + ": " + e.message + "\n");
     return false;
   }
 }
@@ -1050,45 +1050,94 @@ window.gfxZClick = function(z, clickedElement) {
 
 splash(1000);
 
+// Helper for the delay (since the old QDOS sleep() might be gone)
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
 async function splash(durationMs) {
-  _CURSOR=CURSOR; CURSOR=0;
-  await print("\n\n\n");
-  header="Quintrix and Crew Software";
-  footer="Multiplayer Graphics Engine";
-  const L1 = header.split('');
-  const L2 = footer.split('');
-  // State: 0=Black, 1=Dark(22), 2=Mid(28), 3=Bright(46)
-  let state1 = new Array(L1.length).fill(0);
-  let state2 = new Array(L2.length).fill(0);
-  const colors = ["\x1b[30m", "\x1b[38;5;22m", "\x1b[38;5;28m", "\x1b[38;5;46m"];
+  const header = "Quintrix and Crew Software";
+  const footer = "Multiplayer Graphics Engine";
+  
+  // 1. Create a temporary full-screen DOM overlay for the splash
+  const splashContainer = document.createElement('div');
+  splashContainer.style.position = 'absolute';
+  splashContainer.style.top = '0';
+  splashContainer.style.left = '0';
+  splashContainer.style.width = '100vw';
+  splashContainer.style.height = '100vh';
+  splashContainer.style.backgroundColor = '#000';
+  splashContainer.style.zIndex = '999999';
+  splashContainer.style.display = 'flex';
+  splashContainer.style.flexDirection = 'column';
+  splashContainer.style.alignItems = 'center';
+  splashContainer.style.justifyContent = 'center';
+  splashContainer.style.fontFamily = 'monospace';
+  splashContainer.style.fontSize = 'clamp(1rem, 3vw, 2rem)'; // scales nicely
+  splashContainer.style.fontWeight = 'bold';
+  
+  const headerDiv = document.createElement('div');
+  const footerDiv = document.createElement('div');
+  splashContainer.appendChild(headerDiv);
+  splashContainer.appendChild(footerDiv);
+  document.body.appendChild(splashContainer);
+
+  // 2. CSS Colors matching the old ANSI states: 0=Black, 1=Dark, 2=Mid, 3=Bright
+  const colors = ["#000000", "#004d00", "#00aa00", "#00ff00"];
+  
+  // Create individual spans for each character so we can color them independently
+  const createSpans = (text, parent) => {
+    return text.split('').map(char => {
+      const span = document.createElement('span');
+      // preserve spaces
+      span.innerHTML = char === ' ' ? '&nbsp;' : char;
+      span.style.color = colors[0];
+      parent.appendChild(span);
+      return span;
+    });
+  };
+
+  const headerSpans = createSpans(header, headerDiv);
+  const footerSpans = createSpans(footer, footerDiv);
+
+  let state1 = new Array(header.length).fill(0);
+  let state2 = new Array(footer.length).fill(0);
+  
   const startTime = Date.now();
+
+  // 3. Run the animation loop
   while (state1.concat(state2).some(s => s < 3)) {
-    let output = "\x1b[2A"; // Move up to overwrite
-    // Randomly "evolve" characters
+    // Randomly "evolve" characters for the header
     for (let i = 0; i < state1.length; i++) {
       if (state1[i] < 3 && Math.random() > 0.8) state1[i]++;
-      output += colors[state1[i]] + L1[i];
+      headerSpans[i].style.color = colors[state1[i]];
     }
-    output += "\n";
+    // Randomly "evolve" characters for the footer
     for (let i = 0; i < state2.length; i++) {
       if (state2[i] < 3 && Math.random() > 0.8) state2[i]++;
-      output += colors[state2[i]] + L2[i];
+      footerSpans[i].style.color = colors[state2[i]];
     }
-    if (CURMORE>-1) { CURMORE=0; }
-    // beeping sound effects
-    //if (Math.random() > 0.2) { 
-    //  // High-pitched, very short blips (800Hz to 1200Hz)
-    //  let freq = 700 + Math.floor(Math.random() * 400);
-    //  beep(freq, 10); // 20ms duration is a sharp 'click' or 'tick'
-    //}
-    await print(output + "\x1b[0m\n");
+
+    // Optional audio blips
+    if (Math.random() > 0.2 && typeof beep === 'function') { 
+      let freq = 700 + Math.floor(Math.random() * 400);
+      beep(freq, 10, 0.05); // frequency, duration, volume
+    }
+
     await sleep(40); // Fast enough to look like data "streaming" in
+    
     // Safety timeout to prevent infinite loops
     if (Date.now() - startTime > durationMs) break; 
   }
-  await print("\x1b[2A\x1b[38;5;46m"+header+"\n"+footer+"\x1b[0m\n");
-  CURSOR=_CURSOR; await print("\n");
-  window.GFX=1;
+
+  // Force everything to max brightness at the very end just in case
+  headerSpans.forEach(span => span.style.color = colors[3]);
+  footerSpans.forEach(span => span.style.color = colors[3]);
+
+  // Brief pause to let the user read the bright text
+  await sleep(300);
+
+  // 4. Teardown
+  document.body.removeChild(splashContainer);
+  window.GFX = 1;
 }
 
 // Backwards compatibility aliases

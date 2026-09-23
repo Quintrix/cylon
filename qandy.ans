@@ -1,0 +1,34 @@
+\x1b[2J\x1b[H
+\x1b[1;44m\x1b[37m  ___________________________________________________________  \x1b[0m
+\x1b[1;44m\x1b[37m /                                                           \ \x1b[0m
+\x1b[1;44m\x1b[37m|   \x1b[1;33mWelcome to \x1b[1;35mQandyland!\x1b[1;33m — Home of the Qandy Pocket Computer\x1b[1;44m\x1b[37m | \x1b[0m
+\x1b[1;44m\x1b[37m|                                                           | \x1b[0m
+\x1b[1;46m\x1b[30m|  \x1b[1;32m▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄  \x1b[0m
+\x1b[1;46m\x1b[30m|  \x1b[1;37m▌\x1b[1;36m  QANDY POCKET COMPUTER  \x1b[1;37m▐  \x1b[1;33mANSI RENDER DEMO\x1b[0m
+\x1b[1;46m\x1b[30m|  \x1b[1;37m▌\x1b[0m\x1b[1;32m ██████████████████████████████████████ \x1b[1;37m▐  \x1b[0m
+\x1b[1;46m\x1b[30m|  \x1b[1;37m▌\x1b[0m\x1b[1;32m █  \x1b[1;31m★\x1b[1;32m  COLORS  ░░  BOXES  ▒▒  SPRITES  ▓▓  \x1b[1;37m▐  \x1b[0m
+\x1b[1;46m\x1b[30m|  \x1b[1;37m▌\x1b[0m\x1b[1;32m █  \x1b[1;35mSCROLLING TEXT  \x1b[1;32m  •  RETRO SPEEDS   \x1b[1;37m▐  \x1b[0m
+\x1b[1;46m\x1b[30m|  \x1b[1;37m▌\x1b[0m\x1b[1;32m ██████████████████████████████████████ \x1b[1;37m▐  \x1b[0m
+\x1b[1;46m\x1b[30m|                                                              \x1b[0m
+\x1b[1;44m\x1b[37m|   \x1b[1;36m[ DEMO ]\x1b[0m  \x1b[1;32mRendering sample at retro BBS speed...\x1b[1;37m       | \x1b[0m
+\x1b[1;44m\x1b[37m|                                                           | \x1b[0m
+\x1b[1;44m\x1b[37m \___________________________________________________________/  \x1b[0m
+
+\x1b[1;33m   ┌─────────────────────────────────────────────────────────┐\x1b[0m
+\x1b[1;33m   │\x1b[0m  \x1b[1;35mQandy v5\x1b[0m — A tiny pocket computer that renders ANSI with\x1b[1;33m  │\x1b[0m
+\x1b[1;33m   │\x1b[0m  \x1b[1;35mcolors, boxes, sprites, and simulated scroll speeds.\x1b[1;33m│\x1b[0m
+\x1b[1;33m   └─────────────────────────────────────────────────────────┘\x1b[0m
+
+\x1b[1;36m   [SCREEN] \x1b[1;32m▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉\x1b[0m
+\x1b[1;36m           \x1b[1;31m▉\x1b[1;33m  Q A N D Y   A N S I   T E S T  \x1b[1;32m▉\x1b[0m
+\x1b[1;36m           \x1b[1;34m▉\x1b[1;37m  frame: \x1b[1;33m[██████░░░░] 60%\x1b[1;34m▉\x1b[0m
+\x1b[1;36m           \x1b[1;35m▉\x1b[1;36m  sprites: \x1b[1;33m◼ ◻ ◼ ◻ ◼\x1b[1;35m▉\x1b[0m
+\x1b[1;36m           \x1b[1;32m▉\x1b[1;30m  speed: \x1b[1;33m120 CPS (simulated)\x1b[1;32m▉\x1b[0m
+\x1b[1;36m   \x1b[1;32m▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉▉\x1b[0m
+
+\x1b[1;37m   Tips:\x1b[0m
+   - Save this file as qandy_welcome.ans and place it where bbs.js reads welcome screens.
+   - View locally: printf '%b' "$(cat qandy_welcome.ans | sed -e 's/\\\\x1b/\\x1b/g')"  # (if file contains literal \x1b bytes)
+   - Or create it from this template with the command shown below.
+
+\x1b[0m

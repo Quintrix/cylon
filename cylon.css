@@ -1,0 +1,231 @@
+/* --- POWER ON / BOOT OVERLAY --- */
+        #power-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background-color: #030803;
+            z-index: 100000;
+            cursor: pointer;
+            box-sizing: border-box;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+
+            /* Prevent browser touch lag, pinching, and callouts on the kiosk */
+            touch-action: none;
+            -webkit-touch-callout: none;
+            -webkit-user-select: none;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+
+            transition: opacity 0.5s cubic-bezier(0.22, 1, 0.36, 1), visibility 0.5s ease;
+        }
+
+        #power-overlay.hidden {
+            opacity: 0;
+            visibility: hidden;
+            pointer-events: none;
+        }
+
+        /* Center Boot Section */
+        .hud-center {
+            text-align: center;
+            margin: auto 0;
+        }
+
+        .hud-action {
+            font-size: clamp(0.9rem, 3vw, 1.6rem);
+            font-weight: 900;
+            color: #bbb;
+            text-shadow: 0 0 15px #bbb;
+            letter-spacing: 4px;
+            margin-bottom: 16px;
+        }
+
+        html, body {
+            background-color: #000; color: #0f0;
+            font-family: monospace; margin: 0;
+            height: 100vh; width: 100vw;
+            overflow: hidden; overscroll-behavior-y: none; 
+            user-select: none; -webkit-user-select: none;
+        }
+
+        /* --- DYNAMIC LAYOUT VARS --- */
+        :root {
+            --bar-height: 60px;
+            --kb-height: 55vh;
+            --kb-pan: 0px; /* how far the app layer is panned up to keep a focused field clear of the keyboard */
+        }
+
+        /* --- MAIN SCREEN LAYER --- */
+        #screen-wrapper {
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: calc(100vh - var(--bar-height)); /* Fills screen minus taskbar */
+            background-color: #000; /* BLENDED WITH INPUT BAR */
+            /* Changed transition to target height instead of transform */
+            transition: height 0.4s cubic-bezier(0.22, 1, 0.36, 1), filter 0.4s ease;
+            overflow: hidden;
+            box-sizing: border-box;
+        }
+
+        /* When KB opens, resize the screen to dock perfectly above the keyboard */
+        body.kb-open #screen-wrapper {
+            height: calc(100vh - var(--bar-height) - var(--kb-height));
+        }
+        
+        /* --- APP LAYERS --- */
+        #video-layer {
+            width: 100%;
+            height: 100%;
+            box-sizing: border-box;
+            overflow-y: auto;
+            /* Flex layout to align output text to the bottom */
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Clipping "mask" for iframe apps. This element's box is what shrinks
+           when the keyboard opens (via body.kb-open on #screen-wrapper above it);
+           the iframe inside it never resizes (see .page-frame) - instead this
+           container pans it up via --kb-pan so a focused field clears the
+           keyboard. That keeps every app's internal CSS (100vh, flex, etc.)
+           completely unaffected by keyboard state, regardless of that app's
+           internal scroll/overflow structure. */
+        #browser-layer-container {
+            width: 100%;
+            height: 100%;
+            box-sizing: border-box;
+            overflow: hidden;
+        }
+
+        /* Pushes terminal text to the bottom until it overflows */
+        .term-spacer {
+            flex-grow: 1;
+            min-height: 0;
+        }
+
+        /* Dynamically styled generated iframes.
+           Height is intentionally constant (the keyboard-closed size), not 100%
+           of the parent - #browser-layer-container is the thing that shrinks
+           (masking) and pans (transform) around it. The iframe's own box - and
+           therefore every app's internal 100vh/flex layout - never changes when
+           the keyboard opens or closes. */
+        .page-frame {
+            width: 100%;
+            height: calc(100vh - var(--bar-height));
+            border: none;
+            background: #000;
+            display: none;
+            transform: translateY(calc(-1 * var(--kb-pan)));
+            transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+        }
+        .page-frame.active {
+            display: block;
+        }
+
+        /* --- TASKBAR / INPUT BAR --- */
+        #input-bar {
+            position: fixed;
+            bottom: 0; left: 0; right: 0;
+            height: var(--bar-height);
+            background: #000; /* SEAMLESS WITH SCREEN */
+            border-top: none; /* REMOVED GREEN LINE */
+            display: flex; align-items: center; 
+            padding: 0 10px;
+            box-sizing: border-box; z-index: 100;
+            transition: transform 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+            cursor: text;
+        }
+
+        #kb-input-lines {
+            width: 100%; display: flex; flex-direction: column;
+        }
+
+        /* Taskbar flies up to sit exactly on top of the keyboard */
+        body.kb-open #input-bar {
+            transform: translateY(calc(-1 * var(--kb-height)));
+            border-top: none;
+            border-bottom: 1px solid #0a0;
+        }
+
+        /* Iframe for Local Apps */
+        #app-frame {
+            display: none; width: 100%; height: 100%; border: none; background: #000;
+        }
+
+        /* --- BOTTOM BROWSER BAR --- */
+        #browser-bar {
+            position: absolute;
+            top: calc(100vh - var(--bar-height)); /* Default at bottom */
+            left: 0; right: 0; height: var(--bar-height);
+            background: #080808; border-top: 1px solid #0a0; border-bottom: 1px solid transparent;
+            display: flex; align-items: center; padding: 0 10px; gap: 10px;
+            box-sizing: border-box; z-index: 100;
+            transition: top 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+        }
+
+        /* Bar flies to the top when KB is open */
+        body.kb-open #browser-bar {
+            top: 0;
+            border-top: none;
+            border-bottom: 1px solid #0a0;
+        }
+
+        .nav-btn {
+            background: #151515; color: #0f0; border: 1px solid #333;
+            border-radius: 6px; height: 40px; width: 50px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 1.2rem; cursor: pointer; transition: all 0.05s;
+        }
+        .nav-btn:active { background: #0f0; color: #000; transform: scale(0.95); }
+
+        /* URL Display / Input Box */
+        #url-box {
+            flex: 1; background: #020202; border: 1px solid #0a0;
+            border-radius: 6px; height: 40px; padding: 0 15px;
+            display: flex; align-items: center; cursor: text;
+            font-size: 1.1rem; overflow: hidden; white-space: nowrap;
+        }
+        .url-prefix { color: #0a0; margin-right: 8px; font-weight: bold; }
+        #url-input-text { color: #0f0; }
+        #url-cursor {
+            display: inline-block; width: 8px; height: 1.1rem; background: #0f0;
+            vertical-align: text-bottom; margin-left: 2px; display: none;
+            animation: blink 1s infinite steps(2, start);
+        }
+        body.kb-open #url-cursor { display: inline-block; }
+        @keyframes blink { 0% { opacity: 1; } 100% { opacity: 0; } }
+
+        /* --- VIRTUAL KEYBOARD OVERLAY --- */
+        #kb-overlay {
+            position: absolute; bottom: 0; left: 0; right: 0; height: var(--kb-height);
+            background: rgba(8, 8, 8, 0.98); z-index: 999;
+            display: flex; flex-direction: column; box-sizing: border-box;
+            border-top: 1px solid #0a0;
+            transform: translateY(100%); transition: transform 0.4s cubic-bezier(0.22, 1, 0.36, 1);
+        }
+        #kb-overlay.is-open { transform: translateY(0); }
+
+        #kb-grid {
+            display: flex; flex-direction: column; flex: 1; padding: 1vh 1vw; gap: 1vh; min-height: 0;
+        }
+        .kb-cols-wrap { display: flex; flex: 1; gap: 1vw; min-height: 0; }
+        .kb-main-block { flex: 1; display: flex; flex-direction: column; gap: 1vh; min-height: 0; }
+        .kb-nav-block { width: 18vw; flex: 0 0 auto; display: flex; flex-direction: column; gap: 1vh; min-height: 0; }
+        .kb-row { display: flex; flex: 1; gap: 1vw; min-height: 0; }
+        
+        .kb-key {
+            background: #222; color: #fff; border: 1px solid #444; border-radius: 6px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 3vh; cursor: pointer; text-transform: uppercase; padding: 0 2px;
+        }
+        .kb-key.active { background: #666; color: #fff; border-color: #888; }
+        .kb-key.locked { background: #ddd; color: #000; }
+        .kb-key-dual { font-size: 4vh; text-transform: none; }
+        .kb-key-accent { background: #0a220a; border-color: #0f0; color: #0f0; }
+        .kb-fn-key, .kb-nav-key { font-size: 2.2vh; text-transform: none; }
+        .kb-spacer { visibility: hidden; }

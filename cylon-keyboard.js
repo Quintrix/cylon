@@ -1,404 +1,3 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cylon Bootloader</title>
-    <script src="qandy-sound.js"></script>
-    <style>
-        html, body {
-            background-color: #000;
-            color: #0f0;
-            font-family: monospace;
-            margin: 0;
-            height: 100vh;
-            width: 100vw;
-            overflow: hidden; /* Prevent body scrolling */
-        }
-        
-        /* Main Display Screen */
-        #screen-wrapper {
-            display: flex;
-            flex-direction: column;
-            width: 100%;
-            height: 100vh;
-            background-color: #050505;
-            position: relative;
-            box-sizing: border-box;
-            overflow: hidden;
-            transition: height 0.4s cubic-bezier(0.22, 1, 0.36, 1);
-        }
-
-        #video-layer {
-            flex: 1;
-            min-height: 0;
-            order: 1; 
-            padding: 15px 15px 0 15px; /* Top, Right, Bottom(0 for seamless merging), Left */
-            box-sizing: border-box;
-            overflow-y: auto;
-            font-size: 1.2rem;
-            line-height: 1.4;
-            white-space: pre-wrap;
-            word-wrap: break-word;
-            transition: flex 0.4s cubic-bezier(0.22, 1, 0.36, 1), padding 0.4s ease, opacity 0.4s ease;
-        }
-
-        /* Holds one <iframe> per open page/"app". Only one is visible at a time. */
-        #browser-layer-container {
-            display: none; /* Hidden by default on boot; shown once a page is open */
-            flex: 1;
-            min-height: 0;
-            order: 1;
-            position: relative; /* anchors the absolutely-positioned .page-frame children */
-            width: 100%;
-            background: #000000;
-            transition: flex 0.4s cubic-bezier(0.22, 1, 0.36, 1), opacity 0.4s ease;
-        }
-
-        .page-frame {
-            display: none; /* shown only when it has the .active class */
-            position: absolute;
-            inset: 0;
-            width: 100%;
-            height: 100%;
-            border: none;
-            background: #000000;
-        }
-
-        .page-frame.active {
-            display: block;
-        }
-
-        /* Collapse the webpage smoothly when the keyboard opens */
-        body.kb-open #browser-layer-container {
-            flex: 0 0 0px;
-            opacity: 0;
-        }
-
-        body.kb-open #video-layer {
-            flex: 0 0 0px;       /* Shrinks the layer to 0 height */
-            padding-top: 0;      /* Removes padding so it hides completely */
-            padding-bottom: 0;
-            opacity: 0;          /* Fades out the text */
-        }
-
-        /* Persistent Input Prompt */
-        #input-bar {
-            flex: 0 0 auto;
-            order: 2; /* Naturally stays at the bottom of the screen-wrapper */
-            padding: 0 15px 15px 15px; /* Matched horizontal padding to video-layer */
-            background: transparent;
-            font-size: 1.2rem; /* Match terminal */
-            line-height: 1.4; /* Match terminal */
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            position: relative;
-            box-sizing: border-box;
-            cursor: text;
-        }
-
-        /* Virtual Keyboard Overlay */
-        #kb-overlay {
-            position: fixed;
-            bottom: 0; left: 0; right: 0;
-            height: 85vh;
-            background: rgba(10, 10, 10, 0.95);
-            z-index: 99999;
-            display: flex;
-            flex-direction: column;
-            box-sizing: border-box;
-            user-select: none; -webkit-user-select: none;
-            overflow-y: auto; overflow-x: hidden;
-            transform: translateY(100%);
-            transition: transform 0.4s cubic-bezier(0.22, 1, 0.36, 1);
-            will-change: transform;
-        }
-
-        #kb-overlay.is-open {
-            transform: translateY(0);
-        }
-
-        /* Terminal Input Text Rendering */
-        #kb-input-lines { width: 100%; box-sizing: border-box; }
-        #kb-line1, #kb-line2 {
-            white-space: pre; overflow: hidden; line-height: 1.4; width: 100%;
-            cursor: text;
-        }
-        #kb-line2-indent { display: inline-block; }
-        #kb-prompt { color: #0f0; } /* Match Terminal Color */
-        #kb-input-render1, #kb-input-render2 { color: #0f0; } /* Match Terminal Color */
-        
-        .kb-selected { background: #0f0; color: #000; }
-        .kb-cursor-bar {
-            display: inline-block; width: 2px; height: 1.2rem; background: #0f0;
-            margin: 0; vertical-align: text-bottom;
-            animation: blink 1s infinite steps(2, start);
-        }
-        .kb-cursor-block {
-            display: inline-block; min-width: 0.6em; height: 1.2rem;
-            background: #0f0; color: #000; vertical-align: text-bottom;
-            animation: blink 1s infinite steps(2, start);
-        }
-        @keyframes blink { 0% { opacity: 1; } 100% { opacity: 0; } }
-        
-        #kb-mode-indicator {
-            position: absolute; top: 0; right: 15px;
-            color: #0a0; font-size: 0.8rem; border: 1px solid #0a0; border-radius: 3px;
-            padding: 2px 4px; background: rgba(0,0,0,0.55); opacity: 0.6;
-            pointer-events: none; z-index: 2;
-        }
-
-        /* Keyboard Grid Buttons */
-        #kb-grid {
-            display: flex; flex-direction: column; flex: 1; padding: 1vh 1vw; gap: 1vh;
-            background: transparent; box-sizing: border-box; min-height: 0; min-width: 0; width: 100%;
-        }
-        .kb-row { display: flex; flex: 1; gap: 1vw; min-height: 0; }
-        .kb-col { display: flex; flex-direction: column; gap: 1vh; min-height: 0; }
-        .kb-key {
-            background: #222; color: #fff; border: 1px solid #444; border-radius: 6px;
-            display: flex; align-items: center; justify-content: center;
-            font-size: 3.5vh; cursor: pointer; text-transform: uppercase;
-            transition: background 0.05s; text-align: center; padding: 0 2px; box-sizing: border-box;
-        }
-        .kb-key.active { background: #666; color: #fff; border-color: #888; }
-        .kb-key.locked { background: #ddd; color: #000; }
-
-        .kb-key-dual {
-            font-size: 5vh;
-            text-transform: none;
-        }
-        .kb-side-panel {
-            flex: 0 0 9vh;
-            border-bottom: 1px solid #222;
-        }
-        .kb-fn-key, .kb-nav-key { font-size: 3vh; }
-        .kb-cols-wrap { display: flex; flex: 1; gap: 1vw; min-height: 0; }
-        .kb-fn-row { flex: 0 0 9vh; display: flex; gap: 1vw; }
-        .kb-main-block { flex: 1; min-width: 0; }
-        .kb-nav-block { width: 15vw; flex: 0 0 auto; justify-content: flex-end; }
-    </style>
-</head>
-<body>
-
-<!-- MAIN DISPLAY & PROMPT -->
-<div id="screen-wrapper">
-    <div id="video-layer"></div>
-    <div id="browser-layer-container"></div>
-    <div id="input-bar">
-        <span id="kb-mode-indicator">INS</span>
-        <div id="kb-input-lines">
-            <div id="kb-line1"><span id="kb-prompt"></span><span id="kb-input-render1"></span></div>
-            <div id="kb-line2"><span id="kb-line2-indent"></span><span id="kb-input-render2"></span></div>
-        </div>
-    </div>
-</div>
-
-<!-- VIRTUAL KEYBOARD OVERLAY (Grid container) -->
-<div id="kb-overlay">
-    <div id="kb-grid"></div>
-</div>
-
-
-<script>
-// ============================================================================
-// 1. STATE & VIRTUAL FILE SYSTEM (Qandy DOS)
-// ============================================================================
-
-let inputBuffer = "";
-let cursorPos = 0;
-let selAnchor = null;   // null = no active selection; otherwise selection spans [selAnchor, cursorPos)
-let insertMode = true;  // true = insert, false = overwrite
-let clipboard = "";
-let cmdHistory = [];
-let historyIdx = -1;
-let cwd = "/";
-
-const PAGES = Object.freeze(new Set([
-    'capflag.htm',
-    'gfx-tileset.htm',
-    'gfx-create.htm',
-    'gfx-itemid.htm',
-    'gfx-mods.htm',
-    'gfx-viewer.htm',
-    'gfx-compiler.htm'
-]));
-
-// Tracks every currently-open "app" page.
-// key = page filename (e.g. 'gfx-viewer.htm'), value = its <iframe> element.
-let openPages = {};
-// Filename of the page currently shown on screen, or null if the terminal is showing.
-let activePage = null;
-
-// used for mock operatingh system that will be replaced with real one
-const vfs = {
-    '/': ['system', 'docs', 'boot.sys'],
-    '/system': ['kernel.bin', 'config.txt', 'qandy.sys'],
-    '/docs': ['readme.txt', 'manual.doc']
-};
-
-// ============================================================================
-// 2. DISPLAY COMPONENT
-// ============================================================================
-
-function escapeHTML(str) {
-    return str.replace(/[&<>'"]/g, tag => ({
-        '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
-    }[tag] || tag));
-}
-
-function print(html) {
-    const term = document.getElementById('video-layer');
-    const line = document.createElement('div');
-    line.innerHTML = html; // Safe for system strings
-    term.appendChild(line);
-    term.scrollTop = term.scrollHeight; // Auto-scroll to bottom
-}
-
-// ============================================================================
-// 3. COMMAND COMPONENT
-// ============================================================================
-
-function command(cmdStr) {
-    cmdStr = cmdStr.trim();
-    
-    if (cmdStr) {
-        cmdHistory.push(cmdStr);
-        historyIdx = -1;
-    }
-
-    if (!cmdStr) return;
-
-    // Print to terminal history
-    print("Qandy " + escapeHTML(cmdStr)); 
-
-    // 1. Go back to the terminal view (pages already open stay open in the background)
-    if (cmdStr.toLowerCase() === 'exit') {
-        showTerminal();
-        print("Returned to terminal.");
-        return;
-    }
-
-    // 2. "close <page>.htm" - close a specific open page/app
-    let closeMatch = cmdStr.match(/^close\s+(\S+)$/i);
-    if (closeMatch) {
-        PageClose(closeMatch[1]);
-        return;
-    }
-
-    // 3. Bare page name from the whitelist - open it (or switch to it if already open)
-    if (PAGES.has(cmdStr)) {
-        PageOpen(cmdStr);
-        return;
-    }
-
-    // Anything else is not a recognized app / command.
-    // NOTE: the old build fell back to treating unrecognized input as a URL and
-    // loading it in the browser layer. That contradicts the whitelist/".exe" model
-    // (any site could be loaded, not just approved PAGES), so it's removed here.
-    // If you do want a general-purpose "browse anywhere" mode, it should probably
-    // be its own explicit command (e.g. "browse example.com") rather than the
-    // default fallback, so it's an intentional escape hatch and not an accidental one.
-    print("Unknown command: " + escapeHTML(cmdStr));
-}
-
-// ----------------------------------------------------------------------------
-// Page/App management
-// ----------------------------------------------------------------------------
-
-function pageContainer() {
-    return document.getElementById('browser-layer-container');
-}
-
-// Switches the visible layer back to the terminal. Open pages are NOT destroyed,
-// their iframes just get hidden (like minimizing, not quitting).
-function showTerminal() {
-    document.getElementById('video-layer').style.display = 'block';
-    pageContainer().style.display = 'none';
-    if (activePage && openPages[activePage]) {
-        openPages[activePage].classList.remove('active');
-    }
-    activePage = null;
-}
-
-// Brings an already-open page to the foreground.
-function showPage(name) {
-    document.getElementById('video-layer').style.display = 'none';
-    pageContainer().style.display = 'block';
-    Object.keys(openPages).forEach(function (n) {
-        openPages[n].classList.toggle('active', n === name);
-    });
-    activePage = name;
-}
-
-// Opens `name` if it isn't already open (loading a fresh iframe for it),
-// or simply switches to it if it's already running. Single-instance per page.
-function PageOpen(name) {
-    if (!PAGES.has(name)) {
-        print("Not a recognized app: " + escapeHTML(name));
-        return;
-    }
-
-    if (openPages[name]) {
-        showPage(name);
-        print("Switched to " + escapeHTML(name));
-        return;
-    }
-
-    let frame = document.createElement('iframe');
-    frame.className = 'page-frame';
-    frame.src = name;
-    pageContainer().appendChild(frame);
-    openPages[name] = frame;
-
-    showPage(name);
-    print("Opened " + escapeHTML(name));
-}
-
-// Closes `name` if it's open. If it was the visible page, falls back to
-// whatever was opened most recently, or the terminal if nothing is left open.
-function PageClose(name) {
-    if (!openPages[name]) {
-        print("Not open: " + escapeHTML(name));
-        return;
-    }
-
-    openPages[name].remove();
-    delete openPages[name];
-    print("Closed " + escapeHTML(name));
-
-    if (activePage === name) {
-        let remaining = Object.keys(openPages);
-        if (remaining.length) {
-            showPage(remaining[remaining.length - 1]);
-        } else {
-            showTerminal();
-        }
-    }
-}
-
-function navigateHistory(direction) {
-    if (cmdHistory.length === 0) return;
-    
-    if (direction === -1) { // Up
-        if (historyIdx < cmdHistory.length - 1) historyIdx++;
-    } else { // Down
-        if (historyIdx > 0) historyIdx--;
-        else historyIdx = -1;
-    }
-    
-    if (historyIdx === -1) {
-        inputBuffer = "";
-    } else {
-        inputBuffer = cmdHistory[cmdHistory.length - 1 - historyIdx];
-    }
-}
-
-// ============================================================================
-// 4. KEYBOARD COMPONENT
-// ============================================================================
-
 window.normalKeys = {
     '`':'`', '1':'1', '2':'2', '3':'3', '4':'4', '5':'5', '6':'6', '7':'7', '8':'8', '9':'9', '0':'0',
     '-':'-', '=':'=', '[':'[', ']':']', '\\':'\\', ';':';', "'":"'", ',':',', '.':'.', '/':'/',
@@ -692,9 +291,6 @@ function keyboard() {
         render1.appendChild(buildLineSpans(line1Text, !cursorOnLine2, posInLine, line1Start));
         render2.innerHTML = '';
         render2.appendChild(buildLineSpans(line2Text, cursorOnLine2, posInLine, line2Start));
-
-        var modeEl = document.getElementById('kb-mode-indicator');
-        if (modeEl) modeEl.textContent = insertMode ? 'INS' : 'OVR';
     }
 
     function handleLineClick(e, lineNum) {
@@ -738,6 +334,63 @@ function keyboard() {
     window.hideFullKeyboard = function() {
         document.getElementById('kb-overlay').classList.remove('is-open');
         document.body.classList.remove('kb-open');
+        window.resetPan();
+    };
+
+    // --- KEYBOARD-AVOIDANCE PANNING ---------------------------------------
+    // Given a focused field's rect (in ITS OWN iframe's viewport coordinates,
+    // as reported by cylon-sdk.js), work out whether it's covered by the
+    // on-screen keyboard and, if so, how far to pan the whole app layer up
+    // to clear it. This is deliberately ignorant of what's inside the app -
+    // no scrollIntoView, no assumptions about scroll containers - so it works
+    // the same for every page regardless of its internal layout.
+    var kbHeightPxCache = null, barHeightPxCache = null;
+
+    function cssVarPx(name) {
+        var probe = document.createElement('div');
+        probe.style.cssText = 'position:absolute;visibility:hidden;pointer-events:none;width:0;height:var(' + name + ');';
+        document.body.appendChild(probe);
+        var px = probe.getBoundingClientRect().height;
+        probe.remove();
+        return px;
+    }
+
+    function getKbHeightPx() {
+        if (kbHeightPxCache == null) kbHeightPxCache = cssVarPx('--kb-height');
+        return kbHeightPxCache;
+    }
+    function getBarHeightPx() {
+        if (barHeightPxCache == null) barHeightPxCache = cssVarPx('--bar-height');
+        return barHeightPxCache;
+    }
+    // --kb-height is in vh, so it changes with viewport size/orientation.
+    window.addEventListener('resize', function() {
+        kbHeightPxCache = null;
+        barHeightPxCache = null;
+    });
+
+    // frameRect: the on-screen document coordinates of the iframe that holds
+    // the app the rect came from (i.e. #browser-layer-container's box with
+    // --kb-pan treated as 0 - the frame's resting position before any pan).
+    window.panToRect = function(rect) {
+        if (!document.body.classList.contains('kb-open')) return;
+        if (osMode !== 'app-edit' && osMode !== 'app-textarea') return;
+
+        var kbH = getKbHeightPx();
+        var barH = getBarHeightPx();
+        var kbTop = window.innerHeight - kbH - barH; // top edge of the keyboard, resting-frame coords
+        var margin = 12;
+
+        // #screen-wrapper sits at top:0 and the app layer fills it with no
+        // offset, so the rect the app reported is already in resting-frame
+        // document coordinates - no need to add an iframe offset.
+        var shift = Math.max(0, rect.bottom - (kbTop - margin));
+        shift = Math.min(shift, kbH); // never pan further than the keyboard is tall
+        document.documentElement.style.setProperty('--kb-pan', shift + 'px');
+    };
+
+    window.resetPan = function() {
+        document.documentElement.style.setProperty('--kb-pan', '0px');
     };
 
     window.isVirtualKeyboardOpen = function() {
@@ -804,12 +457,31 @@ function keyboard() {
             if (shiftHeld) { if (selAnchor === null) selAnchor = cursorPos; } else { selAnchor = null; }
             cursorPos = inputBuffer.length;
         } else if (e.id === 'enter') {
-            command(inputBuffer);
-            inputBuffer = "";
-            cursorPos = 0;
-            selAnchor = null;
-            document.getElementById('kb-prompt').textContent = cwd + "> ";
-            hideFullKeyboard();
+            if (osMode === 'app-edit' || osMode === 'app-textarea') {
+                // 1. Send the text back to the App iframe
+                if (activePage && openPages[activePage]) {
+                    openPages[activePage].contentWindow.postMessage({
+                        type: 'QANDY_COMMIT_INPUT',
+                        id: proxyInputId,
+                        value: inputBuffer
+                    }, '*');
+                }
+                // 2. Revert back to App Mode
+                osMode = 'app';
+                inputBuffer = "";
+                cursorPos = 0;
+                document.getElementById('kb-prompt').textContent = `[ ${activeAppTitle} ]`;
+                hideFullKeyboard();
+                renderInputLine();
+            } else {
+                // Normal Terminal Enter behavior
+                command(inputBuffer);
+                inputBuffer = "";
+                cursorPos = 0;
+                selAnchor = null;
+                document.getElementById('kb-prompt').textContent = cwd + "> ";
+                hideFullKeyboard();
+            }
         } else if (e.id === 'up') {
             navigateHistory(-1);
             cursorPos = inputBuffer.length;
@@ -827,137 +499,17 @@ function keyboard() {
             cursorPos++;
         }
         renderInputLine();
+
+        // If we are editing an app field, send the updated text immediately 
+        // after every single keystroke, backspace, or deletion.
+        if (osMode === 'app-edit' || osMode === 'app-textarea') {
+            if (activePage && openPages[activePage] && e.id !== 'enter') {
+                openPages[activePage].contentWindow.postMessage({
+                    type: 'QANDY_UPDATE_INPUT',
+                    id: proxyInputId,
+                    value: inputBuffer
+                }, '*');
+            }
+        }
     };
 }
-
-// ============================================================================
-// 5. SYSTEM INITIALIZATION
-// ============================================================================
-
-function powerOn() {
-    var overlay = document.createElement('div');
-    overlay.id = 'qandy-power-overlay';
-    Object.assign(overlay.style, {
-      position: 'fixed', left: '0', top: '0', width: '100%', height: '100%',
-      zIndex: '300', background: 'transparent', display: 'flex',
-      alignItems: 'center', justifyContent: 'center', userSelect: 'none'
-    });
-
-    var label = document.createElement('div');
-    label.textContent = 'POWER ON';
-    Object.assign(label.style, {
-      color: '#fff', fontFamily: 'monospace', fontSize: '28px',
-      letterSpacing: '2px', textAlign: 'center', textShadow: '0 1px 0 rgba(0,0,0,0.6)'
-    });
-
-    var helper = document.createElement('div');
-    helper.textContent = 'Touch, Press, or Click screen to power on.';
-    Object.assign(helper.style, {
-      color: '#ffffff', fontFamily: 'monospace', fontSize: '12px', marginTop: '8px'
-    });
-
-    var stack = document.createElement('div');
-    stack.style.display = 'flex'; stack.style.flexDirection = 'column'; stack.style.alignItems = 'center';
-    stack.appendChild(label); stack.appendChild(helper);
-    overlay.appendChild(stack);
-    document.body.appendChild(overlay);
-
-    function engageHandler(e) {
-      overlay.removeEventListener('click', engageHandler, true);
-      document.removeEventListener('keydown', engageHandler, true);
-      
-      try {
-        if (typeof sound_js === 'function') { sound_js(); }
-      } catch (e) { console.warn('qandy: error while initializing sound', e); }
-
-      if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
-      loadNext();
-    }
-
-    overlay.addEventListener('click', engageHandler, { capture: true, once: true });
-    document.addEventListener('keydown', engageHandler, { capture: true, once: true });
-}
-
-window.onload = function() {
-    powerOn();
-};
-
-function loadNext() {
-    keyboard();
-    
-    print("<p><font color=lime>Qandy Pocket Computer v2029<br>Quintrix and Crew Software</font>");
-    print("<p><font color=cyan>Alpha Testing Prototype Release<br>Free Public Domain Software</font>");
-    
-    updatePrompt(); // Terminal is shown first; prompt sits at the bottom.
-                     // Virtual keyboard stays closed until tapped or ~ is pressed.
-
-    // Hides keyboard whenever the terminal text area itself is tapped
-    document.getElementById('video-layer').addEventListener('click', function() {
-        hideFullKeyboard();
-    });
-    
-    document.addEventListener('keydown', function(e) {
-        if (e.key === 'Shift') {
-            window.setModifier('shift', 'physical-shift', true);
-            window.setKeyVisual('lshift', 'active', true);
-            window.setKeyVisual('rshift', 'active', true);
-            window.updateKeyLabels();
-        } else if (e.key === 'Control') {
-            window.setModifier('ctrl', 'physical-ctrl', true);
-            window.setKeyVisual('lctrl', 'active', true);
-            window.setKeyVisual('rctrl', 'active', true);
-            window.updateKeyLabels();
-        } else if (e.key === 'Alt') {
-            window.setModifier('alt', 'physical-alt', true);
-            window.setKeyVisual('lalt', 'active', true);
-            window.setKeyVisual('ralt', 'active', true);
-            window.updateKeyLabels();
-            e.preventDefault();
-        } else if (e.key === 'CapsLock') {
-            window.caps = e.getModifierState && e.getModifierState('CapsLock');
-            window.setKeyVisual('caps', 'locked', window.caps);
-            window.updateKeyLabels();
-        } else if (e.key === 'Backspace') { window.press({id: 'back'}); e.preventDefault(); }
-        else if (e.key === 'Enter') { window.press({id: 'enter'}); e.preventDefault(); }
-        else if (e.key === 'ArrowUp') { window.press({id: 'up'}); e.preventDefault(); }
-        else if (e.key === 'ArrowDown') { window.press({id: 'down'}); e.preventDefault(); }
-        else if (e.key === 'ArrowLeft') { window.press({id: 'left', shift: e.shiftKey}); e.preventDefault(); }
-        else if (e.key === 'ArrowRight') { window.press({id: 'right', shift: e.shiftKey}); e.preventDefault(); }
-        else if (e.key === 'Home') { window.press({id: 'home', shift: e.shiftKey}); e.preventDefault(); }
-        else if (e.key === 'End') { window.press({id: 'end', shift: e.shiftKey}); e.preventDefault(); }
-        else if (e.key === 'Insert') { window.press({id: 'ins', shift: e.shiftKey}); e.preventDefault(); }
-        else if (e.key === 'Delete') { window.press({id: 'del', shift: e.shiftKey}); e.preventDefault(); }
-        else if (e.key === '`' || e.key === '~') {
-            // Console-style toggle (as in many games): show/hide the virtual
-            // keyboard. Physical typing itself never needs it open - chars
-            // are echoed straight into the prompt bar either way - so this
-            // is purely for when the user wants the on-screen keys/nav pad.
-            e.preventDefault();
-            window.toggleFullKeyboard();
-        } else if (e.key === 'Escape') {
-            if (window.isVirtualKeyboardOpen()) { window.press({id: 'esc'}); }
-        } else if (e.key.length === 1) { window.press({char: e.key}); e.preventDefault(); }
-    });
-
-    document.addEventListener('keyup', function(e) {
-        if (e.key === 'Shift') {
-            window.setModifier('shift', 'physical-shift', false);
-            window.setKeyVisual('lshift', 'active', false);
-            window.setKeyVisual('rshift', 'active', false);
-            window.updateKeyLabels();
-        } else if (e.key === 'Control') {
-            window.setModifier('ctrl', 'physical-ctrl', false);
-            window.setKeyVisual('lctrl', 'active', false);
-            window.setKeyVisual('rctrl', 'active', false);
-            window.updateKeyLabels();
-        } else if (e.key === 'Alt') {
-            window.setModifier('alt', 'physical-alt', false);
-            window.setKeyVisual('lalt', 'active', false);
-            window.setKeyVisual('ralt', 'active', false);
-            window.updateKeyLabels();
-        }
-    });
-}
-</script>
-</body>
-</html>
