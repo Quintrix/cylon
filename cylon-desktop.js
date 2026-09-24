@@ -10,7 +10,7 @@
     const TILE_SIZE = 32;
     const TOP_OFFSET = 10;
     const LEFT_OFFSET = 10;
-    const DESKTOP_FILE = 'desktop.gfx';
+    const DESKTOP_FILE = 'cylon.gfx';
 
     // Desktop State
     let desktopTiles = ""; // 192 characters (96 tiles * 2 chars)

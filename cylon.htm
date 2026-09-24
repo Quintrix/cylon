@@ -134,9 +134,7 @@ function updatePrompt() {
         let path = window.CylonDOS.pwd();
         
         // Ensure path always has a trailing slash for formatting (e.g. ram:/docs/)
-        if (path !== '(no drive)' && !path.endsWith('/')) {
-            path += '/';
-        }
+        if (path !== '(no drive)' && !path.endsWith('/')) { path += '/'; }
         
         // Appended DOS-style > angle bracket to clearly separate prompt from command (saving space)
         sysPrompt = path;
@@ -364,8 +362,7 @@ function loadNext() {
     var promptEl = document.getElementById('kb-prompt');
     if (promptEl) promptEl.textContent = sysPrompt;
 
-    print("<p><font color=lime>Qandy Pocket Computer v2029<br>Quintrix and Crew Software</font>");
-    print("<p><font color=cyan>Alpha Testing Prototype Release<br>Free Public Domain Software</font><br>");
+    print("<br><font color=lime>2029 Qandy Pocket Computer v1j - Quintrix and Crew Software</font><br><font color=cyan>Alpha Testing Prototype Release - Free Public Domain Software</font><br><font color=pink>DISCLAIMER: Written with the assistance of Artificial Intelligence");
     
     // --- Initialize DOS AFTER the welcome message, not behind the click-overlay
     initializeDos().catch(function(err) {
