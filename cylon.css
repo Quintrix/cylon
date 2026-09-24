@@ -144,6 +144,24 @@
         #kb-input-lines {
             width: 100%; display: flex; flex-direction: column;
         }
+        
+        /* --- CURSOR STYLES --- */
+        .kb-cursor-bar {
+            border-left: 2px solid #0f0;
+            margin-right: -2px; 
+            animation: blink 1s infinite steps(2, start);
+            display: inline-block;
+        }
+        .kb-cursor-block {
+            background-color: #0f0;
+            color: #000;
+            animation: blink 1s infinite steps(2, start);
+            display: inline-block;
+        }
+        .kb-selected {
+            background-color: #0f0;
+            color: #000;
+        }
 
         /* Taskbar flies up to sit exactly on top of the keyboard */
         body.kb-open #input-bar {
@@ -229,3 +247,53 @@
         .kb-key-accent { background: #0a220a; border-color: #0f0; color: #0f0; }
         .kb-fn-key, .kb-nav-key { font-size: 2.2vh; text-transform: none; }
         .kb-spacer { visibility: hidden; }
+        
+#app-taskbar {
+    display: none; /* Hidden by default */
+    width: 100%;
+    height: 100%;
+    align-items: center;
+    justify-content: space-between;
+    font-family: monospace;
+}
+
+body.app-mode #kb-input-lines {
+    display: none; /* Hide DOS prompt when apps are running */
+}
+
+body.app-mode #app-taskbar {
+    display: flex; /* Show taskbar */
+}
+
+.taskbar-sys-btn {
+    background: #0a220a;
+    color: #0f0;
+    padding: 6px 12px;
+    border: 1px solid #0f0;
+    cursor: pointer;
+    font-weight: bold;
+    border-radius: 4px;
+}
+.taskbar-sys-btn:active { background: #0f0; color: #000; }
+
+#taskbar-app-list {
+    display: flex;
+    gap: 10px;
+    flex-grow: 1;
+    margin: 0 15px;
+    overflow-x: auto;
+}
+
+.taskbar-app-tab {
+    background: #222;
+    color: #aaa;
+    padding: 6px 12px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    white-space: nowrap;
+}
+.taskbar-app-tab.active {
+    background: #111;
+    color: #0f0;
+    border-bottom: 2px solid #0f0;
+}

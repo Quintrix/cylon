@@ -320,13 +320,8 @@ function keyboard() {
         if (on) el.classList.add(cls); else el.classList.remove(cls);
     };
 
-    window.updatePrompt = function() {
-        document.getElementById('kb-prompt').textContent = cwd + "> ";
-        renderInputLine();
-    };
-
     window.showFullKeyboard = function() {
-        updatePrompt();
+        if (window.updatePrompt) window.updatePrompt(); // Use the global function
         document.getElementById('kb-overlay').classList.add('is-open');
         document.body.classList.add('kb-open');
     };
@@ -344,6 +339,7 @@ function keyboard() {
     // to clear it. This is deliberately ignorant of what's inside the app -
     // no scrollIntoView, no assumptions about scroll containers - so it works
     // the same for every page regardless of its internal layout.
+
     var kbHeightPxCache = null, barHeightPxCache = null;
 
     function cssVarPx(name) {

@@ -1,0 +1,327 @@
+// Qandy Virtual Keyboard — content script
+// Ported from the Cylon Bootloader terminal's keyboard() component.
+// Runs once per frame (all_frames:true in the manifest handles same-site iframes).
+
+(function () {
+  if (window.__qandyKbInstalled) return;
+  window.__qandyKbInstalled = true;
+
+  // ---------------------------------------------------------------------
+  // 1. Key maps (unchanged from the original)
+  // ---------------------------------------------------------------------
+  const NORMAL = {
+    '`':'`','1':'1','2':'2','3':'3','4':'4','5':'5','6':'6','7':'7','8':'8','9':'9','0':'0',
+    '-':'-','=':'=','[':'[',']':']','\\':'\\',';':';',"'":"'",',':',','.':'.','/':'/',
+    'q':'q','w':'w','e':'e','r':'r','t':'t','y':'y','u':'u','i':'i','o':'o','p':'p',
+    'a':'a','s':'s','d':'d','f':'f','g':'g','h':'h','j':'j','k':'k','l':'l',
+    'z':'z','x':'x','c':'c','v':'v','b':'b','n':'n','m':'m'
+  };
+  const SHIFTED = {
+    '`':'~','1':'!','2':'@','3':'#','4':'$','5':'%','6':'^','7':'&','8':'*','9':'(','0':')',
+    '-':'_','=':'+','[':'{',']':'}','\\':'|',';':':',"'":'"',',':'<','.':'>','/':'?',
+    'q':'Q','w':'W','e':'E','r':'R','t':'T','y':'Y','u':'U','i':'I','o':'O','p':'P',
+    'a':'A','s':'S','d':'D','f':'F','g':'G','h':'H','j':'J','k':'K','l':'L',
+    'z':'Z','x':'X','c':'C','v':'V','b':'B','n':'N','m':'M'
+  };
+
+  const mainRows = [
+    [ {id:"backtick",label:"`",flex:1.5,dual:true},{id:"n1",label:"1",flex:1,dual:true},{id:"n2",label:"2",flex:1,dual:true},{id:"n3",label:"3",flex:1,dual:true},{id:"n4",label:"4",flex:1,dual:true},{id:"n5",label:"5",flex:1,dual:true},{id:"n6",label:"6",flex:1,dual:true},{id:"n7",label:"7",flex:1,dual:true},{id:"n8",label:"8",flex:1,dual:true},{id:"n9",label:"9",flex:1,dual:true},{id:"n0",label:"0",flex:1,dual:true},{id:"dash",label:"-",flex:1,dual:true},{id:"equal",label:"=",flex:1,dual:true},{id:"back",label:"Back",flex:2,noType:true} ],
+    [ {id:"tab",label:"Tab",flex:1.5,noType:true},{id:"q",label:"q",flex:1,dual:true},{id:"w",label:"w",flex:1,dual:true},{id:"e",label:"e",flex:1,dual:true},{id:"r",label:"r",flex:1,dual:true},{id:"t",label:"t",flex:1,dual:true},{id:"y",label:"y",flex:1,dual:true},{id:"u",label:"u",flex:1,dual:true},{id:"i",label:"i",flex:1,dual:true},{id:"o",label:"o",flex:1,dual:true},{id:"p",label:"p",flex:1,dual:true},{id:"open",label:"[",flex:1,dual:true},{id:"close",label:"]",flex:1,dual:true},{id:"backslash",label:"\\",flex:1.5,dual:true} ],
+    [ {id:"caps",label:"Caps",flex:1.8,noType:true},{id:"a",label:"a",flex:1,dual:true},{id:"s",label:"s",flex:1,dual:true},{id:"d",label:"d",flex:1,dual:true},{id:"f",label:"f",flex:1,dual:true},{id:"g",label:"g",flex:1,dual:true},{id:"h",label:"h",flex:1,dual:true},{id:"j",label:"j",flex:1,dual:true},{id:"k",label:"k",flex:1,dual:true},{id:"l",label:"l",flex:1,dual:true},{id:"colon",label:";",flex:1,dual:true},{id:"quote",label:"'",flex:1,dual:true},{id:"enter",label:"Enter",flex:2.2,noType:true} ],
+    [ {id:"lshift",label:"Shift",flex:2.3,noType:true},{id:"z",label:"z",flex:1,dual:true},{id:"x",label:"x",flex:1,dual:true},{id:"c",label:"c",flex:1,dual:true},{id:"v",label:"v",flex:1,dual:true},{id:"b",label:"b",flex:1,dual:true},{id:"n",label:"n",flex:1,dual:true},{id:"m",label:"m",flex:1,dual:true},{id:"comma",label:",",flex:1,dual:true},{id:"dot",label:".",flex:1,dual:true},{id:"slash",label:"/",flex:1,dual:true},{id:"rshift",label:"Shift",flex:2.3,noType:true} ],
+    [ {id:"lctrl",label:"Ctrl",flex:1.3,noType:true},{id:"lalt",label:"Alt",flex:1.3,noType:true},{id:"space",label:"Space",flex:6},{id:"ralt",label:"Alt",flex:1.3,noType:true},{id:"rctrl",label:"Ctrl",flex:1.3,noType:true} ]
+  ];
+
+  const navRows = [
+    [ {id:"home",label:"Home",flex:1,noType:true},{id:"end",label:"End",flex:1,noType:true} ],
+    [ {id:"up",label:"▲",flex:1,noType:true} ],
+    [ {id:"left",label:"◀",flex:1,noType:true},{id:"down",label:"▼",flex:1,noType:true},{id:"right",label:"▶",flex:1,noType:true} ]
+  ];
+
+  // ---------------------------------------------------------------------
+  // 2. State
+  // ---------------------------------------------------------------------
+  let targetEl = null;   // the real page element we are typing into
+  let shift = false;
+  let caps = false;
+  let allKeyEls = {};
+
+  function isEditable(el) {
+    if (!el || el.nodeType !== 1) return false;
+    const tag = el.tagName;
+    if (tag === 'TEXTAREA') return true;
+    if (tag === 'INPUT') {
+      const okTypes = ['text', 'search', 'email', 'url', 'tel', 'password', 'number'];
+      return okTypes.includes((el.type || 'text').toLowerCase());
+    }
+    return !!el.isContentEditable;
+  }
+
+  // ---------------------------------------------------------------------
+  // 3. Shadow-DOM host (keeps our CSS/DOM isolated from the page)
+  // ---------------------------------------------------------------------
+  const host = document.createElement('div');
+  host.id = 'qandy-kb-host';
+  const shadow = host.attachShadow({ mode: 'open' });
+
+  const style = document.createElement('style');
+  style.textContent = `
+    :host { all: initial; }
+    #kb-overlay {
+      position: fixed; inset: 0; height: 100vh; width: 100vw;
+      background: rgba(8,8,8,0.97);
+      z-index: 2147483647;
+      display: flex; flex-direction: column; box-sizing: border-box;
+      font-family: monospace; color: #0f0;
+      transform: translateY(100%);
+      transition: transform 0.35s cubic-bezier(0.22,1,0.36,1);
+      user-select: none; -webkit-user-select: none;
+    }
+    #kb-overlay.is-open { transform: translateY(0); }
+    #kb-topbar {
+      flex: 0 0 auto; display: flex; align-items: center; gap: 10px;
+      padding: 10px 14px; border-bottom: 1px solid #0a0;
+    }
+    #kb-preview {
+      flex: 1; overflow: hidden; white-space: nowrap; font-size: 1.1rem;
+      background: #000; border: 1px solid #0a0; border-radius: 4px; padding: 6px 8px;
+    }
+    #kb-cursor { display:inline-block; width:2px; height:1em; background:#0f0; margin-left:1px; animation: blink 1s steps(2,start) infinite; vertical-align: -2px; }
+    @keyframes blink { 0%{opacity:1} 100%{opacity:0} }
+    #kb-close { flex: 0 0 auto; cursor: pointer; border: 1px solid #0a0; border-radius: 4px; padding: 4px 10px; }
+    #kb-grid { flex: 1; display: flex; flex-direction: column; padding: 1vh 1vw; gap: 1vh; min-height: 0; }
+    .kb-cols-wrap { display: flex; flex: 1; gap: 1vw; min-height: 0; }
+    .kb-main-block { flex: 1; display: flex; flex-direction: column; gap: 1vh; min-height: 0; }
+    .kb-nav-block { width: 14vw; flex: 0 0 auto; display: flex; flex-direction: column; gap: 1vh; justify-content: flex-end; }
+    .kb-row { display: flex; flex: 1; gap: 1vw; min-height: 0; }
+    .kb-key {
+      background: #222; color: #fff; border: 1px solid #444; border-radius: 6px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 3.2vh; cursor: pointer; text-align: center; padding: 0 2px; box-sizing: border-box;
+    }
+    .kb-key.active { background: #666; border-color: #888; }
+    .kb-key.locked { background: #ddd; color: #000; }
+    /* Portrait: hide the nav cluster + shrink to keep the layout thumb-usable */
+    @media (orientation: portrait) {
+      .kb-nav-block { display: none; }
+      .kb-key { font-size: 2.6vh; }
+    }
+  `;
+  shadow.appendChild(style);
+
+  const overlay = document.createElement('div');
+  overlay.id = 'kb-overlay';
+  overlay.innerHTML = `
+    <div id="kb-topbar">
+      <div id="kb-preview"><span id="kb-preview-text"></span><span id="kb-cursor"></span></div>
+      <div id="kb-close">DONE ✕</div>
+    </div>
+    <div id="kb-grid"></div>
+  `;
+  shadow.appendChild(overlay);
+
+  const grid = overlay.querySelector('#kb-grid');
+  const previewText = overlay.querySelector('#kb-preview-text');
+
+  function appendReady() {
+    (document.documentElement || document.body).appendChild(host);
+  }
+  if (document.documentElement) appendReady();
+  else document.addEventListener('DOMContentLoaded', appendReady);
+
+  // ---------------------------------------------------------------------
+  // 4. Build the key grid
+  // ---------------------------------------------------------------------
+  function computeChar(def) {
+    const lookup = def.label.toLowerCase();
+    const isLetter = /^[a-z]$/.test(lookup);
+    const normal = NORMAL[lookup] || def.label;
+    const shifted = SHIFTED[lookup] || def.label;
+    const shiftOn = shift;
+    const capsOn = caps;
+    if (isLetter) return (capsOn !== shiftOn) ? shifted : normal;
+    return shiftOn ? shifted : normal;
+  }
+
+  function refreshLabels() {
+    Object.keys(allKeyEls).forEach((id) => {
+      const { el, def } = allKeyEls[id];
+      if (def.dual) el.textContent = computeChar(def);
+    });
+  }
+
+  function makeKeyEl(def) {
+    const btn = document.createElement('div');
+    btn.className = 'kb-key';
+    btn.style.flex = def.flex || 1;
+    btn.textContent = def.dual ? computeChar(def) : def.label;
+    allKeyEls[def.id] = { el: btn, def };
+
+    const down = (e) => { e.preventDefault(); btn.classList.add('active'); handleKeyDown(def, btn); };
+    const up = (e) => { e.preventDefault(); btn.classList.remove('active'); handleKeyUp(def, btn); };
+    btn.addEventListener('mousedown', down);
+    btn.addEventListener('mouseup', up);
+    btn.addEventListener('mouseleave', (e) => { if (btn.classList.contains('active')) up(e); });
+    btn.addEventListener('touchstart', down, { passive: false });
+    btn.addEventListener('touchend', up, { passive: false });
+    return btn;
+  }
+
+  function appendRow(container, rowDefs) {
+    const row = document.createElement('div');
+    row.className = 'kb-row';
+    rowDefs.forEach((d) => row.appendChild(makeKeyEl(d)));
+    container.appendChild(row);
+  }
+
+  const colsWrap = document.createElement('div');
+  colsWrap.className = 'kb-cols-wrap';
+  const main = document.createElement('div');
+  main.className = 'kb-main-block';
+  mainRows.forEach((r) => appendRow(main, r));
+  colsWrap.appendChild(main);
+
+  const nav = document.createElement('div');
+  nav.className = 'kb-nav-block';
+  navRows.forEach((r) => appendRow(nav, r));
+  colsWrap.appendChild(nav);
+
+  grid.appendChild(colsWrap);
+
+  // ---------------------------------------------------------------------
+  // 5. Injection helpers — write into the REAL page element
+  // ---------------------------------------------------------------------
+  function setNativeValue(el, value) {
+    const proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
+    const desc = Object.getOwnPropertyDescriptor(proto, 'value');
+    if (desc && desc.set) desc.set.call(el, value);
+    else el.value = value;
+  }
+
+  function fireKeyPair(el, key) {
+    const opts = { bubbles: true, cancelable: true, key, shiftKey: shift };
+    el.dispatchEvent(new KeyboardEvent('keydown', opts));
+    el.dispatchEvent(new KeyboardEvent('keyup', opts));
+  }
+
+  function insertChar(ch) {
+    if (!targetEl) return;
+    if (targetEl.isContentEditable) {
+      targetEl.focus();
+      document.execCommand('insertText', false, ch);
+    } else {
+      const start = targetEl.selectionStart ?? targetEl.value.length;
+      const end = targetEl.selectionEnd ?? targetEl.value.length;
+      const val = targetEl.value;
+      setNativeValue(targetEl, val.slice(0, start) + ch + val.slice(end));
+      targetEl.setSelectionRange(start + ch.length, start + ch.length);
+      targetEl.dispatchEvent(new InputEvent('input', { bubbles: true, data: ch, inputType: 'insertText' }));
+    }
+    fireKeyPair(targetEl, ch);
+    updatePreview();
+  }
+
+  function backspace() {
+    if (!targetEl) return;
+    if (targetEl.isContentEditable) {
+      targetEl.focus();
+      document.execCommand('delete', false);
+    } else {
+      const start = targetEl.selectionStart, end = targetEl.selectionEnd;
+      const val = targetEl.value;
+      if (start !== end) {
+        setNativeValue(targetEl, val.slice(0, start) + val.slice(end));
+        targetEl.setSelectionRange(start, start);
+      } else if (start > 0) {
+        setNativeValue(targetEl, val.slice(0, start - 1) + val.slice(start));
+        targetEl.setSelectionRange(start - 1, start - 1);
+      }
+      targetEl.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'deleteContentBackward' }));
+    }
+    fireKeyPair(targetEl, 'Backspace');
+    updatePreview();
+  }
+
+  function moveCursor(delta) {
+    if (!targetEl || targetEl.isContentEditable) return;
+    const pos = Math.max(0, Math.min(targetEl.value.length, (targetEl.selectionStart || 0) + delta));
+    targetEl.setSelectionRange(pos, pos);
+  }
+
+  function jumpTo(where) {
+    if (!targetEl || targetEl.isContentEditable) return;
+    const pos = where === 'home' ? 0 : targetEl.value.length;
+    targetEl.setSelectionRange(pos, pos);
+  }
+
+  function pressEnter() {
+    if (!targetEl) return;
+    fireKeyPair(targetEl, 'Enter');
+    targetEl.dispatchEvent(new KeyboardEvent('keypress', { bubbles: true, cancelable: true, key: 'Enter' }));
+    closeKeyboard();
+  }
+
+  function updatePreview() {
+    if (!targetEl) { previewText.textContent = ''; return; }
+    const raw = targetEl.isContentEditable ? targetEl.innerText : targetEl.value;
+    const isPw = targetEl.tagName === 'INPUT' && (targetEl.type || '').toLowerCase() === 'password';
+    previewText.textContent = isPw ? '•'.repeat(raw.length) : raw;
+  }
+
+  // ---------------------------------------------------------------------
+  // 6. Key dispatch
+  // ---------------------------------------------------------------------
+  function handleKeyDown(def) {
+    switch (def.id) {
+      case 'lshift': case 'rshift': shift = true; refreshLabels(); break;
+      case 'caps': caps = !caps; refreshLabels(); break;
+      case 'back': backspace(); break;
+      case 'enter': pressEnter(); break;
+      case 'space': insertChar(' '); break;
+      case 'left': moveCursor(-1); break;
+      case 'right': moveCursor(1); break;
+      case 'home': jumpTo('home'); break;
+      case 'end': jumpTo('end'); break;
+      case 'up': case 'down': case 'tab': case 'lctrl': case 'rctrl': case 'lalt': case 'ralt':
+        // Reserved: wire these to page shortcuts later if needed.
+        break;
+      default:
+        if (def.dual) insertChar(computeChar(def));
+        else if (!def.noType) insertChar(def.label);
+    }
+  }
+
+  function handleKeyUp(def) {
+    if (def.id === 'lshift' || def.id === 'rshift') { shift = false; refreshLabels(); }
+  }
+
+  // ---------------------------------------------------------------------
+  // 7. Open / close + focus tracking
+  // ---------------------------------------------------------------------
+  function openKeyboard() {
+    overlay.classList.add('is-open');
+    updatePreview();
+  }
+  function closeKeyboard() {
+    overlay.classList.remove('is-open');
+  }
+
+  overlay.querySelector('#kb-close').addEventListener('click', closeKeyboard);
+
+  document.addEventListener('focusin', (e) => {
+    const el = e.target;
+    if (isEditable(el) && el !== targetEl) {
+      targetEl = el;
+      openKeyboard();
+    }
+  }, true);
+
+  // If the page swaps DOM out from under the focused field, don't leave a stale target.
+  document.addEventListener('focusout', (e) => {
+    if (e.target === targetEl) {
+      setTimeout(() => {
+        if (document.activeElement !== targetEl) targetEl = null;
+      }, 0);
+    }
+  }, true);
+})();

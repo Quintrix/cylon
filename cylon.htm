@@ -5,8 +5,22 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Qandy Pocket Computer</title>
     <link rel="stylesheet" href="cylon.css">
+    <style>
+        /* Standard DOS light grey for terminal text and input prompt */
+        #video-layer, #kb-input-lines {
+            color: #c0c0c0;
+        }
+        /* Enforce no space/margins around the prompt to save pixel real estate */
+        #kb-prompt {
+            margin: 0 !important;
+            padding: 0 !important;
+        }
+    </style>
     <script src='cylon-sound.js'></script>
     <script src='cylon-keyboard.js'></script>
+    <script src="cylon-dos.js"></script>
+    <script src="cylon-command.js"></script>
+    
 </head>
 <body>
 
@@ -20,9 +34,21 @@
 
 <!-- TASKBAR / TERMINAL PROMPT (Moved outside screen-wrapper) -->
 <div id="input-bar">
+    <!-- Shown when in terminal/desktop mode -->
     <div id="kb-input-lines">
         <div id="kb-line1"><span id="kb-prompt"></span><span id="kb-input-render1"></span></div>
         <div id="kb-line2"><span id="kb-line2-indent"></span><span id="kb-input-render2"></span></div>
+    </div>
+
+    <!-- Shown when an app is open (Taskbar Mode) -->
+    <div id="app-taskbar">
+        <div class="taskbar-sys-btn" onclick="showTerminal()">⏻ Desktop</div>
+        <div id="taskbar-app-list">
+            <!-- Background app tabs are injected here -->
+        </div>
+        <div class="taskbar-status">
+            <span id="tb-clock" style="color:#0f0;">00:00</span>
+        </div>
     </div>
 </div>
 
@@ -36,22 +62,26 @@
 // 1. STATE & VIRTUAL FILE SYSTEM (Qandy DOS)
 // ============================================================================
 
-// Variable defined for the terminal prompt so it can be easily updated with the OS
-var sysPrompt = "/> ";
+var sysPrompt = "ram:/>";
 
 let inputBuffer = "";
 let cursorPos = 0;
-let selAnchor = null;   // null = no active selection; otherwise selection spans [selAnchor, cursorPos)
-let insertMode = true;  // true = insert, false = overwrite
+let selAnchor = null;
+let insertMode = true;
 let clipboard = "";
 let cmdHistory = [];
 let historyIdx = -1;
 let cwd = "/";
-let osMode = 'terminal'; // 'terminal', 'app', 'app-edit', 'app-textarea'
+let osMode = 'terminal';
 let activeAppTitle = "";
 let proxyInputId = null;
 
+// DOS Boot State Variables
+let dosInitialized = false;
+let dosInitializing = null;
+
 const PAGES = Object.freeze(new Set([
+    'cylon-desktop.htm',
     'capflag.htm',
     'lunar.htm',
     'gfx-tileset.htm',
@@ -62,21 +92,11 @@ const PAGES = Object.freeze(new Set([
     'gfx-compiler.htm'
 ]));
 
-// Tracks every currently-open "app" page.
-// key = page filename (e.g. 'gfx-viewer.htm'), value = its <iframe> element.
 let openPages = {};
-// Filename of the page currently shown on screen, or null if the terminal is showing.
 let activePage = null;
 
-// used for mock operatingh system that will be replaced with real one
-const vfs = {
-    '/': ['system', 'docs', 'boot.sys'],
-    '/system': ['kernel.bin', 'config.txt', 'qandy.sys'],
-    '/docs': ['readme.txt', 'manual.doc']
-};
-
 // ============================================================================
-// 2. DISPLAY COMPONENT
+// 2. DISPLAY COMPONENT & DOS FORMATTERS
 // ============================================================================
 
 function escapeHTML(str) {
@@ -93,11 +113,100 @@ function print(html) {
     term.scrollTop = term.scrollHeight; // Auto-scroll to bottom
 }
 
+// Special print for DOS output to preserve table spacing and newlines
+function printDOS(text) {
+    let formatted = escapeHTML(String(text == null ? '' : text))
+        // 1. Convert {.color} to an opening span tag (e.g. {.yellow})
+        .replace(/\{\.([a-zA-Z0-9#]+)\}/g, '<span style="color: $1;">')
+        // 2. Convert {.} to a closing span tag
+        .replace(/\{\.\}/g, '</span>')
+        // 3. Keep your existing spacing and newline rules
+        .replace(/ {2,}/g, run => ' ' + new Array(run.length).join('&nbsp;'))
+        .replace(/\r?\n/g, '<br>');
+    print(formatted);
+}
 // ============================================================================
-// 3. COMMAND COMPONENT
+// 3. DOS INTEGRATION METHODS
 // ============================================================================
 
-function command(cmdStr) {
+function updatePrompt() {
+    if (window.CylonDOS) {
+        let path = window.CylonDOS.pwd();
+        
+        // Ensure path always has a trailing slash for formatting (e.g. ram:/docs/)
+        if (path !== '(no drive)' && !path.endsWith('/')) {
+            path += '/';
+        }
+        
+        // Appended DOS-style > angle bracket to clearly separate prompt from command (saving space)
+        sysPrompt = path;
+        
+        var promptEl = document.getElementById('kb-prompt');
+        if (promptEl) promptEl.textContent = sysPrompt;
+        
+        // Prompt keyboard renderer to update dimensions against the new prompt length
+        if (typeof window.renderInputLine === 'function') {
+            window.renderInputLine();
+        }
+    }
+}
+window.updatePrompt = updatePrompt; // Expose globally for the virtual keyboard
+
+async function bootMount() {
+    var dos = window.CylonDOS;
+    var dbExists = false;
+
+    if (window.indexedDB && window.indexedDB.databases) {
+        var dbs = await window.indexedDB.databases();
+        dbExists = dbs.some(function(db) { return db.name === 'CylonDOS'; });
+    }
+
+    if (dbExists) {
+        var parts = await dos.partitions();
+        var boot = parts.filter(function (p) { return p.boot; })[0] ||
+                   parts.filter(function (p) { return p.name === 'cylon'; })[0];
+                   
+        if (boot) {
+            await dos.mount(boot.name);
+            dos.setDrive(boot.name);
+            return;
+        }
+    }
+
+    try {
+        await dos.mount('ram:cylon.json', 'ram');
+        dos.setDrive('ram');
+        printDOS("{.yellow}System booted to RAM drive, run 'install' to setup indexDB{.}\n");
+    } catch (e) {
+        await dos.mount('ram:', 'ram');
+        dos.setDrive('ram');
+        printDOS("{.yellow}Booted to RAM drive (cylon.json not found).\nInput 'export cylon.json' to download your work later{.}\n");
+    }
+}
+
+function initializeDos() {
+    if (dosInitialized) return Promise.resolve();
+    if (dosInitializing) return dosInitializing;
+    if (!window.CylonDOS) return Promise.reject(new Error('<font color=yellow>CylonDOS is not loaded!</font>'));
+
+    dosInitializing = window.CylonDOS.ready().then(bootMount).then(function () {
+        dosInitialized = true;
+        updatePrompt();
+        if (typeof window.desktopInit === 'function') window.desktopInit();
+    });
+    
+    dosInitializing.catch(function () { dosInitializing = null; });
+    return dosInitializing;
+}
+
+window.cylonDOSInitialize = initializeDos;
+
+// ============================================================================
+// 4. COMMAND COMPONENT
+// ============================================================================
+
+// Changed to async to natively support DOS operations seamlessly
+async function command(cmdStr) {
     cmdStr = cmdStr.trim();
     
     if (cmdStr) {
@@ -105,118 +214,58 @@ function command(cmdStr) {
         historyIdx = -1;
     }
 
+    // Moved up to print the prompt and text BEFORE the empty check (this enables blank lines)
+    // Removed trailing `<br><br>` because `print()` naturally wraps into block elements, saving blank vertical lines
+    print(sysPrompt + escapeHTML(cmdStr)); 
+
     if (!cmdStr) return;
 
-    // Print to terminal history dynamically using the variable
-    print(sysPrompt + escapeHTML(cmdStr) + "<br><br>"); 
+    // Handled locally since it directly manipulates the DOM
+    if (cmdStr.toLowerCase() === 'cls' || cmdStr.toLowerCase() === 'clear') {
+        document.getElementById('video-layer').innerHTML = '<div class="term-spacer"></div>';
+        return;
+    }
 
-    // 1. Go back to the terminal view (pages already open stay open in the background)
+    // --- CYLON DOS COMMAND INTERCEPT ---
+    if (window.CylonDOS && window.handleCylonCommand) {
+        await initializeDos(); // Ensure DOS is loaded before dispatching
+        try {
+            let result = await window.handleCylonCommand(cmdStr);
+            updatePrompt();
+            if (result && result.handled) {
+                if (result.output) printDOS(result.output);
+                return; // Stop here, DOS handled the command successfully.
+            }
+        } catch (error) {
+            printDOS("Error: " + (error.message || String(error)));
+            return; 
+        }
+    }
+
+    // --- LEGACY APP / SYSTEM COMMANDS ---
     if (cmdStr.toLowerCase() === 'exit') {
         showTerminal();
         print("Returned to terminal.");
         return;
     }
 
-    // 2. "close <page>.htm" - close a specific open page/app
     let closeMatch = cmdStr.match(/^close\s+(\S+)$/i);
     if (closeMatch) {
         PageClose(closeMatch[1]);
         return;
     }
 
-    // 3. Bare page name from the whitelist - open it (or switch to it if already open)
     if (PAGES.has(cmdStr)) {
         PageOpen(cmdStr);
         return;
     }
 
-    // Anything else is not a recognized app / command.
     print("Unknown command: " + escapeHTML(cmdStr));
 }
 
 // ----------------------------------------------------------------------------
 // Page/App management
 // ----------------------------------------------------------------------------
-
-function pageContainer() {
-    return document.getElementById('browser-layer-container');
-}
-
-// Switches the visible layer back to the terminal. Open pages are NOT destroyed,
-// their iframes just get hidden (like minimizing, not quitting).
-function showTerminal() {
-    document.getElementById('video-layer').style.display = 'flex'; // Changed to flex for proper bottom alignment
-    pageContainer().style.display = 'none';
-    
-    // Remove app mode, show prompt
-    document.body.classList.remove('app-mode');
-    
-    if (activePage && openPages[activePage]) {
-        openPages[activePage].classList.remove('active');
-    }
-    activePage = null;
-    hideFullKeyboard(); // Clean up view
-}
-
-function showPage(name) {
-    document.getElementById('video-layer').style.display = 'none';
-    pageContainer().style.display = 'block';
-    
-    // Add app mode, update taskbar title
-    document.body.classList.add('app-mode');
-    
-    Object.keys(openPages).forEach(function (n) {
-        openPages[n].classList.toggle('active', n === name);
-    });
-    activePage = name;
-    hideFullKeyboard(); // Clean up view on transition
-}
-
-// Opens `name` if it isn't already open (loading a fresh iframe for it),
-// or simply switches to it if it's already running. Single-instance per page.
-function PageOpen(name) {
-    if (!PAGES.has(name)) {
-        print("Not a recognized app: " + escapeHTML(name));
-        return;
-    }
-
-    if (openPages[name]) {
-        showPage(name);
-        print("Switched to " + escapeHTML(name));
-        return;
-    }
-
-    let frame = document.createElement('iframe');
-    frame.className = 'page-frame';
-    frame.src = name;
-    pageContainer().appendChild(frame);
-    openPages[name] = frame;
-
-    showPage(name);
-    print("Opened " + escapeHTML(name));
-}
-
-// Closes `name` if it's open. If it was the visible page, falls back to
-// whatever was opened most recently, or the terminal if nothing is left open.
-function PageClose(name) {
-    if (!openPages[name]) {
-        print("Not open: " + escapeHTML(name));
-        return;
-    }
-
-    openPages[name].remove();
-    delete openPages[name];
-    print("Closed " + escapeHTML(name));
-
-    if (activePage === name) {
-        let remaining = Object.keys(openPages);
-        if (remaining.length) {
-            showPage(remaining[remaining.length - 1]);
-        } else {
-            showTerminal();
-        }
-    }
-}
 
 function navigateHistory(direction) {
     if (cmdHistory.length === 0) return;
@@ -267,7 +316,7 @@ function powerOn() {
     overlay.appendChild(stack);
     document.body.appendChild(overlay);
 
-function engageHandler(e) {
+    function engageHandler(e) {
       overlay.removeEventListener('click', engageHandler, true);
       document.removeEventListener('keydown', engageHandler, true);
       
@@ -275,7 +324,6 @@ function engageHandler(e) {
         if (typeof sound_js === 'function') { sound_js(); }
       } catch (e) { console.warn('qandy: error while initializing sound', e); }
 
-      // MOVED: Call beep INSIDE the user gesture handler!
       beep(950, 32, 1); 
 
       if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
@@ -297,43 +345,40 @@ window.addEventListener('message', function(e) {
         inputBuffer = e.data.value; // Grab current value from the app
         cursorPos = inputBuffer.length;
         
-        // Change the prompt to show what we are editing
-        document.getElementById('kb-prompt').textContent = `Editing [${e.data.placeholder || 'Text'}]: `;
+        document.getElementById('kb-prompt').textContent = `Editing [${e.data.placeholder || 'Text'}]:`;
         
         window.showFullKeyboard();
         window.updateOverlayInput();
 
-        // Pan the app layer so this field clears the keyboard, wherever it
-        // happens to sit on the page and whatever that page's own layout does.
         if (e.data.rect) window.panToRect(e.data.rect);
 
     } else if (e.data.type === 'QANDY_INPUT_RECT') {
-        // The field moved or resized (e.g. a textarea growing as the user
-        // types) - re-pan to keep it clear of the keyboard.
         window.panToRect(e.data.rect);
     }
 });
 
 function loadNext() {
-    keyboard();
+    // Assuming this function is defined elsewhere from your external scripts
+    if (typeof keyboard === 'function') keyboard();
     
-    // Ensure the visual prompt on the DOM matches our `sysPrompt` variable
     var promptEl = document.getElementById('kb-prompt');
     if (promptEl) promptEl.textContent = sysPrompt;
 
     print("<p><font color=lime>Qandy Pocket Computer v2029<br>Quintrix and Crew Software</font>");
-    print("<p><font color=cyan>Alpha Testing Prototype Release<br>Free Public Domain Software</font>");
+    print("<p><font color=cyan>Alpha Testing Prototype Release<br>Free Public Domain Software</font><br>");
     
-    if (typeof updatePrompt === 'function') {
-        updatePrompt(); // Terminal is shown first; prompt sits at the bottom.
-    }
+    // --- Initialize DOS AFTER the welcome message, not behind the click-overlay
+    initializeDos().catch(function(err) {
+        printDOS("DOS Init Error: " + (err.message || String(err)));
+    });
 
-    // Hides keyboard whenever the terminal text area itself is tapped
     document.getElementById('video-layer').addEventListener('click', function() {
-        hideFullKeyboard();
+        if (typeof hideFullKeyboard === 'function') hideFullKeyboard();
     });
     
     document.addEventListener('keydown', function(e) {
+        if (!window.setModifier) return; // Guard clause if key handlers missing
+        
         if (e.key === 'Shift') {
             window.setModifier('shift', 'physical-shift', true);
             window.setKeyVisual('lshift', 'active', true);
@@ -365,10 +410,6 @@ function loadNext() {
         else if (e.key === 'Insert') { window.press({id: 'ins', shift: e.shiftKey}); e.preventDefault(); }
         else if (e.key === 'Delete') { window.press({id: 'del', shift: e.shiftKey}); e.preventDefault(); }
         else if (e.key === '`' || e.key === '~') {
-            // Console-style toggle (as in many games): show/hide the virtual
-            // keyboard. Physical typing itself never needs it open - chars
-            // are echoed straight into the prompt bar either way - so this
-            // is purely for when the user wants the on-screen keys/nav pad.
             e.preventDefault();
             window.toggleFullKeyboard();
         } else if (e.key === 'Escape') {
@@ -377,6 +418,8 @@ function loadNext() {
     });
 
     document.addEventListener('keyup', function(e) {
+        if (!window.setModifier) return;
+        
         if (e.key === 'Shift') {
             window.setModifier('shift', 'physical-shift', false);
             window.setKeyVisual('lshift', 'active', false);
