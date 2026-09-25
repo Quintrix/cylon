@@ -96,6 +96,7 @@
     '  export [filename]              Export the current drive as JSON',
     '  import <json|url>              Import a JSON archive into the current drive',
     '  install [-y]                   Preview or execute installation of the factory image',
+    '  update <file|*> [-y]           Preview or fetch newer PAGES files from the server',
     '  cls                            Clear the terminal screen',
     '  help [command]                 Show help (e.g. "help mount" or "help fdisk")\n'
   ].join('\n');
@@ -195,6 +196,140 @@
       default:
         return usage('fdisk [-l] | new <name> [size] | resize <name> <size> | delete <name> [-y] | boot <name|none>');
     }
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* update: sync PAGES files against the server                        */
+  /* ------------------------------------------------------------------ */
+
+  function wildcardToRegExp(pattern) {
+    var esc = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
+    return new RegExp('^' + esc + '$');
+  }
+
+  // Resolves a bare filename or wildcard (e.g. '*', 'gfx*') against PAGES.
+  function matchPages(pattern) {
+    if (typeof PAGES === 'undefined') throw new Error('PAGES is not defined (cylon.htm did not load)');
+    var names = [];
+    PAGES.forEach(function (n) { names.push(n); });
+    names.sort();
+    if (pattern.indexOf('*') === -1) return PAGES.has(pattern) ? [pattern] : [];
+    var re = wildcardToRegExp(pattern);
+    return names.filter(function (n) { return re.test(n); });
+  }
+
+  function parseHttpDate(text) {
+    if (!text) return null;
+    var d = new Date(text);
+    return isNaN(d.getTime()) ? null : d;
+  }
+
+  // Local file timestamps are stored as YYYYMMDDHHMMSS (see cylon-dos.js timestamp()).
+  function parseLocalStamp(stamp) {
+    var m = /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})$/.exec(String(stamp || ''));
+    if (!m) return null;
+    return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]), Number(m[6]));
+  }
+
+  function formatDateShort(d) {
+    if (!d) return '?';
+    function p(n) { return String(n).padStart(2, '0'); }
+    return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' +
+      p(d.getHours()) + ':' + p(d.getMinutes());
+  }
+
+  // Checks one PAGES file against the server: does it exist locally, and is
+  // the server's copy newer than the local save timestamp?
+  async function checkPageUpdate(file, localEntry) {
+    var localDate = localEntry ? parseLocalStamp(localEntry.timestamp) : null;
+    var row = { file: file, localDate: localDate, remoteDate: null, needsUpdate: false, reason: '', error: null };
+
+    var res;
+    try {
+      res = await fetch(file, { method: 'HEAD', cache: 'no-store' });
+    } catch (e) {
+      row.error = 'fetch failed: ' + (e && e.message ? e.message : String(e));
+      return row;
+    }
+    if (!res.ok) {
+      row.error = 'HTTP ' + res.status;
+      return row;
+    }
+    row.remoteDate = parseHttpDate(res.headers.get('Last-Modified'));
+
+    if (!localEntry) {
+      row.needsUpdate = true;
+      row.reason = 'new';
+    } else if (!row.remoteDate || !localDate) {
+      row.needsUpdate = true;
+      row.reason = 'unknown';
+    } else if (row.remoteDate.getTime() > localDate.getTime()) {
+      row.needsUpdate = true;
+      row.reason = 'newer';
+    } else {
+      row.needsUpdate = false;
+      row.reason = 'current';
+    }
+    return row;
+  }
+
+  async function updateCommand(dos, args, flags) {
+    if (!args[0]) return usage('update <file|pattern> [-y]  (e.g. update *, update gfx*)');
+
+    var files = matchPages(args[0]);
+    if (!files.length) return 'Error: no PAGES files match "' + args[0] + '"';
+
+    var dirEntries;
+    try { dirEntries = await dos.dir(''); } catch (e) { dirEntries = []; }
+    var localByName = {};
+    dirEntries.forEach(function (e) {
+      if (e.type === 'file') localByName[e.name] = e;
+    });
+
+    var rows = [];
+    for (var i = 0; i < files.length; i++) {
+      rows.push(await checkPageUpdate(files[i], localByName[files[i]]));
+    }
+
+    var STATUS_TEXT = {
+      new: 'new (not local)',
+      newer: 'update available',
+      unknown: 'unknown (will refresh)',
+      current: 'up to date'
+    };
+
+    if (!flags.yes) {
+      var preview = [['File', 'Status', 'Remote modified', 'Local saved']];
+      var pending = 0;
+      rows.forEach(function (r) {
+        if (r.error) { preview.push([r.file, 'error: ' + r.error, '-', formatDateShort(r.localDate)]); return; }
+        if (r.needsUpdate) pending++;
+        preview.push([r.file, STATUS_TEXT[r.reason], formatDateShort(r.remoteDate), formatDateShort(r.localDate)]);
+      });
+      var out = [table(preview)];
+      out.push('');
+      out.push(pending ? (pending + ' of ' + rows.length + ' file(s) have updates available. Re-run with -y to apply.')
+        : 'All ' + rows.length + ' file(s) are up to date.');
+      return out.join('\n');
+    }
+
+    // -y: apply updates
+    var results = [['File', 'Result']];
+    for (var j = 0; j < rows.length; j++) {
+      var r = rows[j];
+      if (r.error) { results.push([r.file, 'skipped: ' + r.error]); continue; }
+      if (!r.needsUpdate) { results.push([r.file, 'unchanged']); continue; }
+      try {
+        var res2 = await fetch(r.file, { cache: 'no-store' });
+        if (!res2.ok) { results.push([r.file, 'skipped: HTTP ' + res2.status]); continue; }
+        var text = await res2.text();
+        await dos.save(r.file, text);
+        results.push([r.file, r.reason === 'new' ? 'installed' : 'updated']);
+      } catch (e) {
+        results.push([r.file, 'failed: ' + (e && e.message ? e.message : String(e))]);
+      }
+    }
+    return table(results);
   }
 
   async function mountCommand(dos, args, flags) {
@@ -335,6 +470,10 @@
           } catch (e) {
             return { handled: true, output: 'Install failed: ' + (e && e.message ? e.message : String(e)) + '. The "cylon" partition was prepared but not populated.' };
           }
+          
+        case 'update':
+          if (!args[0]) return { handled: true, output: usage('update <file|pattern> [-y]  (e.g. update *, update gfx*)') };
+          return { handled: true, output: await updateCommand(dos, args, flags) };
 
         case 'pwd':
           return { handled: true, output: dos.pwd() };
