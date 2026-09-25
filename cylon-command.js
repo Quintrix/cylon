@@ -95,7 +95,7 @@
     '  exists <path>                  Test whether a path exists',
     '  export [filename]              Export the current drive as JSON',
     '  import <json|url>              Import a JSON archive into the current drive',
-    '  install                        Install LiveCD to IndexedDB (creates "cylon" drive)',
+    '  install [-y]                   Preview or execute installation of the factory image',
     '  cls                            Clear the terminal screen',
     '  help [command]                 Show help (e.g. "help mount" or "help fdisk")\n'
   ].join('\n');
@@ -216,8 +216,6 @@
       });      
       
       return table(out) + '\n(* = current drive)';
-
-
     }
     var options = { readOnly: !!flags.readOnly };
     if (flags.size) options.quota = dos.parseSize(flags.size);
@@ -295,35 +293,47 @@
             ' entries erased). Mount it with: mount ' + target.name };
 
         case 'install':
-          // We are officially allowed to touch IDB now
-          var parts = await dos.partitions(); 
+          var parts = await dos.partitions();
           var cylonPart = parts.filter(function(p) { return p.name === 'cylon'; })[0];
+          var imageName = 'cylon.json';
+          var installFiles = ['cylon-desktop.htm', 'cylon.gfx'];
+          var action = cylonPart ? 'Format existing partition "cylon" and reinstall the factory image.'
+            : 'Create a new partition named "cylon" and install the factory image.';
+
+          if (!flags.yes) {
+            return { handled: true, output: [
+              'Install plan:',
+              '  Source:      ' + imageName,
+              '  Target:      cylon (IndexedDB partition)',
+              '  Files:       ' + installFiles.join(', '),
+              '  Boot drive:  yes',
+              '  Action:      ' + action,
+              '',
+              'No changes have been made.',
+              'To continue, run: install -y'
+            ].join('\n') };
+          }
 
           if (cylonPart) {
-            // Unmount if it's currently mounted so we can format it cleanly
             try { await dos.umount('cylon'); } catch (e) {}
             await dos.formatPartition('cylon');
           } else {
-            // Create the primary partition
             await dos.createPartition('cylon', dos.constants.DEFAULT_QUOTA);
           }
 
-          // Mark it as the boot drive and mount it
           await dos.setBootPartition('cylon');
           await dos.mount('cylon');
 
-          // Fetch the JSON and unpack it onto the new drive
           try {
-            var res = await fetch('cylon.json');
-            if (res.ok) {
-              var jsonText = await res.text();
-              await dos.importDrive(jsonText, { drive: 'cylon' });
-              return { handled: true, output: 'Installation complete! System copied to "cylon:". Type "cylon:" to switch drives.' };
-            } else {
-              return { handled: true, output: 'Partition created, but cylon.json could not be loaded (HTTP ' + res.status + ').' };
+            var res = await fetch(imageName);
+            if (!res.ok) {
+              return { handled: true, output: 'Install failed: could not load ' + imageName + ' (HTTP ' + res.status + ').' };
             }
+            var jsonText = await res.text();
+            await dos.importDrive(jsonText, { drive: 'cylon' });
+            return { handled: true, output: 'Installation complete! System copied to "cylon:". Type "cylon:" to switch drives.' };
           } catch (e) {
-            return { handled: true, output: 'Partition "cylon:" created, but failed to load cylon.json: ' + (e.message || e) };
+            return { handled: true, output: 'Install failed: ' + (e && e.message ? e.message : String(e)) + '. The "cylon" partition was prepared but not populated.' };
           }
 
         case 'pwd':
