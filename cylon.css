@@ -142,7 +142,15 @@
         }
 
         #kb-input-lines {
-            width: 100%; display: flex; flex-direction: column;
+            flex: 1 1 auto;
+            min-width: 0;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Keep the prompt visible in terminal mode and app mode. */
+        body.app-mode #kb-input-lines {
+            display: flex;
         }
         
         /* --- CURSOR STYLES --- */
@@ -249,20 +257,18 @@
         .kb-spacer { visibility: hidden; }
         
 #app-taskbar {
-    display: none; /* Hidden by default */
-    width: 100%;
+    display: flex;
+    flex: 0 0 auto;
+    min-width: 0;
     height: 100%;
     align-items: center;
     justify-content: space-between;
+    gap: 8px;
     font-family: monospace;
 }
 
-body.app-mode #kb-input-lines {
-    display: none; /* Hide DOS prompt when apps are running */
-}
-
 body.app-mode #app-taskbar {
-    display: flex; /* Show taskbar */
+    display: flex;
 }
 
 .taskbar-sys-btn {
@@ -273,15 +279,18 @@ body.app-mode #app-taskbar {
     cursor: pointer;
     font-weight: bold;
     border-radius: 4px;
+    flex: 0 0 auto;
 }
 .taskbar-sys-btn:active { background: #0f0; color: #000; }
 
 #taskbar-app-list {
     display: flex;
     gap: 10px;
-    flex-grow: 1;
+    flex: 1 1 auto;
+    min-width: 0;
     margin: 0 15px;
     overflow-x: auto;
+    overflow-y: hidden;
 }
 
 .taskbar-app-tab {
@@ -291,9 +300,30 @@ body.app-mode #app-taskbar {
     cursor: pointer;
     border-bottom: 2px solid transparent;
     white-space: nowrap;
+    flex: 0 0 auto;
 }
 .taskbar-app-tab.active {
     background: #111;
     color: #0f0;
     border-bottom: 2px solid #0f0;
+}
+
+.taskbar-status {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 52px;
+}
+
+#tb-clock {
+    color: #0f0;
+}
+
+body.app-mode #kb-input-lines {
+    display: flex;
+}
+
+body.app-mode #input-bar {
+    display: flex;
 }
