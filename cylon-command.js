@@ -581,6 +581,168 @@
     }
   }
 
+  /* ------------------------------------------------------------------ */
+  /* Local application/window manager                                   */
+  /* ------------------------------------------------------------------ */
+
+  var openPages = Object.create(null);
+  var activePage = null;
+
+  function pageContainer() {
+    return document.getElementById('browser-layer-container');
+  }
+
+  function pageName(filename) {
+    return String(filename || '').replace(/^.*\//, '');
+  }
+
+  function pageTitle(filename, title) {
+    return title || pageName(filename)
+      .replace(/\.(html?|HTML?)$/, '')
+      .replace(/[-_]+/g, ' ')
+      .toUpperCase();
+  }
+
+  function updateTaskbar() {
+    var taskbar = document.getElementById('taskbar-app-list');
+    if (!taskbar) return;
+
+    taskbar.innerHTML = '';
+
+    Object.keys(openPages).forEach(function (filename) {
+      var frame = openPages[filename];
+      var button = document.createElement('div');
+
+      button.className = 'taskbar-app-tab';
+      if (filename === activePage) {
+        button.classList.add('active');
+      }
+
+      button.textContent = frame.dataset.title;
+      button.onclick = function () {
+        global.showPage(filename);
+      };
+
+      taskbar.appendChild(button);
+    });
+  }
+
+  global.showTerminal = function () {
+    var video = document.getElementById('video-layer');
+    var container = pageContainer();
+
+    if (video) video.style.display = 'flex';
+    if (container) container.style.display = 'none';
+
+    document.body.classList.remove('app-mode');
+
+    Object.keys(openPages).forEach(function (filename) {
+      openPages[filename].classList.remove('active');
+    });
+
+    activePage = null;
+
+    if (typeof global.hideFullKeyboard === 'function') {
+      global.hideFullKeyboard();
+    }
+
+    updateTaskbar();
+  };
+
+  global.showPage = function (filename) {
+    var video = document.getElementById('video-layer');
+    var container = pageContainer();
+    var frame = openPages[filename];
+
+    if (!frame) return;
+
+    if (video) video.style.display = 'none';
+    if (container) container.style.display = 'block';
+
+    document.body.classList.add('app-mode');
+
+    activePage = filename;
+
+    Object.keys(openPages).forEach(function (name) {
+      openPages[name].classList.toggle('active', name === filename);
+    });
+
+    if (typeof global.hideFullKeyboard === 'function') {
+      global.hideFullKeyboard();
+    }
+
+    updateTaskbar();
+  };
+
+  /*
+   * Load an application from the current CylonDOS drive.
+   *
+   * The application is stored in IndexedDB or the current mounted drive.
+   * It is not loaded from the web server.
+   */
+  global.PageOpen = async function (filename, title) {
+    filename = pageName(filename);
+
+    if (!/\.html?$/i.test(filename)) {
+      throw new Error('Not an HTML application: ' + filename);
+    }
+
+    if (openPages[filename]) {
+      global.showPage(filename);
+      return;
+    }
+
+    if (!global.CylonDOS) {
+      throw new Error('CylonDOS is not available');
+    }
+
+    var html = await global.CylonDOS.load(filename);
+
+    if (html === null) {
+      throw new Error('Application not found on the mounted drive: ' + filename);
+    }
+
+    var frame = document.createElement('iframe');
+
+    frame.className = 'page-frame';
+    frame.dataset.title = pageTitle(filename, title);
+
+    /*
+     * srcdoc loads the HTML returned by CylonDOS instead of requesting
+     * filename from the web server.
+     */
+    frame.srcdoc = html;
+
+    pageContainer().appendChild(frame);
+    openPages[filename] = frame;
+
+    global.showPage(filename);
+  };
+
+  global.PageClose = function (filename) {
+    filename = pageName(filename);
+
+    var frame = openPages[filename];
+    if (!frame) return;
+
+    frame.remove();
+    delete openPages[filename];
+
+    if (activePage === filename) {
+      var remaining = Object.keys(openPages);
+
+      if (remaining.length) {
+        global.showPage(remaining[remaining.length - 1]);
+      } else {
+        global.showTerminal();
+      }
+    } else {
+      updateTaskbar();
+    }
+  };
+
   global.handleCylonCommand = handleCylonCommand;
   global.parseCylonArgs = parseArgs;
+
 })(typeof window !== 'undefined' ? window : globalThis);
+

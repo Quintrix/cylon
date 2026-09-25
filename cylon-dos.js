@@ -43,12 +43,12 @@
   var ARCHIVE_FORMAT = 'qandy-ramdrive';
   var ARCHIVE_VERSION = 2;
   var MAX_NAME_BYTES = 255;
-  var MAX_FILE_BYTES = 64 * 1024;
+  var MAX_FILE_BYTES = 512 * 1024;
   var MAX_ENTRIES = 20000;
   var MAX_PARTITIONS = 32;
   var DEFAULT_QUOTA = 10 * 1024 * 1024;
   var MIN_QUOTA = 16 * 1024;
-  var MAX_QUOTA = 2 * 1024 * 1024 * 1024;
+  var MAX_QUOTA = 2 * 1024 * 1024 * 1024 * 1024 ;
   var RAM_DEFAULT_QUOTA = 4 * 1024 * 1024;
   var MAX_ROM_BYTES = 32 * 1024 * 1024;
   var NAME_RE = /^(?!\.)(?!.*[\\/])[A-Za-z0-9 \-_.()+=!]+$/;

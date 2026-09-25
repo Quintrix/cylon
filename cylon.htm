@@ -91,9 +91,6 @@ const PAGES = Object.freeze(new Set([
     'gfx-compiler.htm'
 ]));
 
-let openPages = {};
-let activePage = null;
-
 // ============================================================================
 // 2. DISPLAY COMPONENT & DOS FORMATTERS
 // ============================================================================
@@ -252,9 +249,13 @@ async function command(cmdStr) {
         return;
     }
 
-    if (PAGES.has(cmdStr)) {
-        PageOpen(cmdStr);
-        return;
+    if (/\.html?$/i.test(cmdStr)) {
+      try {
+          await PageOpen(cmdStr);
+      } catch (error) {
+          printDOS(error.message || String(error));
+      }
+      return;
     }
 
     print("Unknown command: " + escapeHTML(cmdStr));

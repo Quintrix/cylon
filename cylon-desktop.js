@@ -19,10 +19,13 @@
     // --- APP BINDINGS ---
     // Maps GFX Item IDs to the apps they launch
     const ICON_APPS = {
-        'Ta': { file: 'lunar.htm', title: 'LUNAR LANDER' },
-        'Tb': { file: 'capflag.htm', title: 'CAPTURE THE FLAG' },
-        'Tc': { file: 'gfx-create.htm', title: 'MAP CREATOR' },
-        'Td': { file: 'gfx-viewer.htm', title: 'GFX VIEWER' }
+    	  'Ta': { file: 'cylon-desktop.htm', title: 'desktop' },
+        'Tb': { file: 'gfx-create.htm', title: 'gfx-create' },
+        'Tc': { file: 'gfx-tileset.htm', title: 'gfx-tileset' },
+        'Td': { file: 'gfx-tileset.htm', title: 'gfx-itemid' },
+        'Te': { file: 'gfx-tileset.htm', title: 'gfx-mods' },
+        'Tf': { file: 'gfx-viewer.htm', title: 'gfx-viewer' }
+        'Tg': { file: 'gfx-compiler.htm', title: 'gfx-compiler' }
     };
 
     // --- WINDOW MANAGER STATE ---
@@ -124,7 +127,7 @@
 
         let frame = document.createElement('iframe');
         frame.className = 'page-frame';
-        frame.src = filename;
+        CylonDOS.load('gfx-compiler.htm');
         pageContainer().appendChild(frame);
         
         openPages[filename] = frame;
