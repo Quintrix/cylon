@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cylon DOS Terminal</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 15px;
+            padding-bottom: 80px; /* Ensure content isn't hidden behind the OS taskbar/input */
+            background-color: #000;
+            color: #c0c0c0; /* Standard DOS light grey */
+            font-family: monospace;
+            font-size: clamp(14px, 4vw, 18px);
+            line-height: 1.4;
+            word-wrap: break-word;
+            white-space: pre-wrap;
+        }
+        .cmd-echo { 
+            color: #ffffff; /* Brighter white for the user's typed command */
+        } 
+        .cmd-error { 
+            color: #ff5555; /* Red for errors */
+        }
+    </style>
+</head>
+<body>
+    <div id="output">Cylon DOS Terminal v3.0<br>Type 'help' for a list of commands, or 'exit' to close.<br><br></div>
+
+    <script>
+        const outputEl = document.getElementById('output');
+
+        function print(text, className = '') {
+            if (text === undefined || text === null) return;
+            const div = document.createElement('div');
+            div.textContent = text;
+            if (className) div.className = className;
+            outputEl.appendChild(div);
+            window.scrollTo(0, document.body.scrollHeight);
+        }
+
+        window.addEventListener('message', async (e) => {
+            // When the user clicks the Terminal tab in the taskbar
+            if (e.data.type === 'QANDY_PAGE_ACTIVATED') {
+                // Tell the OS to show the terminal DOS prompt
+                window.parent.postMessage({ type: 'QANDY_SET_MODE', mode: 'terminal' }, '*');
+                if (window.parent.updatePrompt) window.parent.updatePrompt();
+            } 
+            // When the user presses "Enter" on the virtual (or physical) keyboard
+            else if (e.data.type === 'QANDY_EXEC_CMD') {
+                const cmd = (e.data.value || '').trim();
+                
+                // Grab the current prompt from the parent OS (e.g., "ram:/>")
+                const sysPrompt = window.parent.sysPrompt || "> ";
+                
+                // Echo what the user typed
+                print(sysPrompt + cmd, 'cmd-echo');
+
+                if (!cmd) return;
+
+                const lowerCmd = cmd.toLowerCase();
+
+                // Intercept the EXIT command to close the app tab
+                if (lowerCmd === 'exit') {
+                    window.parent.PageClose('cylon-command.htm');
+                    return;
+                }
+
+                // Intercept CLS/CLEAR to wipe the screen
+                if (lowerCmd === 'cls' || lowerCmd === 'clear') {
+                    outputEl.innerHTML = '';
+                    return;
+                }
+
+                // Pass all other commands to the parent DOS command processor
+                if (window.parent.handleCylonCommand) {
+                    const res = await window.parent.handleCylonCommand(cmd);
+                    if (res.handled) {
+                        if (res.output) print(res.output);
+                    } else {
+                        print(`Bad command or file name: ${cmd.split(' ')[0]}`, 'cmd-error');
+                    }
+                    
+                    // The command (like `cd` or `live:`) might have changed the active path.
+                    // Tell the OS to update the DOS prompt at the bottom of the screen.
+                    if (window.parent.updatePrompt) window.parent.updatePrompt();
+                } else {
+                    print("Error: Terminal command processor not found.", 'cmd-error');
+                }
+            }
+        });
+
+        // Upon initial boot/load, request terminal mode immediately
+        window.parent.postMessage({ type: 'QANDY_SET_MODE', mode: 'terminal' }, '*');
+    </script>
+</body>
+</html>

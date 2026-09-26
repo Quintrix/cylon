@@ -327,3 +327,8 @@ body.app-mode #kb-input-lines {
 body.app-mode #input-bar {
     display: flex;
 }
+
+/* Hide app tabs while typing to give the input bar full width 
+body.app-mode.kb-open #app-taskbar {
+    display: none !important;
+} */

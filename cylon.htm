@@ -9,13 +9,21 @@
         /* Standard DOS light grey for terminal text and input prompt */
         #video-layer, #kb-input-lines {
             color: #c0c0c0;
+            /* NEW: Dynamic font sizing for mobile */
+            font-size: clamp(16px, 4.5vw, 22px);
+            line-height: 1.4;
         }
+        
         /* Enforce no space/margins around the prompt to save pixel real estate */
         #kb-prompt {
             margin: 0 !important;
             padding: 0 !important;
         }
     </style>
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#000000">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <script src='cylon-sound.js'></script>
     <script src='cylon-keyboard.js'></script>
     <script src="cylon-dos.js"></script>
@@ -45,9 +53,6 @@
         <div class="taskbar-sys-btn" onclick="showTerminal()">Command</div>
         <div id="taskbar-app-list">
             <!-- Background app tabs are injected here -->
-        </div>
-        <div class="taskbar-status">
-            <span id="tb-clock" style="color:#0f0;">00:00</span>
         </div>
     </div>
 </div>
@@ -131,12 +136,15 @@ function updatePrompt() {
         
         // Ensure path always has a trailing slash for formatting (e.g. ram:/docs/)
         if (path !== '(no drive)' && !path.endsWith('/')) { path += '/'; }
-        
-        // Appended DOS-style > angle bracket to clearly separate prompt from command (saving space)
         sysPrompt = path;
         
         var promptEl = document.getElementById('kb-prompt');
-        if (promptEl) promptEl.textContent = sysPrompt;
+        
+        // BUGFIX: ONLY overwrite the prompt with the DOS path if we are in the terminal!
+        // If an app is asking for input, leave its custom label alone.
+        if (promptEl && osMode === 'terminal') {
+            promptEl.textContent = sysPrompt;
+        }
         
         // Prompt keyboard renderer to update dimensions against the new prompt length
         if (typeof window.renderInputLine === 'function') {
@@ -144,7 +152,30 @@ function updatePrompt() {
         }
     }
 }
+
 window.updatePrompt = updatePrompt; // Expose globally for the virtual keyboard
+
+window.addEventListener('message', function(e) {
+    if (e.data.type === 'QANDY_REQ_INPUT') {
+        osMode = e.data.isMultiline ? 'app-textarea' : 'app-edit';
+        proxyInputId = e.data.id;
+        
+        // Grab the existing value from the text box so we can edit it
+        inputBuffer = e.data.value || ""; 
+        cursorPos = inputBuffer.length;
+        
+        // Set the prompt cleanly, e.g. "newID> " or "tileInput> "
+        document.getElementById('kb-prompt').textContent = e.data.label + "> ";
+        
+        window.showFullKeyboard();
+        window.updateOverlayInput();
+
+        if (e.data.rect) window.panToRect(e.data.rect);
+
+    } else if (e.data.type === 'QANDY_INPUT_RECT') {
+        window.panToRect(e.data.rect);
+    }
+});
 
 async function bootMount() {
     var dos = window.CylonDOS;
@@ -318,6 +349,17 @@ function powerOn() {
       overlay.removeEventListener('click', engageHandler, true);
       document.removeEventListener('keydown', engageHandler, true);
       
+      // NEW: Request Fullscreen mode to hide the browser UI (URL bar, tabs)
+      try {
+          if (document.documentElement.requestFullscreen) {
+              document.documentElement.requestFullscreen().catch(err => console.warn(err));
+          } else if (document.documentElement.webkitRequestFullscreen) { /* Safari */
+              document.documentElement.webkitRequestFullscreen();
+          }
+      } catch (err) {
+          console.warn('Fullscreen API not supported or blocked.');
+      }
+
       try {
         if (typeof sound_js === 'function') { sound_js(); }
       } catch (e) { console.warn('qandy: error while initializing sound', e); }
@@ -326,8 +368,8 @@ function powerOn() {
 
       if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
       loadNext();
-    }
-    
+    }    
+
     overlay.addEventListener('click', engageHandler, { capture: true, once: true });
     document.addEventListener('keydown', engageHandler, { capture: true, once: true });
 }

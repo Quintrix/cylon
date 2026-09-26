@@ -1,48 +1,229 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Cylon Desktop Environment</title>
+    <meta charset="UTF-8">
+    <title>Cylon Desktop</title>
     <style>
-        body { margin: 0; background-color: #000; color: #0f0; overflow: hidden; }
-        /* Include necessary GFX CSS here */
+        /* ADDED 'html' selector and CHANGED 'height: 100vh;' to 'height: 100%;' */
+        /* ADDED 'width: 100%;' for consistency */
+        html, body {
+            margin: 0;
+            background-color: #000;
+            color: #0f0;
+            overflow: hidden;
+            height: 100%; /* Use 100% to fill the iframe's allocated space */
+            width: 100%;  /* Ensure full width */
+        }
+        
+        body { 
+            display: flex; 
+            justify-content: center; 
+            align-items: center; 
+        }
+        
+        #desktop-container {
+            position: relative;
+            background-color: #111;
+            border: 2px solid #333;
+            box-shadow: 0 0 20px #000;
+            transform-origin: center center;
+        }
+
+        .gfx-tile {
+            position: absolute;
+            width: 32px;
+            height: 32px;
+            background-size: cover;
+            image-rendering: pixelated;
+        }
+
+        .gfx-icon {
+            position: absolute;
+            width: 32px;
+            height: 32px;
+            cursor: pointer;
+            z-index: 10;
+        }
+        
+        /* Forces oversized building assets (e.g. 32x64) to properly anchor bottom-right on the grid */
+        .gfx-icon img {
+            position: absolute;
+            bottom: 0;
+            right: 0;
+            image-rendering: pixelated;
+        }
     </style>
-    <!-- Include the graphics engine -->
-    <script src="qandy-sound.js"></script>
-    <script src="gfx.js"></script>
 </head>
 <body>
     <!-- The graphics engine will inject its DOM elements here -->
+    <div id="desktop-container"></div>
 
 <script>
     // 1. Configure the GFX Engine for the Desktop
     window.gfxDrive = 'cylon.gfx'; // The virtual drive holding your desktop map
-    
+
+    // Maps GFX Item IDs to the apps they launch
+    const ICON_APPS = {
+        'Ta': { file: 'cylon-desktop.htm', title: 'desktop' },
+        'Tb': { file: 'gfx-create.htm', title: 'gfx-create' },
+        'Tc': { file: 'gfx-tileset.htm', title: 'gfx-tileset' },
+        'Td': { file: 'gfx-itemid.htm', title: 'gfx-itemid' },
+        'Te': { file: 'gfx-mods.htm', title: 'gfx-mods' },
+        'Tf': { file: 'gfx-viewer.htm', title: 'gfx-viewer' },
+        'Tg': { file: 'gfx-compiler.htm', title: 'gfx-compiler' }
+    };
+
+    //
+    // Display the tileset as defined in the .gfx file
+    // Parse the W4 register for lower bounds in the 'a' alpha file
+    //
+    window.loadAndRenderDesktop = async function() {
+        if (!window.parent || !window.parent.CylonDOS) {
+            console.warn("Desktop: CylonDOS not available.");
+            return;
+        }
+
+        try {
+            let gfxData = await window.parent.CylonDOS.load(window.gfxDrive);
+            if (!gfxData) {
+                console.error("Desktop: Could not load map file: " + window.gfxDrive);
+                return;
+            }
+
+            let globalAlpha = "";
+            let currentSector = "Aa"; // Default starting sector
+            let mapSectors = {};
+
+            // Parse .gfx file lines
+            let lines = gfxData.split('\n');
+            for (let line of lines) {
+                let eqIdx = line.indexOf('=');
+                if (eqIdx === -1) continue;
+                
+                let label = line.substring(0, eqIdx);
+                let content = line.substring(eqIdx + 1);
+
+                if (label === 'a') {
+                    globalAlpha = content;
+                } else if (label.length === 2 && label[0] >= 'A' && label[0] <= 'Z') {
+                    let parts = content.split('.');
+                    let mapData = parts[0];
+                    let itemsData = parts[1] || "";
+                    
+                    // Extract exactly enough tiles for our defined map size (mapx * mapy)
+                    let totalTiles = window.mapx * window.mapy;
+                    let tiles = mapData.substring(0, totalTiles * 2);
+
+                    let objects = [];
+                    if (itemsData) {
+                        itemsData.split('~').forEach(c => {
+                            if (!c) return;
+                            let [meta, logic] = c.split('|');
+                            if (meta.length >= 4) {
+                                objects.push({
+                                    id: meta.substring(0, 2),
+                                    z: meta.substring(2, 4), // Z is stored in Hex (e.g. 0A)
+                                    data: meta.length >= 6 ? meta.substring(4, 6) : "",
+                                    logic: logic || ""
+                                });
+                            }
+                        });
+                    }
+                    mapSectors[label] = { tiles, objects };
+                }
+            }
+
+            // Render the sector onto the screen
+            renderMapSector(currentSector, mapSectors[currentSector]);
+
+        } catch (err) {
+            console.error("Failed to load or render desktop map:", err);
+        }
+    };
+
+    //
+    // Loop through any items in the .gfx file for the current map sector
+    // and display these items as clickable icons hooked into objdown
+    // 
+    function renderMapSector(sectorId, sectorData) {
+        if (!sectorData) return;
+
+        let container = document.getElementById('desktop-container');
+        container.innerHTML = '';
+        
+        // Size the container dynamically based on config
+        let width = window.mapx * 32;
+        let height = window.mapy * 32;
+        container.style.width = width + 'px';
+        container.style.height = height + 'px';
+
+        // Scale to fit smaller screens (responsive)
+        // Adjust buffer for mobile UI elements
+        let scale = Math.min(1, (window.innerWidth - 30) / width, (window.innerHeight - 30) / height);
+        container.style.transform = `scale(${scale})`;
+
+        // 1. Render Tiles (Background)
+        for (let i = 0; i < (window.mapx * window.mapy); i++) {
+            let tileCode = sectorData.tiles.substring(i * 2, i * 2 + 2);
+            if (tileCode && tileCode.length === 2) {
+                let tile = document.createElement('div');
+                tile.className = 'gfx-tile';
+                tile.style.left = (i % window.mapx) * 32 + 'px';
+                tile.style.top = Math.floor(i / window.mapx) * 32 + 'px';
+                tile.style.backgroundImage = `url('t/${tileCode}.png')`;
+                container.appendChild(tile);
+            }
+        }
+
+        // 2. Render Items (Interactable Desktop Icons)
+        sectorData.objects.forEach(obj => {
+            let zIdx = parseInt(obj.z, 16); // Convert Hex grid-index to Decimal
+            let targetX = (zIdx % window.mapx) * 32;
+            let targetY = Math.floor(zIdx / window.mapx) * 32;
+
+            let iconWrap = document.createElement('div');
+            iconWrap.className = 'gfx-icon';
+            iconWrap.style.left = targetX + 'px';
+            iconWrap.style.top = targetY + 'px';
+            iconWrap.title = `Run: ${obj.id}`;
+
+            let img = document.createElement('img');
+            img.src = `i/${obj.id}.png`;
+            
+            // Graceful fallback if image doesn't exist
+            // img.onerror = function() { this.style.display = 'none'; };
+
+            iconWrap.appendChild(img);
+
+            // Trigger the graphics engine click hooks
+            iconWrap.onclick = () => {
+                if (window.objdown) {
+                    window.objdown(obj.id + obj.z);
+                }
+            };
+
+            container.appendChild(iconWrap);
+        });
+    }
+        
     // 2. Client Hooks required by gfx.js
     
     // Called when the user clicks a static object (like a desk, computer, etc.)
     window.objdown = function(code) {
         // code = itemID + z-location (e.g., 'Yj44')
         let itemId = code.substring(0, 2);
+        let app = ICON_APPS[itemId];
         
-        switch(itemId) {
-            case 'Ta': // Let's pretend 'Ta' is an Arcade Cabinet graphic
-                // Tell the outer Qandy Pocket Computer shell to launch Lunar Lander
-                if (window.parent && window.parent.loadUrl) {
-                    window.parent.loadUrl('lunar.htm');
-                }
-                break;
-            case 'Tb': // Let's pretend 'Tb' is a Calculator on a desk
-                if (window.parent && window.parent.loadUrl) {
-                    window.parent.loadUrl('calc.htm');
-                }
-                break;
-            // Add more objects here!
+        if (app && window.parent && window.parent.PageOpen) {
+            window.parent.PageOpen(app.file, app.title);
+        } else {
+            console.log("No app bound for item:", itemId);
         }
     };
 
     window.itemdown = function(code) {
         // Handle dynamic item clicks (picking up files/apps)
-        window.gfxClick("ID" + code); 
+        if (window.gfxClick) window.gfxClick("ID" + code); 
     };
 
     window.serverdown = function(code) {
@@ -52,12 +233,29 @@
 
     // 3. Boot the connection
     window.onload = async function() {
-        // Set map dimensions to fit nicely inside the pocket computer screen
-        window.mapx = 7;
-        window.mapy = 11;
+        // Set map dimensions to match the compiler/creator (14x10)
+        window.mapx = 14;
+        window.mapy = 10;
         
-        // Connect to the Qandyland Server
-        await gfxConnect(1); 
+        // Handle window resize for responsive scaling
+        window.addEventListener('resize', () => {
+            let container = document.getElementById('desktop-container');
+            if (container.innerHTML !== '') {
+                let width = window.mapx * 32;
+                let height = window.mapy * 32;
+                // Adjusted buffer for mobile UI elements
+                let scale = Math.min(1, (window.innerWidth - 30) / width, (window.innerHeight - 30) / height);
+                container.style.transform = `scale(${scale})`;
+            }
+        });
+
+        // Connect to the Qandyland Server (if library exists in your repo)
+        if (typeof gfxConnect === 'function') {
+            await gfxConnect(1);
+        }
+
+        // Parse local .gfx and render the items and map
+        await window.loadAndRenderDesktop();
     };
 </script>
 </body>

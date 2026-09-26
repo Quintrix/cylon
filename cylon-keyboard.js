@@ -454,9 +454,10 @@ function keyboard() {
             cursorPos = inputBuffer.length;
         } else if (e.id === 'enter') {
             if (osMode === 'app-edit' || osMode === 'app-textarea') {
-                // 1. Send the text back to the App iframe
-                if (activePage && openPages[activePage]) {
-                    openPages[activePage].contentWindow.postMessage({
+                // 1. Send the text back to the App iframe safely via DOM query
+                var activeFrame = document.querySelector('.page-frame.active');
+                if (activeFrame) {
+                    activeFrame.contentWindow.postMessage({
                         type: 'QANDY_COMMIT_INPUT',
                         id: proxyInputId,
                         value: inputBuffer
@@ -466,8 +467,9 @@ function keyboard() {
                 osMode = 'app';
                 inputBuffer = "";
                 cursorPos = 0;
-                document.getElementById('kb-prompt').textContent = `[ ${activeAppTitle} ]`;
-                hideFullKeyboard();
+                var title = activeFrame ? activeFrame.dataset.title : 'App';
+                document.getElementById('kb-prompt').textContent = `[ ${title} ]`;
+                window.hideFullKeyboard();
                 renderInputLine();
             } else {
                 // Normal Terminal Enter behavior
@@ -475,7 +477,7 @@ function keyboard() {
                 inputBuffer = "";
                 cursorPos = 0;
                 selAnchor = null;
-                document.getElementById('kb-prompt').textContent = cwd + "> ";
+                if (window.updatePrompt) window.updatePrompt();
                 hideFullKeyboard();
             }
         } else if (e.id === 'up') {
@@ -499,12 +501,15 @@ function keyboard() {
         // If we are editing an app field, send the updated text immediately 
         // after every single keystroke, backspace, or deletion.
         if (osMode === 'app-edit' || osMode === 'app-textarea') {
-            if (activePage && openPages[activePage] && e.id !== 'enter') {
-                openPages[activePage].contentWindow.postMessage({
-                    type: 'QANDY_UPDATE_INPUT',
-                    id: proxyInputId,
-                    value: inputBuffer
-                }, '*');
+            if (e.id !== 'enter') {
+                var activeFrame = document.querySelector('.page-frame.active');
+                if (activeFrame) {
+                    activeFrame.contentWindow.postMessage({
+                        type: 'QANDY_UPDATE_INPUT',
+                        id: proxyInputId,
+                        value: inputBuffer
+                    }, '*');
+                }
             }
         }
     };
