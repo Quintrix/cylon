@@ -209,18 +209,118 @@
     // 2. Client Hooks required by gfx.js
     
     // Called when the user clicks a static object (like a desk, computer, etc.)
-    window.objdown = function(code) {
-        // code = itemID + z-location (e.g., 'Yj44')
-        let itemId = code.substring(0, 2);
-        let app = ICON_APPS[itemId];
-        
+    // ============================================================================
+// ENHANCED objdown() - Display icon menu and launch apps via popup
+// ============================================================================
+
+window.objdown = function(code) {
+    // code = itemID + z-location (e.g., 'Ta44')
+    let itemId = code.substring(0, 2);
+    let zLocation = code.substring(2, 4);
+    let app = ICON_APPS[itemId];
+    
+    if (!itemId) {
+        console.log("objdown: Invalid code format:", code);
+        return;
+    }
+
+    // Generate the popup menu HTML
+    let popupHTML = generateIconMenu(itemId, zLocation, app);
+    
+    // Display the popup
+    if (typeof window.parent.popHtm === 'function') {
+        // Set alignment to "click" so popup appears near where user clicked
+        if (window.parent.PopAlign !== undefined) {
+            window.parent.PopAlign = "click";
+        }
+        window.parent.lastClickedZ = parseInt(zLocation, 16); // Convert hex to decimal for positioning
+        window.parent.popHtm(popupHTML);
+    } else if (typeof popHtm === 'function') {
+        // Fallback to local popHtm if parent unavailable
+        popHtm(popupHTML);
+    } else {
+        console.warn("objdown: popHtm() function not available");
+        // Fallback: directly open the app
         if (app && window.parent && window.parent.PageOpen) {
             window.parent.PageOpen(app.file, app.title);
-        } else {
-            console.log("No app bound for item:", itemId);
         }
-    };
+    }
+};
 
+/**
+ * generateIconMenu() - Create the HTML popup menu for an icon
+ * Displays the icon image and ItemID with a clickable link
+ */
+function generateIconMenu(itemId, zLocation, app) {
+    if (!app) {
+        return `<p><strong>Item: ${itemId}</strong></p><p>(No app bound)</p>`;
+    }
+
+    // Create clickable link that triggers app launch
+    let launchCmd = `gfx:launch_${itemId}`;
+    
+    let html = `
+        <div style="text-align: center; padding: 8px;">
+            <div style="margin-bottom: 8px;">
+                <img src="i/${itemId}.png" style="width: 64px; height: 64px; image-rendering: pixelated;" />
+            </div>
+            <div style="font-weight: bold; margin: 6px 0;">
+                <strong>${app.title}</strong>
+            </div>
+            <div style="font-size: 11px; color: #666; margin: 4px 0;">
+                ItemID: <code>${itemId}</code>
+            </div>
+            <div style="margin-top: 10px;">
+                <a href="gfx:launch_${itemId}" style="
+                    display: inline-block;
+                    padding: 6px 12px;
+                    background-color: #0066cc;
+                    color: white;
+                    text-decoration: none;
+                    border-radius: 3px;
+                    cursor: pointer;
+                    font-size: 12px;
+                ">Open ${app.title}</a>
+            </div>
+        </div>
+    `;
+    
+    return html;
+}
+
+/**
+ * Handle popup link clicks from the popHtm iframe
+ * Intercept gfx: commands and launch the appropriate app
+ */
+window.addEventListener('message', function(event) {
+    const data = event.data;
+    if (!data || typeof data !== 'object') return;
+
+    // Handle gfx: commands from popup
+    if (data.type === 'gfx' && data.cmd) {
+        let cmd = data.cmd;
+        
+        // Parse launch command: "launch_Ta"
+        if (cmd.startsWith('launch_')) {
+            let itemId = cmd.substring('launch_'.length);
+            let app = ICON_APPS[itemId];
+            
+            if (app && window.parent && window.parent.PageOpen) {
+                // Hide the popup before launching
+                if (typeof window.parent.hpop === 'function') {
+                    window.parent.hpop();
+                } else if (typeof hpop === 'function') {
+                    hpop();
+                }
+                // Launch the app
+                window.parent.PageOpen(app.file, app.title);
+            } else {
+                console.log("objdown: No app bound for item:", itemId);
+            }
+        }
+    }
+});
+    
     window.itemdown = function(code) {
         // Handle dynamic item clicks (picking up files/apps)
         if (window.gfxClick) window.gfxClick("ID" + code); 
