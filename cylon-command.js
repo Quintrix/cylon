@@ -746,3 +746,236 @@
 
 })(typeof window !== 'undefined' ? window : globalThis);
 
+// ============================================================================
+// cylon-command.js - Pop Function Compatibility Layer for Cylon OS
+// ============================================================================
+// Bridges Qandy Pop Functions (popHtm, hpop, popWeb, hpopWeb) to work on both
+// cylon-command.htm (text terminal) and cylon-desktop.htm (graphic desktop)
+
+(function() {
+    "use strict";
+
+    // ========================================================================
+    // 1. CROSS-ENVIRONMENT POP MANAGER
+    // ========================================================================
+
+    const CylonPopManager = {
+        // Track which context (terminal or desktop) we're in
+        activeContext: null,
+        pendingPop: null,
+        
+        // Initialize the manager - detect which frame/context we're running in
+        init: function() {
+            // Detect if we're in cylon-command.htm (terminal) or cylon-desktop.htm (graphic)
+            try {
+                // Check if parent is the main Cylon OS (cylon.htm)
+                if (window.parent && window.parent !== window) {
+                    // We're in an iframe - determine which one
+                    if (window.location.pathname.includes('command')) {
+                        this.activeContext = 'terminal';
+                    } else if (window.location.pathname.includes('desktop')) {
+                        this.activeContext = 'desktop';
+                    }
+                }
+            } catch (e) {
+                console.warn('CylonPopManager: Could not determine context', e);
+            }
+
+            // Listen for pop events from either context
+            window.addEventListener('message', (e) => this.handlePopMessage(e));
+            
+            // Expose Pop Functions to both contexts
+            this.exposePopFunctions();
+        },
+
+        // Route pop operations to the appropriate context
+        handlePopMessage: function(e) {
+            if (!e.data || typeof e.data !== 'object') return;
+
+            const { type } = e.data;
+
+            if (type === 'CYLON_POP_HTM') {
+                this.callPopHtm(e.data.html);
+            } else if (type === 'CYLON_POP_HIDE') {
+                this.callHpop();
+            } else if (type === 'CYLON_POP_WEB') {
+                this.callPopWeb(e.data.url);
+            } else if (type === 'CYLON_POP_WEB_HIDE') {
+                this.callHpopWeb();
+            } else if (type === 'CYLON_POP_ALIGN') {
+                this.setPopAlign(e.data.align);
+            }
+        },
+
+        // ====================================================================
+        // 2. POP FUNCTION IMPLEMENTATIONS
+        // ====================================================================
+
+        /**
+         * popHtm(html) - Display HTML in a popup
+         * Works in both terminal and desktop contexts
+         */
+        callPopHtm: function(html) {
+            if (!html) return;
+
+            if (window.parent.popHtm && typeof window.parent.popHtm === 'function') {
+                // Use parent's popHtm if available (already loaded from qandy-core.js)
+                window.parent.popHtm(html);
+            } else {
+                // Fallback: create a simple pop div in current context
+                this.createSimplePop(html);
+            }
+        },
+
+        /**
+         * hpop() - Hide/close the current popup
+         */
+        callHpop: function() {
+            if (window.parent.hpop && typeof window.parent.hpop === 'function') {
+                window.parent.hpop();
+            } else {
+                const popEl = document.getElementById('cylon-pop');
+                if (popEl) popEl.style.visibility = 'hidden';
+            }
+        },
+
+        /**
+         * popWeb(url) - Display a web page in a scaled popup
+         */
+        callPopWeb: function(url) {
+            if (!url) return;
+
+            if (window.parent.popWeb && typeof window.parent.popWeb === 'function') {
+                window.parent.popWeb(url);
+            } else {
+                this.createSimplePopWeb(url);
+            }
+        },
+
+        /**
+         * hpopWeb() - Hide/close the web popup
+         */
+        callHpopWeb: function() {
+            if (window.parent.hpopWeb && typeof window.parent.hpopWeb === 'function') {
+                window.parent.hpopWeb();
+            } else {
+                const webPopEl = document.getElementById('cylon-popWeb');
+                if (webPopEl) webPopEl.style.visibility = 'hidden';
+            }
+        },
+
+        /**
+         * Set pop alignment: "center", "click", "full"
+         */
+        setPopAlign: function(align) {
+            if (window.parent.PopAlign) {
+                window.parent.PopAlign = align;
+            }
+        },
+
+        // ====================================================================
+        // 3. FALLBACK IMPLEMENTATIONS (for standalone/offline contexts)
+        // ====================================================================
+
+        createSimplePop: function(html) {
+            let popEl = document.getElementById('cylon-pop');
+            if (!popEl) {
+                popEl = document.createElement('div');
+                popEl.id = 'cylon-pop';
+                popEl.style.cssText = `
+                    position: fixed;
+                    top: 50%;
+                    left: 50%;
+                    transform: translate(-50%, -50%);
+                    background: white;
+                    border: 2px solid #333;
+                    padding: 16px;
+                    z-index: 999;
+                    max-width: 90vw;
+                    max-height: 90vh;
+                    overflow: auto;
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                `;
+                document.body.appendChild(popEl);
+            }
+            popEl.innerHTML = html;
+            popEl.style.visibility = 'visible';
+        },
+
+        createSimplePopWeb: function(url) {
+            let webPopEl = document.getElementById('cylon-popWeb');
+            if (!webPopEl) {
+                webPopEl = document.createElement('div');
+                webPopEl.id = 'cylon-popWeb';
+                webPopEl.style.cssText = `
+                    position: fixed;
+                    top: 50%;
+                    left: 50%;
+                    transform: translate(-50%, -50%);
+                    width: 800px;
+                    height: 600px;
+                    z-index: 998;
+                    background: white;
+                    border: 2px solid #333;
+                    overflow: hidden;
+                `;
+                document.body.appendChild(webPopEl);
+            }
+            webPopEl.innerHTML = `<iframe src="${url}" style="width:100%; height:100%; border:none;"></iframe>`;
+            webPopEl.style.visibility = 'visible';
+        },
+
+        // ====================================================================
+        // 4. EXPOSE GLOBAL FUNCTIONS
+        // ====================================================================
+
+        exposePopFunctions: function() {
+            const self = this;
+
+            // Global popHtm() - display HTML popup
+            window.popHtm = function(html) {
+                self.callPopHtm(html);
+            };
+
+            // Global hpop() - hide popup
+            window.hpop = function() {
+                self.callHpop();
+            };
+
+            // Global popWeb() - display web popup
+            window.popWeb = function(url) {
+                self.callPopWeb(url);
+            };
+
+            // Global hpopWeb() - hide web popup
+            window.hpopWeb = function() {
+                self.callHpopWeb();
+            };
+
+            // Global setPopAlign() - set popup alignment
+            window.setPopAlign = function(align) {
+                self.setPopAlign(align);
+            };
+
+            // Convenience aliases (matching qandy-core.js)
+            window.pop = window.popHtm;
+        }
+    };
+
+    // ========================================================================
+    // 5. INITIALIZATION HOOK
+    // ========================================================================
+
+    // Auto-initialize when DOM is ready
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => {
+            CylonPopManager.init();
+        });
+    } else {
+        CylonPopManager.init();
+    }
+
+    // Expose the manager globally for debugging
+    window.CylonPopManager = CylonPopManager;
+
+})();
