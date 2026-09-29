@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cylon Files</title>
+<script src="cylon-sdk.js"></script>
+</head>
+<body>
+<div id="files-container"></div>
+<script>
+    const BASE64_FALLBACK_ICON = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAKElEQVQ4jWNgYGD4z0AAMDHQATAaDAYNDQ0NjYEMGBgYGBkYGAAAAAD//wIA5U4B5wAAAABJRU5ErkJggg==";
+    window.onload = async function() {
+        CylonSDK.injectDesktopStyles();
+
+        if (!window.parent || !window.parent.CylonDOS) {
+            document.getElementById('files-container').innerHTML = "<h3 style='color:white;padding:20px;'>Error: CylonDOS not connected.</h3>";
+            return;
+        }
+
+        let dos = window.parent.CylonDOS;
+        let currentDir = dos.cwd || '/';
+        let currentMode = localStorage.getItem('cylon_files_mode') || 'icon';
+        
+        // System Menu configuration overlay
+        CylonSDK.onSystemMenu = function() {
+            let html = `
+                <div style="text-align:center; padding:15px; font-family:sans-serif;">
+                    <h3 style="margin-top:0;">Display Mode</h3>
+                    <div style="display:flex; justify-content:center; gap:10px; margin-top:15px;">
+                        <button onclick="
+                            var activeFrame = document.querySelector('.page-frame.active');
+                            if(activeFrame) activeFrame.contentWindow.postMessage({type:'FILE_CMD', cmd:'set_mode', mode:'icon'}, '*');
+                        " style="padding:10px 20px; background:#333; color:#fff; border:1px solid #555; cursor:pointer;">[ Icon ]</button>
+                        
+                        <button onclick="
+                            var activeFrame = document.querySelector('.page-frame.active');
+                            if(activeFrame) activeFrame.contentWindow.postMessage({type:'FILE_CMD', cmd:'set_mode', mode:'list'}, '*');
+                        " style="padding:10px 20px; background:#333; color:#fff; border:1px solid #555; cursor:pointer;">[ List ]</button>
+                    </div>
+                </div>
+            `;
+            if (window.parent.popHtm) window.parent.popHtm(html);
+        };
+
+        let fileItemsRaw = [];
+        
+        async function fetchTree(dirPath, level, outArray) {
+            let rawFiles = await dos.dir(dirPath);
+            for (let f of rawFiles) {
+                f.isDir = (f.type === 'directory');
+                f.rawName = f.name.replace(/[<>]/g, '');
+                f.fullPath = (dirPath === '/' ? '' : dirPath) + '/' + f.rawName;
+                f.level = level;
+                outArray.push(f);
+                if (f.isDir && currentMode === 'list') {
+                    await fetchTree(f.fullPath, level + 1, outArray);
+                }
+            }
+        }
+        
+        try {
+            await fetchTree(currentDir, 0, fileItemsRaw);
+            let fileItems = [];
+
+            if (currentDir !== '/' && currentDir !== '') {
+                fileItems.push({
+                    iconPath: 'q/folder.png',
+                    label: '.. (Up)',
+                    level: 0,
+                    action: async (item, e) => {
+                        await window.parent.injectAndExecute('cd ..');
+                        window.location.reload(); 
+                    }
+                });
+            }
+
+            function getIconFor(f) {
+              if (f.isDir) return 'q/folder.png';
+              let nameLower = f.rawName.toLowerCase();
+              if (nameLower.endsWith('.htm') || nameLower.endsWith('.html')) {
+                  let baseName = f.rawName.substring(0, f.rawName.lastIndexOf('.'));
+                  return 'i/' + baseName + '.png'; 
+              }
+              if (nameLower.endsWith('.txt')) return 'q/dot-txt.png';
+              if (nameLower.endsWith('.json')) return 'q/dot-json.png';
+              if (nameLower.endsWith('.js')) return 'q/dot-js.png';
+              if (nameLower.endsWith('.cfg')) return 'q/folder.png';
+              return 'q/file.png'; 
+            }
+
+            fileItemsRaw.forEach(f => {
+                fileItems.push({
+                    iconPath: getIconFor(f),
+                    label: f.rawName,
+                    level: f.level,
+                    action: (item, e) => {
+                        let items = [];
+                        
+                        // 1. Folders
+                        if (f.isDir) {
+                            items.push({ label: `Open ${f.rawName}`, action: async () => {
+                                await window.parent.injectAndExecute(`cd ${f.rawName}`);
+                                window.location.reload();
+                            }});
+                        } 
+                        // 2. Files
+                        else {
+                            let isApp = f.rawName.toLowerCase().endsWith('.htm') || f.rawName.toLowerCase().endsWith('.html') || f.rawName.toLowerCase().endsWith('.cfg');
+                            
+                            items.push({ label: `Open ${f.rawName}`, action: async () => {
+                                if (isApp) {
+                                    await window.parent.injectAndExecute(f.rawName);
+                                } else {
+                                    await window.parent.injectAndExecute(`load ${f.rawName}`);
+                                    window.parent.showTerminal();
+                                }
+                            }});
+                            
+                            if (isApp) {
+                                items.push({ label: 'Add to Desktop', action: async () => {
+                                    let cfgText = await dos.load('cylon.cfg') || "bgcolor=#008080\nnewline\ncylon-files.htm\ncylon-command.htm\nnewline\ngfx-create.htm\n";
+                                    cfgText = cfgText.trimEnd() + `\n${f.rawName}\n`;
+                                    await dos.save('cylon.cfg', cfgText);
+                                    await window.parent.injectAndExecute(`echo Added ${f.rawName} to Desktop`);
+                                }});
+                            }
+                            
+                            items.push({ label: 'Delete', action: () => {
+                                // Double menu technique allows confirming dangerous actions cleanly
+                                setTimeout(() => {
+                                    window.parent.CylonPopManager.showContextMenu(e, [
+                                        { label: `Confirm Delete ${f.rawName}`, action: async () => {
+                                            await window.parent.injectAndExecute(`delete ${f.rawName} -y`);
+                                            window.location.reload();
+                                        }}
+                                    ]);
+                                }, 50);
+                            }});
+                        }
+                        
+                        // Trigger the SDK OS context menu at exact click location
+                        if (window.parent && window.parent.CylonPopManager) {
+                            window.parent.CylonPopManager.showContextMenu(e, items);
+                        }
+                    }
+                });
+            });
+
+            if (currentMode === 'list') CylonSDK.renderListGrid('files-container', fileItems);
+            else CylonSDK.renderIconGrid('files-container', fileItems);
+
+        } catch (err) {
+            console.error("File Explorer Error:", err);
+        }
+    };
+
+    window.addEventListener('message', async (e) => {
+        if (e.data && e.data.type === 'FILE_CMD') {
+            if (e.data.cmd === 'set_mode') {
+                localStorage.setItem('cylon_files_mode', e.data.mode);
+                if (window.parent.hpop) window.parent.hpop();
+                window.location.reload();
+            }
+        }
+    });
+</script>
+</body>
+</html>

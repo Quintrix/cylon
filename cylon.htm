@@ -40,23 +40,24 @@
     <div id="browser-layer-container"></div>
 </div>
 
+
 <!-- TASKBAR / TERMINAL PROMPT (Moved outside screen-wrapper) -->
 <div id="input-bar">
-    <!-- Shown when in terminal/desktop mode -->
+    <div id="os-menu-btn" onclick="event.stopPropagation(); triggerOSMenu()">
+        <img src="i/Lk.png" width="24" height="24" alt="Menu" style="image-rendering: pixelated; filter: drop-shadow(0 0 2px #0f0);">
+    </div>
     <div id="kb-input-lines">
         <div id="kb-line1"><span id="kb-prompt"></span><span id="kb-input-render1"></span></div>
         <div id="kb-line2"><span id="kb-line2-indent"></span><span id="kb-input-render2"></span></div>
     </div>
 
-    <!-- Shown when an app is open (Taskbar Mode) -->
     <div id="app-taskbar">
-        <div class="taskbar-sys-btn" onclick="showTerminal()">Command</div>
-        <div id="taskbar-app-list">
-            <!-- Background app tabs are injected here -->
-        </div>
+        <div class="taskbar-sys-btn" onclick="event.stopPropagation(); showTerminal()">Command</div>
+        <div id="taskbar-app-list"></div>
     </div>
 </div>
-
+    
+<!-- VIRTUAL KEYBOARD OVERLAY -->
 <!-- VIRTUAL KEYBOARD OVERLAY -->
 <div id="kb-overlay">
     <div id="kb-grid"></div>
@@ -87,7 +88,9 @@ let dosInitializing = null;
 
 const PAGES = Object.freeze(new Set([
     'cylon.gfx',
+    'cylon-files.htm',
     'cylon-desktop.htm',
+    'cylon-desktop.cfg',
     'gfx-tileset.htm',
     'gfx-create.htm',
     'gfx-itemid.htm',
@@ -155,6 +158,27 @@ function updatePrompt() {
 
 window.updatePrompt = updatePrompt; // Expose globally for the virtual keyboard
 
+// ==== CORE ARCHITECTURE: CLI DRIVEN GUI MACROS ====
+window.injectAndExecute = async function(cmdStr) {
+    // Drop back to terminal mode for command execution log
+    if (osMode !== 'terminal' && osMode !== 'app') osMode = 'app'; 
+    
+    // Visually populate the input buffer
+    inputBuffer = cmdStr;
+    cursorPos = inputBuffer.length;
+    if (window.renderInputLine) window.renderInputLine();
+    
+    // Execute the command natively
+    await command(cmdStr);
+    
+    // Clear buffer after execution
+    inputBuffer = "";
+    cursorPos = 0;
+    selAnchor = null;
+    if (window.updatePrompt) window.updatePrompt();
+    if (window.renderInputLine) window.renderInputLine();
+};
+
 window.addEventListener('message', function(e) {
     if (e.data.type === 'QANDY_REQ_INPUT') {
         osMode = e.data.isMultiline ? 'app-textarea' : 'app-edit';
@@ -171,9 +195,14 @@ window.addEventListener('message', function(e) {
         window.updateOverlayInput();
 
         if (e.data.rect) window.panToRect(e.data.rect);
-
     } else if (e.data.type === 'QANDY_INPUT_RECT') {
         window.panToRect(e.data.rect);
+    } else if (e.data.type === 'QANDY_SET_MODE') {
+        osMode = e.data.mode;
+        if (osMode === 'terminal') {
+            window.showFullKeyboard();
+            if (window.updatePrompt) window.updatePrompt();
+        }
     }
 });
 
@@ -345,6 +374,15 @@ function powerOn() {
     overlay.appendChild(stack);
     document.body.appendChild(overlay);
 
+    window.triggerOSMenu = function() {
+        if (osMode === 'terminal') return; // Future expansion: terminal OS menu
+        // Send the OS menu command down to the currently active app iframe
+        const activeFrame = document.querySelector('.page-frame.active');
+        if (activeFrame) {
+            activeFrame.contentWindow.postMessage({ type: 'QANDY_OS_MENU' }, '*');
+        }
+    };
+
     function engageHandler(e) {
       overlay.removeEventListener('click', engageHandler, true);
       document.removeEventListener('keydown', engageHandler, true);
@@ -438,6 +476,9 @@ function loadNext() {
             window.caps = e.getModifierState && e.getModifierState('CapsLock');
             window.setKeyVisual('caps', 'locked', window.caps);
             window.updateKeyLabels();
+        } else if (e.key === 'Meta' || e.key === 'OS' || e.key === 'Windows') { 
+            window.triggerOSMenu(); 
+            e.preventDefault(); 
         } else if (e.key === 'Backspace') { window.press({id: 'back'}); e.preventDefault(); }
         else if (e.key === 'Enter') { window.press({id: 'enter'}); e.preventDefault(); }
         else if (e.key === 'ArrowUp') { window.press({id: 'up'}); e.preventDefault(); }

@@ -97,6 +97,7 @@
     '  import <json|url>              Import a JSON archive into the current drive',
     '  install [-y]                   Preview or execute installation of the factory image',
     '  update <file|*> [-y]           Preview or fetch newer PAGES files from the server',
+    '  echo [text]                    Print text to the console',
     '  cls                            Clear the terminal screen',
     '  help [command]                 Show help (e.g. "help mount" or "help fdisk")\n'
   ].join('\n');
@@ -508,6 +509,9 @@
           await dos.rmdir(args.join(' '));
           return { handled: true, output: 'Directory removed.' };
 
+        case 'echo':
+          return { handled: true, output: args.join(' ') };
+
         case 'save':
         case 'write':
           if (args.length < 2) return { handled: true, output: usage('save <file> <text>') };
@@ -603,7 +607,7 @@
       .toUpperCase();
   }
 
-  function updateTaskbar() {
+function updateTaskbar() {
     var taskbar = document.getElementById('taskbar-app-list');
     if (!taskbar) return;
 
@@ -619,14 +623,15 @@
       }
 
       button.textContent = frame.dataset.title;
-      button.onclick = function () {
+      button.onclick = function (e) {
+        if (e) e.stopPropagation(); // Prevent bubbling up to #input-bar which triggers the keyboard
         global.showPage(filename);
       };
 
       taskbar.appendChild(button);
     });
   }
-
+  
   global.showTerminal = function () {
     var video = document.getElementById('video-layer');
     var container = pageContainer();
@@ -642,8 +647,8 @@
 
     activePage = null;
 
-    if (typeof global.hideFullKeyboard === 'function') {
-      global.hideFullKeyboard();
+    if (typeof global.showFullKeyboard === 'function') {
+      global.showFullKeyboard(); // Command is a terminal type, so explicitly show the keyboard
     }
 
     updateTaskbar();
@@ -664,9 +669,15 @@
     activePage = filename;
 
     Object.keys(openPages).forEach(function (name) {
-      openPages[name].classList.toggle('active', name === filename);
+      var isActive = (name === filename);
+      openPages[name].classList.toggle('active', isActive);
+      
+      // Tell the iframe application it has been brought to the foreground
+      if (isActive && openPages[name].contentWindow) {
+          openPages[name].contentWindow.postMessage({ type: 'QANDY_PAGE_ACTIVATED' }, '*');
+      }
     });
-
+    
     if (typeof global.hideFullKeyboard === 'function') {
       global.hideFullKeyboard();
     }
@@ -818,8 +829,8 @@
         callPopHtm: function(html) {
             if (!html) return;
 
-            if (window.parent.popHtm && typeof window.parent.popHtm === 'function') {
-                // Use parent's popHtm if available (already loaded from qandy-core.js)
+            if (window.parent && window.parent !== window && typeof window.parent.popHtm === 'function' && window.parent.popHtm !== window.popHtm) {
+                // Use parent's popHtm if available and if we are safely inside an iframe wrapper
                 window.parent.popHtm(html);
             } else {
                 // Fallback: create a simple pop div in current context
@@ -831,21 +842,103 @@
          * hpop() - Hide/close the current popup
          */
         callHpop: function() {
-            if (window.parent.hpop && typeof window.parent.hpop === 'function') {
+            if (window.parent && window.parent !== window && typeof window.parent.hpop === 'function' && window.parent.hpop !== window.hpop) {
                 window.parent.hpop();
             } else {
-                const popEl = document.getElementById('cylon-pop');
-                if (popEl) popEl.style.visibility = 'hidden';
+                const popWrapper = document.getElementById('cylon-pop-wrapper');
+                if (popWrapper) popWrapper.style.visibility = 'hidden';
             }
         },
 
+        // ==== ADVANCED MENU / CONTEXT POPUP IMPLEMENTATION ====
+        showContextMenu: function(e, items) {
+            this.callHpop(); // Ensure standard popups are hidden
+
+            let absX = e.clientX || 0;
+            let absY = e.clientY || 0;
+
+            // Auto-detect and translate iframe offsets if the event bubbled from an app
+            if (e.view && e.view !== window && e.view !== window.parent) {
+                let frames = document.querySelectorAll('iframe');
+                for (let i = 0; i < frames.length; i++) {
+                    if (frames[i].contentWindow === e.view) {
+                        let rect = frames[i].getBoundingClientRect();
+                        absX += rect.left;
+                        absY += rect.top;
+                        break;
+                    }
+                }
+            }
+
+            let wrapper = document.getElementById('cylon-context-wrapper');
+            if (!wrapper) {
+                wrapper = document.createElement('div');
+                wrapper.id = 'cylon-context-wrapper';
+                wrapper.style.cssText = `
+                    position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+                    z-index: 100000; cursor: default;
+                `;
+                wrapper.addEventListener('pointerdown', (ev) => {
+                    if (ev.target === wrapper) wrapper.style.display = 'none';
+                });
+                document.body.appendChild(wrapper);
+            }
+            wrapper.style.display = 'block';
+            wrapper.innerHTML = '';
+
+            let menu = document.createElement('div');
+            // DOS/Windows style file menu styling
+            menu.style.cssText = `
+                position: absolute; background: #c0c0c0;
+                border-top: 2px solid #fff; border-left: 2px solid #fff;
+                border-bottom: 2px solid #555; border-right: 2px solid #555;
+                box-shadow: 4px 4px 0px rgba(0,0,0,0.5);
+                font-family: sans-serif; font-size: 14px; color: #000;
+                min-width: 160px; display: flex; flex-direction: column;
+            `;
+
+            items.forEach((item, index) => {
+                let btn = document.createElement('div');
+                btn.textContent = item.label;
+                btn.style.cssText = `
+                    padding: 8px 12px; cursor: pointer; user-select: none;
+                `;
+                if (index < items.length - 1) btn.style.borderBottom = '1px solid #a0a0a0';
+                
+                btn.onpointerdown = (ev) => {
+                    ev.stopPropagation();
+                    wrapper.style.display = 'none';
+                    if (item.action) item.action();
+                };
+                
+                btn.onmouseenter = () => { btn.style.background = '#000080'; btn.style.color = '#fff'; };
+                btn.onmouseleave = () => { btn.style.background = 'transparent'; btn.style.color = '#000'; };
+
+                menu.appendChild(btn);
+            });
+
+            wrapper.appendChild(menu);
+
+            // Align precisely so a double tap lands squarely on the first menu item
+            menu.style.left = Math.max(0, absX - 12) + 'px';
+            menu.style.top = Math.max(0, absY - 8) + 'px';
+            
+            // Re-adjust if off screen
+            setTimeout(() => {
+               let r = menu.getBoundingClientRect();
+               if (r.right > window.innerWidth) menu.style.left = (window.innerWidth - r.width - 5) + 'px';
+               if (r.bottom > window.innerHeight) menu.style.top = (window.innerHeight - r.height - 5) + 'px';
+            }, 0);
+        },
+
+        /**
         /**
          * popWeb(url) - Display a web page in a scaled popup
          */
         callPopWeb: function(url) {
             if (!url) return;
 
-            if (window.parent.popWeb && typeof window.parent.popWeb === 'function') {
+            if (window.parent && window.parent !== window && typeof window.parent.popWeb === 'function' && window.parent.popWeb !== window.popWeb) {
                 window.parent.popWeb(url);
             } else {
                 this.createSimplePopWeb(url);
@@ -856,11 +949,11 @@
          * hpopWeb() - Hide/close the web popup
          */
         callHpopWeb: function() {
-            if (window.parent.hpopWeb && typeof window.parent.hpopWeb === 'function') {
+            if (window.parent && window.parent !== window && typeof window.parent.hpopWeb === 'function' && window.parent.hpopWeb !== window.hpopWeb) {
                 window.parent.hpopWeb();
             } else {
-                const webPopEl = document.getElementById('cylon-popWeb');
-                if (webPopEl) webPopEl.style.visibility = 'hidden';
+                const webPopWrapper = document.getElementById('cylon-popWeb-wrapper');
+                if (webPopWrapper) webPopWrapper.style.visibility = 'hidden';
             }
         },
 
@@ -868,8 +961,10 @@
          * Set pop alignment: "center", "click", "full"
          */
         setPopAlign: function(align) {
-            if (window.parent.PopAlign) {
+            if (window.parent && window.parent !== window && window.parent.PopAlign !== undefined) {
                 window.parent.PopAlign = align;
+            } else {
+                window.PopAlign = align;
             }
         },
 
@@ -878,51 +973,88 @@
         // ====================================================================
 
         createSimplePop: function(html) {
-            let popEl = document.getElementById('cylon-pop');
-            if (!popEl) {
-                popEl = document.createElement('div');
+            let popWrapper = document.getElementById('cylon-pop-wrapper');
+            if (!popWrapper) {
+                popWrapper = document.createElement('div');
+                popWrapper.id = 'cylon-pop-wrapper';
+                popWrapper.style.cssText = `
+                    position: fixed;
+                    top: 0; left: 0; width: 100vw; height: 100vh;
+                    background: rgba(0,0,0,0.6);
+                    z-index: 9999;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                `;
+                // Clicking the background closes it
+                popWrapper.addEventListener('click', function(e) {
+                    if (e.target === popWrapper) {
+                        window.hpop();
+                    }
+                });
+
+                let popEl = document.createElement('div');
                 popEl.id = 'cylon-pop';
                 popEl.style.cssText = `
-                    position: fixed;
-                    top: 50%;
-                    left: 50%;
-                    transform: translate(-50%, -50%);
-                    background: white;
+                    background: #eee;
+                    color: #000;
                     border: 2px solid #333;
+                    border-radius: 4px;
                     padding: 16px;
-                    z-index: 999;
                     max-width: 90vw;
                     max-height: 90vh;
                     overflow: auto;
-                    box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
                 `;
-                document.body.appendChild(popEl);
+                popWrapper.appendChild(popEl);
+                document.body.appendChild(popWrapper);
             }
+            
+            const popEl = document.getElementById('cylon-pop');
             popEl.innerHTML = html;
-            popEl.style.visibility = 'visible';
+            popWrapper.style.visibility = 'visible';
         },
 
         createSimplePopWeb: function(url) {
-            let webPopEl = document.getElementById('cylon-popWeb');
-            if (!webPopEl) {
-                webPopEl = document.createElement('div');
+            let webPopWrapper = document.getElementById('cylon-popWeb-wrapper');
+            if (!webPopWrapper) {
+                webPopWrapper = document.createElement('div');
+                webPopWrapper.id = 'cylon-popWeb-wrapper';
+                webPopWrapper.style.cssText = `
+                    position: fixed;
+                    top: 0; left: 0; width: 100vw; height: 100vh;
+                    background: rgba(0,0,0,0.8);
+                    z-index: 9998;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                `;
+                
+                webPopWrapper.addEventListener('click', function(e) {
+                    if (e.target === webPopWrapper) {
+                        window.hpopWeb();
+                    }
+                });
+
+                let webPopEl = document.createElement('div');
                 webPopEl.id = 'cylon-popWeb';
                 webPopEl.style.cssText = `
-                    position: fixed;
-                    top: 50%;
-                    left: 50%;
-                    transform: translate(-50%, -50%);
                     width: 800px;
                     height: 600px;
-                    z-index: 998;
+                    max-width: 95vw;
+                    max-height: 95vh;
                     background: white;
                     border: 2px solid #333;
+                    border-radius: 4px;
                     overflow: hidden;
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
                 `;
-                document.body.appendChild(webPopEl);
+                webPopWrapper.appendChild(webPopEl);
+                document.body.appendChild(webPopWrapper);
             }
+            const webPopEl = document.getElementById('cylon-popWeb');
             webPopEl.innerHTML = `<iframe src="${url}" style="width:100%; height:100%; border:none;"></iframe>`;
-            webPopEl.style.visibility = 'visible';
+            webPopWrapper.style.visibility = 'visible';
         },
 
         // ====================================================================

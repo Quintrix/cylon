@@ -127,6 +127,24 @@
             display: block;
         }
 
+        
+        /* --- TASKBAR / MENU BUTTON --- */
+        #os-menu-btn {
+            background: #111; 
+            border: 1px solid #333; 
+            border-radius: 4px;
+            height: 36px; 
+            width: 44px; 
+            display: flex; 
+            align-items: center; 
+            justify-content: center;
+            cursor: pointer; 
+            flex: 0 0 auto; 
+            transition: all 0.1s;
+            margin-right: 10px;
+        }
+        #os-menu-btn:active { background: #333; transform: scale(0.95); }
+        
         /* --- TASKBAR / INPUT BAR --- */
         #input-bar {
             position: fixed;
