@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cylon Colors Control Panel</title>
+    <script src="cylon-sdk.js"></script>
+    <style>
+        body {
+            background-color: #000;
+            color: #0f0;
+            font-family: monospace;
+            margin: 0;
+            padding: 20px;
+            box-sizing: border-box;
+            overflow-y: auto;
+            padding-bottom: 80px; /* Room for taskbar */
+        }
+
+        h2 {
+            text-align: center;
+            border-bottom: 2px solid #0f0;
+            padding-bottom: 10px;
+            margin-top: 0;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+
+        .setting-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: #111;
+            margin-bottom: 10px;
+            padding: 10px 15px;
+            border: 1px solid #333;
+            border-radius: 4px;
+        }
+
+        .setting-label {
+            flex: 1;
+            font-size: 16px;
+            font-weight: bold;
+        }
+
+        .setting-desc {
+            font-size: 12px;
+            color: #888;
+            margin-top: 4px;
+        }
+
+        .controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        /* Native OS color picker */
+        input[type="color"] {
+            -webkit-appearance: none;
+            border: 1px solid #0f0;
+            background: #000;
+            width: 44px;
+            height: 36px;
+            cursor: pointer;
+            padding: 0;
+        }
+        input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
+        input[type="color"]::-webkit-color-swatch { border: none; }
+
+        /* Hex text input that triggers Qandy virtual keyboard */
+        input[type="text"] {
+            background: #000;
+            color: #0f0;
+            border: 1px solid #0f0;
+            padding: 8px;
+            width: 80px;
+            text-align: center;
+            font-family: monospace;
+            font-size: 16px;
+            text-transform: uppercase;
+        }
+
+        .btn {
+            background: #0a220a;
+            color: #0f0;
+            border: 2px solid #0f0;
+            padding: 12px 20px;
+            width: 100%;
+            font-family: monospace;
+            font-size: 18px;
+            font-weight: bold;
+            cursor: pointer;
+            text-transform: uppercase;
+            margin-top: 20px;
+            transition: all 0.1s;
+        }
+        .btn:active {
+            background: #0f0;
+            color: #000;
+            transform: scale(0.98);
+        }
+
+        #status-msg {
+            text-align: center;
+            margin-top: 15px;
+            color: #ff0;
+            min-height: 1.2em;
+        }
+    </style>
+</head>
+<body>
+
+    <h2>System Colors</h2>
+
+    <div id="settings-container">
+        <!-- Rows will be generated here by JS -->
+    </div>
+
+    <button class="btn" onclick="saveColors()">Save & Apply</button>
+    <div id="status-msg"></div>
+
+<script>
+    // Define our variables and their default fallback colors
+    const colorDefinitions = [
+        { key: 'bgcolor',  label: 'Desktop Background',  default: '#008080' },
+        { key: 'fgcolor',  label: 'Desktop Text',        default: '#ffffff' },
+        { key: 'hlcolor',  label: 'Highlight Accent',    default: '#00ff00' },
+        { key: 'menuBG',   label: 'Menu Background',     default: '#c0c0c0' },
+        { key: 'menuFG',   label: 'Menu Text',           default: '#000000' },
+        { key: 'menuHL',   label: 'Menu Highlight',      default: '#000080' }
+    ];
+
+    let currentColors = {};
+
+    function initUI() {
+        const container = document.getElementById('settings-container');
+        
+        colorDefinitions.forEach(def => {
+            currentColors[def.key] = def.default; // Prep default state
+
+            const row = document.createElement('div');
+            row.className = 'setting-row';
+
+            row.innerHTML = `
+                <div>
+                    <div class="setting-label">${def.label}</div>
+                    <div class="setting-desc">${def.key}</div>
+                </div>
+                <div class="controls">
+                    <input type="color" id="color-${def.key}" value="${def.default}">
+                    <input type="text" id="text-${def.key}" value="${def.default}" maxlength="7">
+                </div>
+            `;
+            container.appendChild(row);
+
+            // Setup synchronization between the color picker and the text input
+            const colorInput = document.getElementById(`color-${def.key}`);
+            const textInput = document.getElementById(`text-${def.key}`);
+
+            colorInput.addEventListener('input', (e) => {
+                textInput.value = e.target.value.toUpperCase();
+                currentColors[def.key] = e.target.value;
+            });
+
+            // "change" event triggers when virtual keyboard hits Enter
+            textInput.addEventListener('change', (e) => {
+                let val = e.target.value;
+                if (!val.startsWith('#')) val = '#' + val;
+                
+                // Basic Hex validation
+                if (/^#[0-9A-F]{6}$/i.test(val)) {
+                    colorInput.value = val;
+                    currentColors[def.key] = val;
+                    textInput.value = val.toUpperCase();
+                } else {
+                    // Revert on invalid hex
+                    textInput.value = currentColors[def.key].toUpperCase(); 
+                }
+            });
+        });
+    }
+
+    async function loadColors() {
+        if (!window.parent || !window.parent.CylonDOS) return;
+        
+        try {
+            let text = await window.parent.CylonDOS.load('cylon-colors.cfg');
+            if (text) {
+                let lines = text.split('\n');
+                lines.forEach(line => {
+                    if (line.includes('=')) {
+                        let [key, val] = line.split('=').map(s => s.trim());
+                        if (currentColors[key] !== undefined) {
+                            currentColors[key] = val;
+                            let colorInput = document.getElementById(`color-${key}`);
+                            let textInput = document.getElementById(`text-${key}`);
+                            if (colorInput && textInput) {
+                                colorInput.value = val;
+                                textInput.value = val.toUpperCase();
+                            }
+                        }
+                    }
+                });
+            }
+        } catch (e) {
+            console.warn("No cylon-colors.cfg found. Using defaults.");
+        }
+    }
+
+    async function saveColors() {
+        let status = document.getElementById('status-msg');
+        status.textContent = "Saving...";
+
+        if (!window.parent || !window.parent.CylonDOS) {
+            status.textContent = "Error: CylonDOS not found.";
+            return;
+        }
+
+        // 1. Build the .cfg string
+        let outputLines = [
+            "// Cylon OS Color Configuration",
+            "// Modify via cylon-colors.htm"
+        ];
+        
+        colorDefinitions.forEach(def => {
+            outputLines.push(`${def.key}=${currentColors[def.key]}`);
+        });
+
+        // 2. Save file
+        await window.parent.CylonDOS.save('cylon-colors.cfg', outputLines.join('\n'));
+
+        // 3. Apply live to the parent OS as CSS Variables
+        if (window.parent.document) {
+            const rootStyle = window.parent.document.documentElement.style;
+            colorDefinitions.forEach(def => {
+                rootStyle.setProperty(`--os-${def.key.toLowerCase()}`, currentColors[def.key]);
+            });
+        }
+
+        // 4. Send a broadcast event so desktop/other apps can redraw themselves
+        window.parent.postMessage({ type: 'CYLON_COLORS_UPDATED' }, '*');
+
+        status.textContent = "Colors Saved & Applied!";
+        setTimeout(() => status.textContent = "", 3000);
+    }
+
+    // Initialize
+    window.onload = async () => {
+        initUI();
+        await loadColors();
+    };
+
+</script>
+</body>
+</html>

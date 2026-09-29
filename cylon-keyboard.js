@@ -246,6 +246,7 @@ function keyboard() {
             var cursorSpan = document.createElement('span');
             if (insertMode) {
                 cursorSpan.className = 'kb-cursor-bar';
+                cursorSpan.innerHTML = '&#8203;'; // Fix: zero-width space gives it height when empty
                 frag.appendChild(cursorSpan);
                 addSpan(atChar + after);
             } else {
@@ -415,6 +416,26 @@ function keyboard() {
         cursorPos = range[0];
         selAnchor = null;
     }
+    
+    // Expose for external copy/paste events from host OS
+    window.pasteText = function(text) {
+        if (hasSelection()) deleteSelection();
+        inputBuffer = inputBuffer.slice(0, cursorPos) + text + inputBuffer.slice(cursorPos);
+        cursorPos += text.length;
+        renderInputLine();
+        
+        if (osMode === 'app-edit' || osMode === 'app-textarea') {
+            var activeFrame = document.querySelector('.page-frame.active');
+            if (activeFrame) {
+                activeFrame.contentWindow.postMessage({
+                    type: 'QANDY_UPDATE_INPUT',
+                    id: proxyInputId,
+                    value: inputBuffer
+                }, '*');
+            }
+        }
+    };
+
 
     window.press = function(e) {
         var shiftHeld = (typeof e.shift !== 'undefined') ? e.shift : !!window.shift;

@@ -623,15 +623,29 @@ function updateTaskbar() {
       }
 
       button.textContent = frame.dataset.title;
+      
+       // If not active, click switches to it. If active, click opens menu to close it.
       button.onclick = function (e) {
         if (e) e.stopPropagation(); // Prevent bubbling up to #input-bar which triggers the keyboard
-        global.showPage(filename);
+        
+        if (filename !== activePage) {
+            global.showPage(filename);
+        } else {
+            if (global.CylonPopManager && typeof global.CylonPopManager.showContextMenu === 'function') {
+                global.CylonPopManager.showContextMenu(e, [
+                    { label: 'Close ' + frame.dataset.title, action: () => global.PageClose(filename) }
+                ]);
+            } else {
+                // Fallback just in case CylonPopManager wasn't loaded 
+                global.PageClose(filename);
+            }
+        }
       };
 
       taskbar.appendChild(button);
     });
-  }
-  
+  }  
+
   global.showTerminal = function () {
     var video = document.getElementById('video-layer');
     var container = pageContainer();

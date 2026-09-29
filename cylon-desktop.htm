@@ -85,7 +85,7 @@
                 if (!baseName) baseName = line; 
                 
                 let labelText = baseName.replace(/[-_]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-                let iconPath = isConfig ? 'q/folder.png' : 'i/' + baseName + '.png';
+                let iconPath = isConfig ? 'q/folder.png' : 'q/' + baseName + '.png';
 
                 createIconEl(container, {
                     file: line,

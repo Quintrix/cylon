@@ -80,7 +80,7 @@
               let nameLower = f.rawName.toLowerCase();
               if (nameLower.endsWith('.htm') || nameLower.endsWith('.html')) {
                   let baseName = f.rawName.substring(0, f.rawName.lastIndexOf('.'));
-                  return 'i/' + baseName + '.png'; 
+                  return 'q/' + baseName + '.png'; 
               }
               if (nameLower.endsWith('.txt')) return 'q/dot-txt.png';
               if (nameLower.endsWith('.json')) return 'q/dot-json.png';
@@ -119,9 +119,9 @@
                             
                             if (isApp) {
                                 items.push({ label: 'Add to Desktop', action: async () => {
-                                    let cfgText = await dos.load('cylon.cfg') || "bgcolor=#008080\nnewline\ncylon-files.htm\ncylon-command.htm\nnewline\ngfx-create.htm\n";
+                                    let cfgText = await dos.load('cylon-desktop.cfg') || "bgcolor=#008080\nnewline\ncylon-files.htm\ncylon-command.htm\nnewline\ngfx-create.htm\n";
                                     cfgText = cfgText.trimEnd() + `\n${f.rawName}\n`;
-                                    await dos.save('cylon.cfg', cfgText);
+                                    await dos.save('cylon-desktop.cfg', cfgText);
                                     await window.parent.injectAndExecute(`echo Added ${f.rawName} to Desktop`);
                                 }});
                             }

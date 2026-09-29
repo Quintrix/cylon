@@ -43,7 +43,7 @@
 
 <!-- TASKBAR / TERMINAL PROMPT (Moved outside screen-wrapper) -->
 <div id="input-bar">
-    <div id="os-menu-btn" onclick="event.stopPropagation(); triggerOSMenu()">
+    <div id="os-menu-btn" onclick="event.stopPropagation(); toggleFullKeyboard()">
         <img src="i/Lk.png" width="24" height="24" alt="Menu" style="image-rendering: pixelated; filter: drop-shadow(0 0 2px #0f0);">
     </div>
     <div id="kb-input-lines">
@@ -87,10 +87,16 @@ let dosInitialized = false;
 let dosInitializing = null;
 
 const PAGES = Object.freeze(new Set([
-    'cylon.gfx',
+    'cylon.htm',
+    'cylon.cfg',
+    'cylon-command.cfg',
+    'cylon-command.htm',
     'cylon-files.htm',
+    'cylon-files.cfg',
     'cylon-desktop.htm',
     'cylon-desktop.cfg',
+    'cylon-colors.htm',
+    'cylon-colors.cfg',
     'gfx-tileset.htm',
     'gfx-create.htm',
     'gfx-itemid.htm',
@@ -203,6 +209,16 @@ window.addEventListener('message', function(e) {
             window.showFullKeyboard();
             if (window.updatePrompt) window.updatePrompt();
         }
+    } else if (e.data.type === 'QANDY_PASTE') {
+        if (window.pasteText) window.pasteText(e.data.text);
+    }
+});
+
+window.addEventListener('paste', function(e) {
+    let text = (e.clipboardData || window.clipboardData).getData('text');
+    if (text && window.pasteText) {
+        window.pasteText(text);
+        e.preventDefault();
     }
 });
 
@@ -237,6 +253,43 @@ async function bootMount() {
         printDOS("{.yellow}Booted to RAM drive (cylon.json not found).\nInput 'export cylon.json' to download your work later{.}\n");
     }
 }
+
+// ============================================================================
+// SYSTEM BOOT - load cylon.cfg
+// ============================================================================
+window.desktopInit = async function() {
+    // 1. Mandatory Terminal Open (OS relies on this for executing commands)
+    // try {
+    //     await window.PageOpen('cylon-command.htm', 'Terminal');
+    // } catch (e) {
+    //     printDOS("{.red}Error: cylon-command.htm is missing! System may be unstable.{.}\n");
+    // }
+
+    // 2. Check for cylon.cfg (our autoexec file)
+    let dos = window.CylonDOS;
+    let cfgText = "";
+    
+    if (await dos.exists('cylon.cfg')) { cfgText = await dos.load('cylon.cfg'); }
+    
+    // 3. Process the file line-by-line
+    let lines = cfgText.split('\n');
+    for (let line of lines) {
+        line = line.trim();
+        
+        // Skip empty lines or comments
+        if (!line || line.startsWith('//') || line.startsWith(';')) continue;
+        
+        // If it's an app/page, try to launch it!
+        if (line.toLowerCase().endsWith('.htm') || line.toLowerCase().endsWith('.html')) {
+            try {
+                await window.PageOpen(line);
+            } catch(e) {
+                // If it fails (e.g. file missing), just log to the terminal and continue
+                printDOS(`{.yellow}Autoexec: Could not open ${line}{.}\n`);
+            }
+        }
+    }
+};
 
 function initializeDos() {
     if (dosInitialized) return Promise.resolve();
@@ -387,7 +440,7 @@ function powerOn() {
       overlay.removeEventListener('click', engageHandler, true);
       document.removeEventListener('keydown', engageHandler, true);
       
-      // NEW: Request Fullscreen mode to hide the browser UI (URL bar, tabs)
+      // Request Fullscreen mode to hide the browser UI (URL bar, tabs)
       try {
           if (document.documentElement.requestFullscreen) {
               document.documentElement.requestFullscreen().catch(err => console.warn(err));
@@ -442,7 +495,7 @@ function loadNext() {
     var promptEl = document.getElementById('kb-prompt');
     if (promptEl) promptEl.textContent = sysPrompt;
 
-    print("<br><font color=lime>2029 Qandy Pocket Computer v1j - Quintrix and Crew Software</font><br><font color=cyan>Alpha Testing Prototype Release - Free Public Domain Software</font><br><font color=pink>DISCLAIMER: Written with the assistance of Artificial Intelligence");
+    print("<br><font color=lime>2029 Qandy Pocket Computer v1w - Quintrix and Crew Software</font><br><font color=cyan>Alpha Testing Prototype Release - Free Public Domain Software</font><br><font color=pink>DISCLAIMER: Written with the assistance of Artificial Intelligence");
     
     // --- Initialize DOS AFTER the welcome message, not behind the click-overlay
     initializeDos().catch(function(err) {
@@ -477,7 +530,7 @@ function loadNext() {
             window.setKeyVisual('caps', 'locked', window.caps);
             window.updateKeyLabels();
         } else if (e.key === 'Meta' || e.key === 'OS' || e.key === 'Windows') { 
-            window.triggerOSMenu(); 
+            window.toggleFullKeyboard(); 
             e.preventDefault(); 
         } else if (e.key === 'Backspace') { window.press({id: 'back'}); e.preventDefault(); }
         else if (e.key === 'Enter') { window.press({id: 'enter'}); e.preventDefault(); }

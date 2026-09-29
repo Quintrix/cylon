@@ -86,6 +86,9 @@
             /* Flex layout to align output text to the bottom */
             display: flex;
             flex-direction: column;
+            /* Allow text highlighting/selection */
+            user-select: text;
+            -webkit-user-select: text;
         }
 
         /* Clipping "mask" for iframe apps. This element's box is what shrinks
@@ -177,6 +180,8 @@
             margin-right: -2px; 
             animation: blink 1s infinite steps(2, start);
             display: inline-block;
+            height: 1.1em;
+            vertical-align: text-bottom;
         }
         .kb-cursor-block {
             background-color: #0f0;
