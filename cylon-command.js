@@ -432,7 +432,6 @@
           var parts = await dos.partitions();
           var cylonPart = parts.filter(function(p) { return p.name === 'cylon'; })[0];
           var imageName = 'cylon.json';
-          var installFiles = ['cylon-desktop.htm', 'cylon.gfx'];
           var action = cylonPart ? 'Format existing partition "cylon" and reinstall the factory image.'
             : 'Create a new partition named "cylon" and install the factory image.';
 
@@ -441,7 +440,7 @@
               'Install plan:',
               '  Source:      ' + imageName,
               '  Target:      cylon (IndexedDB partition)',
-              '  Files:       ' + installFiles.join(', '),
+              '  Files:       All system files (full archive)',
               '  Boot drive:  yes',
               '  Action:      ' + action,
               '',
