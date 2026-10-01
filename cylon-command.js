@@ -660,9 +660,9 @@ function updateTaskbar() {
 
     activePage = null;
 
-    if (typeof global.showFullKeyboard === 'function') {
-      global.showFullKeyboard(); // Command is a terminal type, so explicitly show the keyboard
-    }
+    //if (typeof global.showFullKeyboard === 'function') {
+    //  global.showFullKeyboard(); // Command is a terminal type, so explicitly show the keyboard
+    //}
 
     updateTaskbar();
   };

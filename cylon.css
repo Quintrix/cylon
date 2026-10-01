@@ -46,12 +46,15 @@
         }
 
         html, body {
-            background-color: #000; color: #0f0;
-            font-family: monospace; margin: 0;
-            height: 100vh; width: 100vw;
+            background-color: var(--bg-color, #000); 
+            color: var(--fg-color, #0f0);
+            font-family: var(--font-face, monospace); 
+            margin: 0; height: 100vh; width: 100vw;
             overflow: hidden; overscroll-behavior-y: none; 
             user-select: none; -webkit-user-select: none;
         }
+
+
 
         /* --- DYNAMIC LAYOUT VARS --- */
         :root {
@@ -133,6 +136,8 @@
         
         /* --- TASKBAR / MENU BUTTON --- */
         #os-menu-btn {
+            background: var(--menu-bg, #111); 
+            border: 1px solid var(--menu-fg, #333); 
             background: #111; 
             border: 1px solid #333; 
             border-radius: 4px;
@@ -146,14 +151,16 @@
             transition: all 0.1s;
             margin-right: 10px;
         }
-        #os-menu-btn:active { background: #333; transform: scale(0.95); }
+        #os-menu-btn:active {
+            background: var(--sel-bg, #333); 
+        }
         
         /* --- TASKBAR / INPUT BAR --- */
         #input-bar {
             position: fixed;
             bottom: 0; left: 0; right: 0;
             height: var(--bar-height);
-            background: #000; /* SEAMLESS WITH SCREEN */
+            background: var(--input-bg, #000); /* SEAMLESS WITH SCREEN */
             border-top: none; /* REMOVED GREEN LINE */
             display: flex; align-items: center; 
             padding: 0 10px;
@@ -169,6 +176,48 @@
             flex-direction: column;
         }
 
+        /* --- TEXTAREA MULTI-LINE OVERLAY --- */
+        #kb-textarea-view {
+            display: none;
+            position: absolute;
+            bottom: 0; 
+            left: 0; 
+            right: 0;
+            height: 160px; /* ~5 Rows of text overlay */
+            background: rgba(8, 12, 8, 0.98);
+            border: 1px solid #0a0;
+            border-bottom: none;
+            border-radius: 4px 4px 0 0;
+            padding: 8px 10px;
+            box-sizing: border-box;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            box-shadow: 0 -4px 15px rgba(0,255,0,0.1);
+            z-index: 10;
+            touch-action: pan-y; /* Allow native finger scrolling */
+    
+            /* Mirror terminal styling */
+            color: #c0c0c0;
+            font-family: monospace;
+            font-size: clamp(16px, 4.5vw, 22px);
+            line-height: 1.4;
+            
+            background: var(--bg-color, rgba(8, 12, 8, 0.98));
+            border: 1px solid var(--fg-color, #0a0);
+            color: var(--fg-color, #c0c0c0);
+            font-family: var(--font-face, monospace);
+        }
+
+        body.textarea-mode #kb-line1,
+        body.textarea-mode #kb-line2 {
+            display: none; /* Hide single-line interface */
+        }
+
+        body.textarea-mode #kb-textarea-view {
+            display: block; /* Reveal multi-line box */
+        }
+
         /* Keep the prompt visible in terminal mode and app mode. */
         body.app-mode #kb-input-lines {
             display: flex;
@@ -176,6 +225,7 @@
         
         /* --- CURSOR STYLES --- */
         .kb-cursor-bar {
+        	   border-left: 2px solid var(--fg-color, #0f0);
             border-left: 2px solid #0f0;
             margin-right: -2px; 
             animation: blink 1s infinite steps(2, start);
@@ -192,6 +242,11 @@
         .kb-selected {
             background-color: #0f0;
             color: #000;
+        }
+        
+        .kb-cursor-block, .kb-selected {
+            background-color: var(--fg-color, #0f0);
+            color: var(--bg-color, #000);
         }
 
         /* Taskbar flies up to sit exactly on top of the keyboard */
@@ -252,7 +307,10 @@
         /* --- VIRTUAL KEYBOARD OVERLAY --- */
         #kb-overlay {
             position: absolute; bottom: 0; left: 0; right: 0; height: var(--kb-height);
-            background: rgba(8, 8, 8, 0.98); z-index: 999;
+            background: var(--case-bg, rgba(8, 8, 8, 0.98)); 
+            border-top: 1px solid var(--case-fg, #0a0);
+            z-index: 999;        	
+            position: absolute; bottom: 0; left: 0; right: 0; height: var(--kb-height);
             display: flex; flex-direction: column; box-sizing: border-box;
             border-top: 1px solid #0a0;
             transform: translateY(100%); transition: transform 0.4s cubic-bezier(0.22, 1, 0.36, 1);
@@ -268,11 +326,18 @@
         .kb-row { display: flex; flex: 1; gap: 1vw; min-height: 0; }
         
         .kb-key {
-            background: #222; color: #fff; border: 1px solid #444; border-radius: 6px;
+            background: var(--key-bg, #222); 
+            color: var(--key-fg, #fff); 
+            border: 1px solid var(--case-fg, #444); 
+            border-radius: 6px;
             display: flex; align-items: center; justify-content: center;
             font-size: 3vh; cursor: pointer; text-transform: uppercase; padding: 0 2px;
         }
-        .kb-key.active { background: #666; color: #fff; border-color: #888; }
+        .kb-key.active { 
+            background: var(--key-hl-bg, #666); 
+            color: var(--key-hl-fg, #fff); 
+            border-color: var(--key-fg, #888); 
+         }
         .kb-key.locked { background: #ddd; color: #000; }
         .kb-key-dual { font-size: 4vh; text-transform: none; }
         .kb-key-accent { background: #0a220a; border-color: #0f0; color: #0f0; }
@@ -295,16 +360,16 @@ body.app-mode #app-taskbar {
 }
 
 .taskbar-sys-btn {
-    background: #0a220a;
-    color: #0f0;
+    background: var(--menu-bg, #0a220a);
+    color: var(--fg-color, #0f0);
+    border: 1px solid var(--fg-color, #0f0);
     padding: 6px 12px;
-    border: 1px solid #0f0;
     cursor: pointer;
     font-weight: bold;
     border-radius: 4px;
     flex: 0 0 auto;
 }
-.taskbar-sys-btn:active { background: #0f0; color: #000; }
+.taskbar-sys-btn:active { background: var(--fg-color, #0f0); color: var(--bg-color, #000); }
 
 #taskbar-app-list {
     display: flex;
@@ -317,19 +382,20 @@ body.app-mode #app-taskbar {
 }
 
 .taskbar-app-tab {
-    background: #222;
-    color: #aaa;
+    background: var(--menu-bg, #222);
+    color: var(--menu-fg, #aaa);
+    border-bottom: 2px solid transparent;
     padding: 6px 12px;
     cursor: pointer;
-    border-bottom: 2px solid transparent;
     white-space: nowrap;
     flex: 0 0 auto;
 }
 .taskbar-app-tab.active {
-    background: #111;
-    color: #0f0;
-    border-bottom: 2px solid #0f0;
+    background: var(--sel-bg, #111);
+    color: var(--sel-fg, #0f0);
+    border-bottom: 2px solid var(--fg-color, #0f0);
 }
+
 
 .taskbar-status {
     flex: 0 0 auto;
@@ -349,6 +415,10 @@ body.app-mode #kb-input-lines {
 
 body.app-mode #input-bar {
     display: flex;
+}
+
+#screen-wrapper, #input-bar, .page-frame, #app-frame {
+    background-color: var(--bg-color, #000);
 }
 
 /* Hide app tabs while typing to give the input bar full width 

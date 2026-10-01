@@ -6,251 +6,286 @@
     <title>Cylon Colors Control Panel</title>
     <script src="cylon-sdk.js"></script>
     <style>
-        body {
-            background-color: #000;
-            color: #0f0;
-            font-family: monospace;
+        :root {
+            --theme: default;
+            --font-face: Courier, monospace;
+            --bg-color: #030;
+            --fg-color: #080;
+            --menu-bg: #ccc;
+            --menu-fg: #030;
+            --sel-bg: #00c;
+            --sel-fg: #ccc;
+        }
+
+        html, body {
             margin: 0;
-            padding: 20px;
-            box-sizing: border-box;
-            overflow-y: auto;
-            padding-bottom: 80px; /* Room for taskbar */
-        }
-
-        h2 {
-            text-align: center;
-            border-bottom: 2px solid #0f0;
-            padding-bottom: 10px;
-            margin-top: 0;
-            text-transform: uppercase;
-            letter-spacing: 2px;
-        }
-
-        .setting-row {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            background: #111;
-            margin-bottom: 10px;
-            padding: 10px 15px;
-            border: 1px solid #333;
-            border-radius: 4px;
-        }
-
-        .setting-label {
-            flex: 1;
-            font-size: 16px;
-            font-weight: bold;
-        }
-
-        .setting-desc {
-            font-size: 12px;
-            color: #888;
-            margin-top: 4px;
-        }
-
-        .controls {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        /* Native OS color picker */
-        input[type="color"] {
-            -webkit-appearance: none;
-            border: 1px solid #0f0;
-            background: #000;
-            width: 44px;
-            height: 36px;
-            cursor: pointer;
             padding: 0;
-        }
-        input[type="color"]::-webkit-color-swatch-wrapper { padding: 0; }
-        input[type="color"]::-webkit-color-swatch { border: none; }
-
-        /* Hex text input that triggers Qandy virtual keyboard */
-        input[type="text"] {
-            background: #000;
-            color: #0f0;
-            border: 1px solid #0f0;
-            padding: 8px;
-            width: 80px;
-            text-align: center;
-            font-family: monospace;
-            font-size: 16px;
-            text-transform: uppercase;
-        }
-
-        .btn {
-            background: #0a220a;
-            color: #0f0;
-            border: 2px solid #0f0;
-            padding: 12px 20px;
             width: 100%;
-            font-family: monospace;
+            height: 100%;
+            background-color: var(--bg-color);
+            color: var(--fg-color);
+            font-family: var(--font-face);
             font-size: 18px;
             font-weight: bold;
-            cursor: pointer;
-            text-transform: uppercase;
-            margin-top: 20px;
-            transition: all 0.1s;
-        }
-        .btn:active {
-            background: #0f0;
-            color: #000;
-            transform: scale(0.98);
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start; 
+            justify-content: flex-start;
+            padding-top: 40px;
+            padding-left: 10px; 
+            box-sizing: border-box;
+            overflow-y: auto;
         }
 
-        #status-msg {
+        /* Expanded to a 4 column grid */
+        .config-grid {
+            display: grid;
+            grid-template-columns: 160px auto 160px auto; 
+            gap: 4px 10px;
+            align-items: center; 
+        }
+
+        .label {
+            text-align: right;
+            user-select: none;
+            white-space: pre;
+        }
+
+        input[type="text"] {
+            background-color: var(--menu-bg);
+            color: var(--menu-fg);
+            font-family: inherit;
+            font-size: inherit;
+            font-weight: bold;
+            border: none;
+            outline: none;
+            padding: 2px 6px;
+            width: 120px;
+            border-radius: 0;
+            cursor: pointer;
+        }
+
+        .spacer {
+            height: 12px;
+            grid-column: 1 / -1; /* Spans across all columns */
+        }
+
+        /* Container to center the Save button horizontally */
+        .action-row {
+            grid-column: 1 / -1;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .btn-action {
+            background-color: var(--sel-bg);
+            color: var(--sel-fg);
             text-align: center;
-            margin-top: 15px;
-            color: #ff0;
-            min-height: 1.2em;
+            padding: 2px 16px;
+            cursor: pointer;
+            user-select: none;
+            display: inline-block;
+            transition: transform 0.05s;
+        }
+
+        .btn-action:active {
+            transform: scale(0.95);
+        }
+
+        #error-msg {
+            color: #f00;
+            margin-bottom: 20px;
+            display: none;
         }
     </style>
 </head>
 <body>
 
-    <h2>System Colors</h2>
+    <div id="error-msg">Error: CylonDOS not connected.</div>
 
-    <div id="settings-container">
-        <!-- Rows will be generated here by JS -->
+    <div class="config-grid">
+        <!-- Row 1 -->
+        <div class="label">Theme:</div>
+        <div><input type="text" id="Theme" value="default"></div>
+        <div class="label">InputFg:</div>
+        <div><input type="text" id="InputFg" value="#0f0"></div>
+
+        <div class="spacer"></div>
+
+        <!-- Row 2 -->
+        <div class="label">Font:</div>
+        <div><input type="text" id="Font" value="Courier"></div>
+        <div class="label">InputBg:</div>
+        <div><input type="text" id="InputBg" value="#000"></div>
+
+        <div class="spacer"></div>
+
+        <!-- Row 3 -->
+        <div class="label">BackgroundColor:</div>
+        <div><input type="text" id="BackgroundColor" value="#030"></div>
+        <div class="label">CaseBg:</div>
+        <div><input type="text" id="CaseBg" value="#080808"></div>
+
+        <!-- Row 4 -->
+        <div class="label">ForegroundColor:</div>
+        <div><input type="text" id="ForegroundColor" value="#080"></div>
+        <div class="label">CaseFg:</div>
+        <div><input type="text" id="CaseFg" value="#0a0"></div>
+
+        <div class="spacer"></div>
+
+        <!-- Row 5 -->
+        <div class="label">MenuBgColor:</div>
+        <div><input type="text" id="MenuBgColor" value="#ccc"></div>
+        <div class="label">KeyBg:</div>
+        <div><input type="text" id="KeyBg" value="#222"></div>
+
+        <!-- Row 6 -->
+        <div class="label">MenuFgColor:</div>
+        <div><input type="text" id="MenuFgColor" value="#030"></div>
+        <div class="label">KeyFg:</div>
+        <div><input type="text" id="KeyFg" value="#fff"></div>
+
+        <div class="spacer"></div>
+
+        <!-- Row 7 -->
+        <div class="label">SelectBgColor:</div>
+        <div><input type="text" id="SelectBgColor" value="#00c"></div>
+        <div class="label">KeyHlBg:</div>
+        <div><input type="text" id="KeyHlBg" value="#666"></div>
+
+        <!-- Row 8 -->
+        <div class="label">SelectFgColor:</div>
+        <div><input type="text" id="SelectFgColor" value="#ccc"></div>
+        <div class="label">KeyHlFg:</div>
+        <div><input type="text" id="KeyHlFg" value="#fff"></div>
+
+        <div class="spacer"></div>
+        <div class="spacer"></div>
+
+        <div class="action-row">
+            <div class="label">Action:</div>
+            <div id="save-btn" class="btn-action" onclick="saveConfig()">SAVE</div>
+        </div>
     </div>
 
-    <button class="btn" onclick="saveColors()">Save & Apply</button>
-    <div id="status-msg"></div>
-
-<script>
-    // Define our variables and their default fallback colors
-    const colorDefinitions = [
-        { key: 'bgcolor',  label: 'Desktop Background',  default: '#008080' },
-        { key: 'fgcolor',  label: 'Desktop Text',        default: '#ffffff' },
-        { key: 'hlcolor',  label: 'Highlight Accent',    default: '#00ff00' },
-        { key: 'menuBG',   label: 'Menu Background',     default: '#c0c0c0' },
-        { key: 'menuFG',   label: 'Menu Text',           default: '#000000' },
-        { key: 'menuHL',   label: 'Menu Highlight',      default: '#000080' }
-    ];
-
-    let currentColors = {};
-
-    function initUI() {
-        const container = document.getElementById('settings-container');
+    <script>
+        const CFG_FILE = 'cylon-colors.cfg';
         
-        colorDefinitions.forEach(def => {
-            currentColors[def.key] = def.default; // Prep default state
+        // Define our fallback/default settings
+        const defaults = {
+            "Theme": "default",
+            "Font": "Courier",
+            "BackgroundColor": "#030",
+            "ForegroundColor": "#080",
+            "MenuBgColor": "#ccc",
+            "MenuFgColor": "#030",
+            "SelectBgColor": "#00c",
+            "SelectFgColor": "#ccc",
+            "InputFg": "#0f0",
+            "InputBg": "#000",
+            "CaseBg": "#080808",
+            "CaseFg": "#0a0",
+            "KeyBg": "#222",
+            "KeyFg": "#fff",
+            "KeyHlBg": "#666",
+            "KeyHlFg": "#fff"
+        };
 
-            const row = document.createElement('div');
-            row.className = 'setting-row';
-
-            row.innerHTML = `
-                <div>
-                    <div class="setting-label">${def.label}</div>
-                    <div class="setting-desc">${def.key}</div>
-                </div>
-                <div class="controls">
-                    <input type="color" id="color-${def.key}" value="${def.default}">
-                    <input type="text" id="text-${def.key}" value="${def.default}" maxlength="7">
-                </div>
-            `;
-            container.appendChild(row);
-
-            // Setup synchronization between the color picker and the text input
-            const colorInput = document.getElementById(`color-${def.key}`);
-            const textInput = document.getElementById(`text-${def.key}`);
-
-            colorInput.addEventListener('input', (e) => {
-                textInput.value = e.target.value.toUpperCase();
-                currentColors[def.key] = e.target.value;
-            });
-
-            // "change" event triggers when virtual keyboard hits Enter
-            textInput.addEventListener('change', (e) => {
-                let val = e.target.value;
-                if (!val.startsWith('#')) val = '#' + val;
-                
-                // Basic Hex validation
-                if (/^#[0-9A-F]{6}$/i.test(val)) {
-                    colorInput.value = val;
-                    currentColors[def.key] = val;
-                    textInput.value = val.toUpperCase();
-                } else {
-                    // Revert on invalid hex
-                    textInput.value = currentColors[def.key].toUpperCase(); 
-                }
-            });
+        document.addEventListener('input', (e) => {
+            if (e.target.tagName === 'INPUT') {
+                updateLivePreview();
+            }
         });
-    }
 
-    async function loadColors() {
-        if (!window.parent || !window.parent.CylonDOS) return;
-        
-        try {
-            let text = await window.parent.CylonDOS.load('cylon-colors.cfg');
-            if (text) {
-                let lines = text.split('\n');
-                lines.forEach(line => {
-                    if (line.includes('=')) {
-                        let [key, val] = line.split('=').map(s => s.trim());
-                        if (currentColors[key] !== undefined) {
-                            currentColors[key] = val;
-                            let colorInput = document.getElementById(`color-${key}`);
-                            let textInput = document.getElementById(`text-${key}`);
-                            if (colorInput && textInput) {
-                                colorInput.value = val;
-                                textInput.value = val.toUpperCase();
+        function updateLivePreview() {
+            document.documentElement.style.setProperty('--font-face', document.getElementById('Font').value + ', monospace');
+            document.documentElement.style.setProperty('--bg-color', document.getElementById('BackgroundColor').value);
+            document.documentElement.style.setProperty('--fg-color', document.getElementById('ForegroundColor').value);
+            document.documentElement.style.setProperty('--menu-bg', document.getElementById('MenuBgColor').value);
+            document.documentElement.style.setProperty('--menu-fg', document.getElementById('MenuFgColor').value);
+            document.documentElement.style.setProperty('--sel-bg', document.getElementById('SelectBgColor').value);
+            document.documentElement.style.setProperty('--sel-fg', document.getElementById('SelectFgColor').value);
+        }
+
+        async function init() {
+            if (!window.parent || !window.parent.CylonDOS) {
+                document.getElementById('error-msg').style.display = 'block';
+                return;
+            }
+
+            let dos = window.parent.CylonDOS;
+            
+            try {
+                if (await dos.exists(CFG_FILE)) {
+                    let rawText = await dos.load(CFG_FILE);
+                    let lines = rawText.split('\n');
+                    
+                    lines.forEach(line => {
+                        line = line.trim();
+                        if (line && line.includes('=')) {
+                            let parts = line.split('=');
+                            let key = parts[0].trim();
+                            let val = parts[1].trim();
+                            
+                            let inputEl = document.getElementById(key);
+                            if (inputEl) {
+                                inputEl.value = val;
                             }
                         }
-                    }
-                });
+                    });
+                }
+            } catch (err) {
+                console.warn("Could not load cylon-colors.cfg, using defaults.");
             }
-        } catch (e) {
-            console.warn("No cylon-colors.cfg found. Using defaults.");
-        }
-    }
-
-    async function saveColors() {
-        let status = document.getElementById('status-msg');
-        status.textContent = "Saving...";
-
-        if (!window.parent || !window.parent.CylonDOS) {
-            status.textContent = "Error: CylonDOS not found.";
-            return;
+            updateLivePreview();
         }
 
-        // 1. Build the .cfg string
-        let outputLines = [
-            "// Cylon OS Color Configuration",
-            "// Modify via cylon-colors.htm"
-        ];
-        
-        colorDefinitions.forEach(def => {
-            outputLines.push(`${def.key}=${currentColors[def.key]}`);
-        });
+        async function saveConfig() {
+            let btn = document.getElementById('save-btn');
+            
+            if (!window.parent || !window.parent.CylonDOS) {
+                btn.textContent = "ERROR";
+                return;
+            }
 
-        // 2. Save file
-        await window.parent.CylonDOS.save('cylon-colors.cfg', outputLines.join('\n'));
+            let lines = [];
+            for (let key in defaults) {
+                let el = document.getElementById(key);
+                let val = el ? el.value.trim() : defaults[key];
+                lines.push(`${key}=${val}`);
+            }
+            
+            let cfgText = lines.join('\n') + '\n';
+            
+            try {
+                await window.parent.CylonDOS.save(CFG_FILE, cfgText);
 
-        // 3. Apply live to the parent OS as CSS Variables
-        if (window.parent.document) {
-            const rootStyle = window.parent.document.documentElement.style;
-            colorDefinitions.forEach(def => {
-                rootStyle.setProperty(`--os-${def.key.toLowerCase()}`, currentColors[def.key]);
-            });
+                if (window.parent.applyColorConfig) {
+                    window.parent.applyColorConfig(cfgText);
+                }
+                
+                let oldText = btn.textContent;
+                btn.textContent = "SAVED!";
+                btn.style.backgroundColor = document.getElementById('ForegroundColor').value;
+                btn.style.color = document.getElementById('BackgroundColor').value;
+                
+                setTimeout(() => {
+                    btn.textContent = oldText;
+                    updateLivePreview(); 
+                }, 1000);
+                
+            } catch (err) {
+                console.error("Failed to save:", err);
+                btn.textContent = "FAIL";
+                setTimeout(() => btn.textContent = "SAVE", 1000);
+            }
         }
 
-        // 4. Send a broadcast event so desktop/other apps can redraw themselves
-        window.parent.postMessage({ type: 'CYLON_COLORS_UPDATED' }, '*');
-
-        status.textContent = "Colors Saved & Applied!";
-        setTimeout(() => status.textContent = "", 3000);
-    }
-
-    // Initialize
-    window.onload = async () => {
-        initUI();
-        await loadColors();
-    };
-
-</script>
+        window.onload = init;
+    </script>
 </body>
 </html>

@@ -8,17 +8,17 @@
     <style>
         /* Standard DOS light grey for terminal text and input prompt */
         #video-layer, #kb-input-lines {
-            color: #c0c0c0;
-            /* NEW: Dynamic font sizing for mobile */
+            color: var(--input-fg, var(--fg-color, #c0c0c0)); /* Will use InputFg, falling back to fg-color */
             font-size: clamp(16px, 4.5vw, 22px);
             line-height: 1.4;
         }
-        
         /* Enforce no space/margins around the prompt to save pixel real estate */
         #kb-prompt {
             margin: 0 !important;
             padding: 0 !important;
         }
+    }
+
     </style>
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#000000">
@@ -28,12 +28,11 @@
     <script src='cylon-keyboard.js'></script>
     <script src="cylon-dos.js"></script>
     <script src="cylon-command.js"></script>
-    
 </head>
 <body>
 
-<!-- MAIN DISPLAY LAYER -->
-<div id="screen-wrapper">
+<!-- MAIN DISPLAY LAYER (Hidden until power on) -->
+<div id="screen-wrapper" style="visibility: hidden;">
     <div id="video-layer">
         <div class="term-spacer"></div>
     </div>
@@ -41,14 +40,15 @@
 </div>
 
 
-<!-- TASKBAR / TERMINAL PROMPT (Moved outside screen-wrapper) -->
-<div id="input-bar">
+<!-- TASKBAR / TERMINAL PROMPT (Hidden until power on) -->
+<div id="input-bar" style="visibility: hidden;">
     <div id="os-menu-btn" onclick="event.stopPropagation(); toggleFullKeyboard()">
         <img src="i/Lk.png" width="24" height="24" alt="Menu" style="image-rendering: pixelated; filter: drop-shadow(0 0 2px #0f0);">
     </div>
     <div id="kb-input-lines">
         <div id="kb-line1"><span id="kb-prompt"></span><span id="kb-input-render1"></span></div>
         <div id="kb-line2"><span id="kb-line2-indent"></span><span id="kb-input-render2"></span></div>
+        <div id="kb-textarea-view"></div> <!-- NEW -->
     </div>
 
     <div id="app-taskbar">
@@ -57,9 +57,8 @@
     </div>
 </div>
     
-<!-- VIRTUAL KEYBOARD OVERLAY -->
-<!-- VIRTUAL KEYBOARD OVERLAY -->
-<div id="kb-overlay">
+<!-- VIRTUAL KEYBOARD OVERLAY (Hidden until power on) -->
+<div id="kb-overlay" style="visibility: hidden;">
     <div id="kb-grid"></div>
 </div>
 
@@ -194,9 +193,9 @@ window.addEventListener('message', function(e) {
         inputBuffer = e.data.value || ""; 
         cursorPos = inputBuffer.length;
         
-        // Set the prompt cleanly, e.g. "newID> " or "tileInput> "
-        document.getElementById('kb-prompt').textContent = e.data.label + "> ";
-        
+        // Set the prompt using the element's ID for debugging
+        document.getElementById('kb-prompt').textContent = `${e.data.id}: `;        
+
         window.showFullKeyboard();
         window.updateOverlayInput();
 
@@ -257,34 +256,80 @@ async function bootMount() {
 // ============================================================================
 // SYSTEM BOOT - load cylon.cfg
 // ============================================================================
+
+window.CylonColors = {};
+
+// Applies CSS variables globally and alerts all open iframes
+window.applyColorConfig = function(cfgText) {
+    let vars = {
+        "Font": "monospace", "BackgroundColor": "#000", "ForegroundColor": "#0f0",
+        "MenuBgColor": "#111", "MenuFgColor": "#aaa", "SelectBgColor": "#333", "SelectFgColor": "#0f0",
+        // Inject the newly configured defaults here
+        "InputFg": "#0f0", "InputBg": "#000", "CaseBg": "#080808", "CaseFg": "#0a0",
+        "KeyBg": "#222", "KeyFg": "#fff", "KeyHlBg": "#666", "KeyHlFg": "#fff"
+    };
+    
+    if (cfgText) {
+        cfgText.split('\n').forEach(line => {
+            let parts = line.split('=');
+            if (parts.length >= 2) vars[parts[0].trim()] = parts.slice(1).join('=').trim();
+        });
+    }
+    window.CylonColors = vars;
+    
+    let root = document.documentElement;
+    root.style.setProperty('--font-face', vars.Font + ', monospace');
+    root.style.setProperty('--bg-color', vars.BackgroundColor);
+    root.style.setProperty('--fg-color', vars.ForegroundColor);
+    root.style.setProperty('--menu-bg', vars.MenuBgColor);
+    root.style.setProperty('--menu-fg', vars.MenuFgColor);
+    root.style.setProperty('--sel-bg', vars.SelectBgColor);
+    root.style.setProperty('--sel-fg', vars.SelectFgColor);
+
+    // Bind new variables to the global CSS Root
+    root.style.setProperty('--input-fg', vars.InputFg);
+    root.style.setProperty('--input-bg', vars.InputBg);
+    root.style.setProperty('--case-bg', vars.CaseBg);
+    root.style.setProperty('--case-fg', vars.CaseFg);
+    root.style.setProperty('--key-bg', vars.KeyBg);
+    root.style.setProperty('--key-fg', vars.KeyFg);
+    root.style.setProperty('--key-hl-bg', vars.KeyHlBg);
+    root.style.setProperty('--key-hl-fg', vars.KeyHlFg);
+
+    // Broadcast the new colors to any apps currently open in iframes
+    document.querySelectorAll('iframe.page-frame').forEach(frame => {
+        if (frame.contentWindow) {
+            frame.contentWindow.postMessage({type: 'QANDY_UPDATE_COLORS', colors: vars}, '*');
+        }
+    });
+};
+
 window.desktopInit = async function() {
-    // 1. Mandatory Terminal Open (OS relies on this for executing commands)
-    // try {
-    //     await window.PageOpen('cylon-command.htm', 'Terminal');
-    // } catch (e) {
-    //     printDOS("{.red}Error: cylon-command.htm is missing! System may be unstable.{.}\n");
-    // }
+    let dos = window.CylonDOS;
+    
+    // 1. Load system colors BEFORE autoexec loads any apps
+    try {
+        if (await dos.exists('cylon-colors.cfg')) {
+            window.applyColorConfig(await dos.load('cylon-colors.cfg'));
+        } else {
+            window.applyColorConfig(""); // Apply defaults if missing
+        }
+    } catch(e) { 
+        console.warn("Theme load error", e); 
+        window.applyColorConfig(""); 
+    }
 
     // 2. Check for cylon.cfg (our autoexec file)
-    let dos = window.CylonDOS;
     let cfgText = "";
-    
     if (await dos.exists('cylon.cfg')) { cfgText = await dos.load('cylon.cfg'); }
     
     // 3. Process the file line-by-line
     let lines = cfgText.split('\n');
     for (let line of lines) {
         line = line.trim();
-        
-        // Skip empty lines or comments
         if (!line || line.startsWith('//') || line.startsWith(';')) continue;
-        
-        // If it's an app/page, try to launch it!
         if (line.toLowerCase().endsWith('.htm') || line.toLowerCase().endsWith('.html')) {
-            try {
-                await window.PageOpen(line);
-            } catch(e) {
-                // If it fails (e.g. file missing), just log to the terminal and continue
+            try { await window.PageOpen(line); } catch(e) {
                 printDOS(`{.yellow}Autoexec: Could not open ${line}{.}\n`);
             }
         }
@@ -404,7 +449,7 @@ function powerOn() {
     overlay.id = 'qandy-power-overlay';
     Object.assign(overlay.style, {
       position: 'fixed', left: '0', top: '0', width: '100%', height: '100%',
-      zIndex: '300', background: 'transparent', display: 'flex',
+      zIndex: '300', background: '#000000', display: 'flex', // Solid black effectively simulates screen off
       alignItems: 'center', justifyContent: 'center', userSelect: 'none'
     });
 
@@ -469,26 +514,12 @@ window.onload = function() {
     powerOn();
 };
 
-window.addEventListener('message', function(e) {
-    if (e.data.type === 'QANDY_REQ_INPUT') {
-        osMode = e.data.isMultiline ? 'app-textarea' : 'app-edit';
-        proxyInputId = e.data.id;
-        inputBuffer = e.data.value; // Grab current value from the app
-        cursorPos = inputBuffer.length;
-        
-        document.getElementById('kb-prompt').textContent = `Editing [${e.data.placeholder || 'Text'}]:`;
-        
-        window.showFullKeyboard();
-        window.updateOverlayInput();
-
-        if (e.data.rect) window.panToRect(e.data.rect);
-
-    } else if (e.data.type === 'QANDY_INPUT_RECT') {
-        window.panToRect(e.data.rect);
-    }
-});
-
 function loadNext() {
+    // Reveal the UI layers now that power is on
+    document.getElementById('screen-wrapper').style.visibility = '';
+    document.getElementById('input-bar').style.visibility = '';
+    document.getElementById('kb-overlay').style.visibility = '';
+
     // Assuming this function is defined elsewhere from your external scripts
     if (typeof keyboard === 'function') keyboard();
     

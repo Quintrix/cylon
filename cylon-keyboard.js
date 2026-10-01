@@ -268,7 +268,41 @@ function keyboard() {
         if (!render1 || !render2) return;
 
         var text = inputBuffer;
+
+        // Render multi-line logic
+        if (osMode === 'app-textarea') {
+            document.body.classList.add('textarea-mode');
+            if (taView) {
+                taView.innerHTML = '';
+                
+                // Add the Prompt Label back in visually
+                var promptEl = document.getElementById('kb-prompt');
+                if (promptEl && promptEl.textContent) {
+                    var pSpan = document.createElement('span');
+                    pSpan.textContent = promptEl.textContent;
+                    pSpan.style.color = '#0a0'; 
+                    taView.appendChild(pSpan);
+                }
+                
+                taView.appendChild(buildLineSpans(text, true, cursorPos, 0));
+                
+                // Ensure scroll tracks cursor exactly
+                let cursorEl = taView.querySelector('.kb-cursor-bar, .kb-cursor-block');
+                if (cursorEl) {
+                    let top = cursorEl.offsetTop;
+                    if (top < taView.scrollTop || top > taView.scrollTop + taView.clientHeight - 30) {
+                        taView.scrollTop = Math.max(0, top - taView.clientHeight / 2);
+                    }
+                }
+            }
+            return; // Skip drawing single lines 1 and 2
+        } else {
+            document.body.classList.remove('textarea-mode');
+        }
+
         var geom = measureLineGeometry();
+
+
         lastCharW = geom.charW; lastPromptWidth = geom.promptWidth; lastCharsPerLine = geom.charsPerLine;
         if (indent) indent.style.width = geom.promptWidth + 'px';
 
@@ -473,9 +507,11 @@ function keyboard() {
         } else if (e.id === 'end') {
             if (shiftHeld) { if (selAnchor === null) selAnchor = cursorPos; } else { selAnchor = null; }
             cursorPos = inputBuffer.length;
+
+
         } else if (e.id === 'enter') {
-            if (osMode === 'app-edit' || osMode === 'app-textarea') {
-                // 1. Send the text back to the App iframe safely via DOM query
+            if (osMode === 'app-edit') {
+                // Submit single-line fields seamlessly
                 var activeFrame = document.querySelector('.page-frame.active');
                 if (activeFrame) {
                     activeFrame.contentWindow.postMessage({
@@ -484,13 +520,29 @@ function keyboard() {
                         value: inputBuffer
                     }, '*');
                 }
-                // 2. Revert back to App Mode
                 osMode = 'app';
                 inputBuffer = "";
                 cursorPos = 0;
                 var title = activeFrame ? activeFrame.dataset.title : 'App';
                 document.getElementById('kb-prompt').textContent = `[ ${title} ]`;
                 window.hideFullKeyboard();
+                renderInputLine();
+            } else if (osMode === 'app-textarea') {
+                // Insert a native line break in multi-line fields
+                if (hasSelection()) deleteSelection();
+                if (insertMode) { inputBuffer = inputBuffer.slice(0, cursorPos) + '\n' + inputBuffer.slice(cursorPos); }
+                else { inputBuffer = inputBuffer.slice(0, cursorPos) + '\n' + inputBuffer.slice(cursorPos + 1); }
+                cursorPos++;
+                
+                // Keep visually updating the app underneath as you type new lines
+                var activeFrame = document.querySelector('.page-frame.active');
+                if (activeFrame) {
+                    activeFrame.contentWindow.postMessage({
+                        type: 'QANDY_UPDATE_INPUT',
+                        id: proxyInputId,
+                        value: inputBuffer
+                    }, '*');
+                }
                 renderInputLine();
             } else {
                 // Normal Terminal Enter behavior
@@ -501,6 +553,11 @@ function keyboard() {
                 if (window.updatePrompt) window.updatePrompt();
                 hideFullKeyboard();
             }
+            
+            
+                        
+            
+            
         } else if (e.id === 'up') {
             navigateHistory(-1);
             cursorPos = inputBuffer.length;
