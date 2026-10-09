@@ -273,6 +273,117 @@ function displayStartupBanner(publicIP, registryStatus, serverId) {
   console.log('[TIME    ] CLIENT          ACTION    DRIVE    FILE         SESSION  RESULT');
 }
 
+// ── JSON Archive Export / Import ──────────────────────────────────────────────
+
+// ── JSON Archive Export / Import ──────────────────────────────────────────────
+
+function exportDrive(driveName, outputFile) {
+  var drive = drives[driveName];
+  if (!drive) return { success: false, error: 'drive not found' };
+
+  var entries = [];
+  drive.manifestMap.forEach(function(e, key) {
+    if (key === MANIFEST_KEY) return;
+    
+    var isDir = key.charAt(0) === '<';
+    var pathName = isDir ? key.substring(1, key.length - 1) : key;
+    var content = isDir ? '' : (_storageGet(drive.storage, key) || '');
+
+    entries.push({
+      name: pathName,
+      type: isDir ? 'directory' : 'file',
+      content: content,
+      size: e.size,
+      timestamp: e.timestamp,
+      owner: e.owner,
+      session: e.session,
+      readOnly: pathName.endsWith('!') // server tracks read-only via filename suffix
+    });
+  });
+
+  // Sort alphabetically so the JSON is deterministic and neat
+  entries.sort(function(a, b) { return a.name < b.name ? -1 : 1; });
+
+  var archive = {
+    format: 'qandy-ramdrive',
+    version: 2,
+    drive: driveName,
+    created: new Date().toISOString(),
+    entries: entries
+  };
+
+  // The 'null, 2' adds line feeds and 2-space indentation
+  var json = JSON.stringify(archive, null, 2);
+
+  if (outputFile) {
+    try {
+      fs.writeFileSync(path.join(process.cwd(), outputFile), json, 'utf8');
+      return { success: true, result: 'Exported drive to ' + outputFile };
+    } catch(err) {
+      return { success: false, error: err.message };
+    }
+  }
+  return { success: true, json: json };
+}
+
+function importDrive(driveName, inputFile, session) {
+  var raw;
+  try {
+    raw = fs.readFileSync(path.join(process.cwd(), inputFile), 'utf8');
+  } catch(err) {
+    return { success: false, error: 'Cannot read file: ' + err.message };
+  }
+
+  var archive;
+  try {
+    archive = JSON.parse(raw);
+  } catch(err) {
+    return { success: false, error: 'Invalid JSON format' };
+  }
+
+  if (archive.format !== 'qandy-ramdrive') {
+    return { success: false, error: 'Unsupported archive format: ' + archive.format };
+  }
+
+  // Ensure drive exists
+  if (!drives[driveName]) {
+    var cr = driveCreate(driveName, session || 'console');
+    if (!cr.success) return { success: false, error: 'Failed to create drive: ' + cr.error };
+  }
+
+  var entries = archive.entries || [];
+  
+  // Sort so parent directories are created before their children
+  entries.sort(function(a, b) {
+    var da = a.name.split('/').length, db = b.name.split('/').length;
+    return da !== db ? da - db : (a.name < b.name ? -1 : 1);
+  });
+
+  var importedCount = 0;
+  var errors = 0;
+
+  for (var i = 0; i < entries.length; i++) {
+    var e = entries[i];
+    if (e.type === 'directory') {
+      dirMake(driveName, '/', e.name, session || 'console');
+    } else {
+      var ts = e.timestamp || timestamp();
+      var owner = e.owner || session || 'console';
+      var res = fileSave(driveName, '/', e.name, e.content || '', e.session || session || 'console', owner, ts);
+      if (!res.success) {
+        console.warn('  Import warning for ' + e.name + ': ' + res.error);
+        errors++;
+      }
+    }
+    importedCount++;
+  }
+
+  return { 
+    success: true, 
+    result: 'Imported ' + importedCount + ' items into ' + driveName + (errors ? ' (' + errors + ' skipped)' : '') 
+  };
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function timestamp() {
@@ -1864,6 +1975,29 @@ if (process.stdin.isTTY) {
           break;
         }
 
+        case 'export':
+          if (!_serverMountedDrive) { process.stdout.write('No drive mounted. Use: mount <drive>\n'); return; }
+          if (!arg) { process.stdout.write('Usage: export <filename.json>\n'); return; }
+          var expRes = exportDrive(_serverMountedDrive, arg);
+          if (expRes.success) {
+            process.stdout.write(expRes.result + '\n');
+          } else {
+            process.stdout.write('Error: ' + expRes.error + '\n');
+          }
+          break;
+
+        case 'import':
+          if (!_serverMountedDrive) { process.stdout.write('No drive mounted. Use: mount <drive>\n'); return; }
+          if (!arg) { process.stdout.write('Usage: import <filename.json>\n'); return; }
+          process.stdout.write('Importing ' + arg + ' into server://' + _serverMountedDrive + '/...\n');
+          var impRes = importDrive(_serverMountedDrive, arg, 'console');
+          if (impRes.success) {
+            process.stdout.write(impRes.result + '\n');
+          } else {
+            process.stdout.write('Error: ' + impRes.error + '\n');
+          }
+          break;
+        
         case 'mount':
           if (!name) { process.stdout.write('Usage: mount <drive>\n'); return; }
           var n = normName(name);
@@ -2141,6 +2275,8 @@ if (process.stdin.isTTY) {
             '  drives               - List all drives\n' +
             '  delete <name>        - Delete a drive (no drive mounted) or a file (drive mounted)\n' +
             '\nNavigation commands (mount a drive first):\n' +
+            '  import <file.json>   - Import a Qandy JSON archive into current drive\n' + 
+            '  export <file.json>   - Export current drive to a JSON archive\n' +
             '  mount <drive>        - Mount a drive for navigation\n' +
             '  unmount <drive>      - Unmount current drive\n' +
             '  dir                  - Directory listing with full metadata\n' +

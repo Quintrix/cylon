@@ -105,7 +105,7 @@
                  player file, change the Za to the $$ item and remove the item from the map
                  sector directory
                  
-       Vh 
+       Vh Vh%%-- html page name attached
        
        Vi Vi     inventory - outputs a server plug with the player item's inventory file.
 

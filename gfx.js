@@ -6,8 +6,35 @@ window.gfxPong = "..";   // server response
 window.gfxSession = null;
 window.gfxConnected = null;
 
-var _serverUrl = 'https://qandy.onrender.com/qandyland.js';
-var _serverUrl = 'http://localhost:8080/qandyland.js';
+var _serverUrl = location.origin+'/qandyland.js';
+async function testServerReachability() {
+  try {
+    const response = await fetch(_serverUrl, { method: 'HEAD' });
+    if (response.ok) {
+      console.log(_serverUrl+' is reachable.');
+      return true;
+    } else {
+      console.error(_serverUrl+' responded with status:', response.status);
+      return false;
+    }
+  } catch (error) {
+    console.error('Error reaching '+_serverUrl+':', error);
+    return false;
+  }
+}
+
+(async function() {
+  const serverReachable = await testServerReachability();
+  if (!serverReachable) {
+    _serverUrl = 'https://qandy.onrender.com/qandyland.js';
+    const fallbackReachable = await testServerReachability();
+    if (!fallbackReachable) {
+      console.error('Both primary and fallback servers are unreachable.');
+      //IDEA: maybe a stub to use filesystem if location.protocol is 'file'
+      alert('Error: Unable to connect to the server.');
+    }
+  }
+})();
 
 var mapx=7;
 var mapy=11;
@@ -87,10 +114,13 @@ window.gfxInit = async function() {
     for (var i = 0; i < queue.length; i++) { queue[i](); }
   }
 
-  document.body.appendChild(popup);
-  // move txt screen over to reveal gfx
-  document.getElementById('txt').style.top = '50px';
-  document.getElementById('txt').style.left = '350px';
+  if (typeof popup !== 'undefined') document.body.appendChild(popup);
+  // move txt screen over to reveal gfx (Only if it exists in the DOM)
+  var txtEl = document.getElementById('txt');
+  if (txtEl) {
+      txtEl.style.top = '50px';
+      txtEl.style.left = '350px';
+  }
 }
 
 window.gfxConnect = async function(serverIndex) {
@@ -98,8 +128,8 @@ window.gfxConnect = async function(serverIndex) {
   try {
     await gfxFetchMap(gfxDrive);
   } catch (e) {
-    // await print("Error: " + e.message + "\n\n");
-    dosExit();
+    if (typeof print === 'function') await print("Error: " + e.message + "\n\n");
+    if (typeof dosExit === 'function') dosExit();
     return;
   }
   
@@ -115,8 +145,8 @@ window.gfxConnect = async function(serverIndex) {
     return;
   }
 
-  // await print("Error: No session token\n\n");
-  dosExit;
+  if (typeof print === 'function') await print("Error: No session token\n\n");
+  if (typeof dosExit === 'function') dosExit();
 };
 
 window.gfxTiles = function(sector) {
@@ -225,8 +255,7 @@ window.gfxChar = function(charID, avatarStr, zPos) {
       redBar.id = meterDomId + "_r";
       redBar.src = "i/Zm.png";
       redBar.style.position = "absolute";
-      redBar.style.height = "6px";
-      redBar.style.top = "0px";
+      greenBar.style.top = "0px"; // Ensure alignment
       
       meterEl.appendChild(greenBar);
       meterEl.appendChild(redBar);
@@ -448,7 +477,7 @@ window.gfxVisualTick = function() {
     
     if (playerWalk > -1) {
     	// if player is walking, let client know it is time to take next step
-    	walkdown();
+    	if (typeof walkdown === 'function') walkdown();
     }
     
 }
@@ -458,7 +487,7 @@ var tiles = [];
 async function gfxFetchMap(filename) {
   filename = filename || "capflag.gfx";
   try {
-    // await print("Loading " + filename + "...\n");
+    if (typeof print === 'function') await print("Loading " + filename + "...<br>");
     
     var gfxContent = await qdosLoad(filename);
     if (!gfxContent) { throw new Error("Failed to load " + filename); }
@@ -504,7 +533,7 @@ async function gfxFetchMap(filename) {
     return true;
     
   } catch (e) {
-    // await print("Error loading " + filename + ": " + e.message + "\n");
+    if (typeof print === 'function') await print("<span style='color:red;'>Error loading " + filename + ": " + e.message + "</span><br>");
     return false;
   }
 }
@@ -991,7 +1020,7 @@ function gfxClick(bytecode) {
       break;
             
     case "SD": // Server-Down (send command to server)
-      hpop();
+      if (typeof hpop === 'function') hpop();
       gfxDo=data;
       break;   
     
@@ -1045,100 +1074,68 @@ window.gfxZClick = function(z, clickedElement) {
     }
   }
   
-  if (htm) { pop(htm); }
+  if (htm && typeof pop === 'function') { pop(htm); }
+}
+
+async function splash(durationMs) {
+  var outFn = (typeof print === 'function') ? print : console.log;
+
+  // If running inside Cylon OS, the terminal is HTML-based and doesn't process VT100 ANSI codes
+  if (window.parent && window.parent.CylonDOS) {
+    await outFn("<br><span style='color:var(--fg-color, #0f0); font-weight:bold;'>Quintrix and Crew Software<br>Multiplayer Graphics Engine</span><br><br>");
+    window.GFX = 1;
+    return;
+  }
+
+  // --- Legacy ANSI Fallback for external terminals ---
+  var _CURSOR = typeof CURSOR !== 'undefined' ? CURSOR : 0; 
+  if (typeof CURSOR !== 'undefined') CURSOR = 0;
+  
+  await outFn("\n\n\n");
+  var header = "Quintrix and Crew Software";
+  var footer = "Multiplayer Graphics Engine";
+  const L1 = header.split('');
+  const L2 = footer.split('');
+  let state1 = new Array(L1.length).fill(0);
+  let state2 = new Array(L2.length).fill(0);
+  const colors = ["\x1b[30m", "\x1b[38;5;22m", "\x1b[38;5;28m", "\x1b[38;5;46m"];
+  const startTime = Date.now();
+  
+  while (state1.concat(state2).some(s => s < 3)) {
+    let output = "\x1b[2A"; 
+    for (let i = 0; i < state1.length; i++) {
+      if (state1[i] < 3 && Math.random() > 0.8) state1[i]++;
+      output += colors[state1[i]] + L1[i];
+    }
+    output += "\n";
+    for (let i = 0; i < state2.length; i++) {
+      if (state2[i] < 3 && Math.random() > 0.8) state2[i]++;
+      output += colors[state2[i]] + L2[i];
+    }
+    if (typeof CURMORE !== 'undefined' && CURMORE > -1) { CURMORE = 0; }
+    await outFn(output + "\x1b[0m\n");
+    if (typeof sleep === 'function') await sleep(40); 
+    if (Date.now() - startTime > durationMs) break; 
+  }
+  await outFn("\x1b[2A\x1b[38;5;46m"+header+"\n"+footer+"\x1b[0m\n");
+  if (typeof CURSOR !== 'undefined') CURSOR = _CURSOR; 
+  await outFn("\n");
+  window.GFX = 1;
 }
 
 splash(1000);
 
-// Helper for the delay (since the old QDOS sleep() might be gone)
-const sleep = ms => new Promise(r => setTimeout(r, ms));
-
-async function splash(durationMs) {
-  const header = "Quintrix and Crew Software";
-  const footer = "Multiplayer Graphics Engine";
-  
-  // 1. Create a temporary full-screen DOM overlay for the splash
-  const splashContainer = document.createElement('div');
-  splashContainer.style.position = 'absolute';
-  splashContainer.style.top = '0';
-  splashContainer.style.left = '0';
-  splashContainer.style.width = '100vw';
-  splashContainer.style.height = '100vh';
-  splashContainer.style.backgroundColor = '#000';
-  splashContainer.style.zIndex = '999999';
-  splashContainer.style.display = 'flex';
-  splashContainer.style.flexDirection = 'column';
-  splashContainer.style.alignItems = 'center';
-  splashContainer.style.justifyContent = 'center';
-  splashContainer.style.fontFamily = 'monospace';
-  splashContainer.style.fontSize = 'clamp(1rem, 3vw, 2rem)'; // scales nicely
-  splashContainer.style.fontWeight = 'bold';
-  
-  const headerDiv = document.createElement('div');
-  const footerDiv = document.createElement('div');
-  splashContainer.appendChild(headerDiv);
-  splashContainer.appendChild(footerDiv);
-  document.body.appendChild(splashContainer);
-
-  // 2. CSS Colors matching the old ANSI states: 0=Black, 1=Dark, 2=Mid, 3=Bright
-  const colors = ["#000000", "#004d00", "#00aa00", "#00ff00"];
-  
-  // Create individual spans for each character so we can color them independently
-  const createSpans = (text, parent) => {
-    return text.split('').map(char => {
-      const span = document.createElement('span');
-      // preserve spaces
-      span.innerHTML = char === ' ' ? '&nbsp;' : char;
-      span.style.color = colors[0];
-      parent.appendChild(span);
-      return span;
-    });
-  };
-
-  const headerSpans = createSpans(header, headerDiv);
-  const footerSpans = createSpans(footer, footerDiv);
-
-  let state1 = new Array(header.length).fill(0);
-  let state2 = new Array(footer.length).fill(0);
-  
-  const startTime = Date.now();
-
-  // 3. Run the animation loop
-  while (state1.concat(state2).some(s => s < 3)) {
-    // Randomly "evolve" characters for the header
-    for (let i = 0; i < state1.length; i++) {
-      if (state1[i] < 3 && Math.random() > 0.8) state1[i]++;
-      headerSpans[i].style.color = colors[state1[i]];
+// Listen for gfx link clicks forwarded from Cylon OS popups
+window.addEventListener('message', function(e) {
+    if (e.data && e.data.type === 'gfx' && e.data.cmd) {
+        // Ignore "launch_" commands which are meant for the OS desktop launcher
+        if (!e.data.cmd.startsWith('launch_')) {
+            if (typeof gfxClick === 'function') {
+                gfxClick(e.data.cmd);
+            }
+        }
     }
-    // Randomly "evolve" characters for the footer
-    for (let i = 0; i < state2.length; i++) {
-      if (state2[i] < 3 && Math.random() > 0.8) state2[i]++;
-      footerSpans[i].style.color = colors[state2[i]];
-    }
-
-    // Optional audio blips
-    if (Math.random() > 0.2 && typeof beep === 'function') { 
-      let freq = 700 + Math.floor(Math.random() * 400);
-      beep(freq, 10, 0.05); // frequency, duration, volume
-    }
-
-    await sleep(40); // Fast enough to look like data "streaming" in
-    
-    // Safety timeout to prevent infinite loops
-    if (Date.now() - startTime > durationMs) break; 
-  }
-
-  // Force everything to max brightness at the very end just in case
-  headerSpans.forEach(span => span.style.color = colors[3]);
-  footerSpans.forEach(span => span.style.color = colors[3]);
-
-  // Brief pause to let the user read the bright text
-  await sleep(300);
-
-  // 4. Teardown
-  document.body.removeChild(splashContainer);
-  window.GFX = 1;
-}
+});
 
 // Backwards compatibility aliases
 window.LMap = window.LoadMap;

@@ -102,7 +102,7 @@
 
   function normalizePath(path, base) {
     path = String(path == null ? '' : path).trim().replace(/\\/g, '/');
-    base = String(base == null ? '' : base).replace(/^\/+|\/+$/g, '');
+    base = String(base == null ? '' : base).replace(/^\/+|\/+$/g, ''); //'
     var parts = (path.charAt(0) === '/' ? path : (base ? base + '/' : '') + path).split('/');
     var result = [];
     parts.forEach(function (part) {
@@ -976,9 +976,9 @@
         return { name: e.path, type: e.type, content: e.type === 'file' ? e.content : undefined,
                  size: e.size, timestamp: e.timestamp, owner: e.owner, session: e.session, readOnly: !!e.readOnly };
       })
-    });
+    }, null, 2); // Added null, 2 for pretty-printing
   }
-
+  
   async function importDrive(input, options) {
     options = options || {};
     var m = options.drive ? mounts[String(options.drive).replace(/:$/, '')] : current();

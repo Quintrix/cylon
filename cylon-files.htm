@@ -5,54 +5,151 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Cylon Files</title>
 <script src="cylon-sdk.js"></script>
+<style>
+    /* Custom List View Styles */
+    .list-row {
+        display: flex; align-items: center; padding: 6px 10px; cursor: pointer;
+        border-bottom: 1px dashed var(--sel-bg, #333); transition: background 0.1s;
+    }
+    .list-row:hover { background-color: var(--sel-bg, #111); }
+    .list-header {
+        display: flex; padding: 8px 10px; border-bottom: 2px solid var(--fg-color, #0f0);
+        font-weight: bold; position: sticky; top: 0; background-color: var(--bg-color, #000); z-index: 2;
+    }
+    .col-icon { width: 32px; height: 32px; image-rendering: pixelated; margin-right: 10px; flex-shrink: 0; filter: drop-shadow(1px 1px 2px rgba(0,0,0,0.5)); }
+    .col-name { flex: 1; min-width: 80px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 16px; }
+    .col-size { width: 75px; flex-shrink: 0; text-align: right; opacity: 0.8; font-size: 0.9em; }
+    .col-date { width: 150px; flex-shrink: 0; text-align: right; opacity: 0.8; padding-left: 10px; font-size: 0.9em; white-space: nowrap; }
+    
+    /* Hide the Date column on very small portrait screens to save space */
+    @media (max-width: 400px) {
+        .col-date { display: none; }
+    }
+</style>
 </head>
 <body>
 <div id="files-container"></div>
 <script>
     const BASE64_FALLBACK_ICON = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAKElEQVQ4jWNgYGD4z0AAMDHQATAaDAYNDQ0NjYEMGBgYGBkYGAAAAAD//wIA5U4B5wAAAABJRU5ErkJggg==";
+    
     window.onload = async function() {
         CylonSDK.injectDesktopStyles();
 
         if (!window.parent || !window.parent.CylonDOS) {
-            document.getElementById('files-container').innerHTML = "<h3 style='color:white;padding:20px;'>Error: CylonDOS not connected.</h3>";
+            document.getElementById('files-container').innerHTML = "<h3 style='color:var(--fg-color,#fff);padding:20px;'>Error: CylonDOS not connected.</h3>";
             return;
         }
 
         let dos = window.parent.CylonDOS;
         let currentDir = dos.cwd || '/';
-        let currentMode = localStorage.getItem('cylon_files_mode') || 'icon';
         
-        // System Menu configuration overlay
+        // Load state preferences
+        let currentMode = localStorage.getItem('cylon_files_mode') || 'icon';
+        let currentSort = localStorage.getItem('cylon_files_sort') || 'name';
+        
+        // Windows/DOS style context menu injected into System UI
         CylonSDK.onSystemMenu = function() {
             let html = `
-                <div style="text-align:center; padding:15px; font-family:sans-serif;">
-                    <h3 style="margin-top:0;">Display Mode</h3>
-                    <div style="display:flex; justify-content:center; gap:10px; margin-top:15px;">
-                        <button onclick="
-                            var activeFrame = document.querySelector('.page-frame.active');
-                            if(activeFrame) activeFrame.contentWindow.postMessage({type:'FILE_CMD', cmd:'set_mode', mode:'icon'}, '*');
-                        " style="padding:10px 20px; background:#333; color:#fff; border:1px solid #555; cursor:pointer;">[ Icon ]</button>
-                        
-                        <button onclick="
-                            var activeFrame = document.querySelector('.page-frame.active');
-                            if(activeFrame) activeFrame.contentWindow.postMessage({type:'FILE_CMD', cmd:'set_mode', mode:'list'}, '*');
-                        " style="padding:10px 20px; background:#333; color:#fff; border:1px solid #555; cursor:pointer;">[ List ]</button>
+                <div style="background: var(--menu-bg, #c0c0c0); color: var(--menu-fg, #000); border: 2px solid var(--fg-color, #fff); border-right-color: #555; border-bottom-color: #555; font-family: sans-serif; font-size: 15px; min-width: 200px; box-shadow: 4px 4px 0px rgba(0,0,0,0.5);">
+                    <style>
+                        .q-menu-item { padding: 8px 12px; cursor: pointer; display: flex; align-items: center; user-select: none; }
+                        .q-menu-item:hover { background: var(--sel-bg, #000080); color: var(--sel-fg, #fff); }
+                        .q-menu-check { width: 24px; text-align: center; font-weight: bold; font-family: monospace; font-size: 16px; }
+                        .q-menu-divider { height: 1px; background: #888; border-bottom: 1px solid #fff; margin: 4px 2px; }
+                    </style>
+                    <div class="q-menu-item" onclick="var f=document.querySelector('.page-frame.active'); if(f) f.contentWindow.postMessage({type:'FILE_CMD', cmd:'set_mode', mode:'icon'},'*');">
+                        <span class="q-menu-check">${currentMode === 'icon' ? '✓' : ''}</span> Icon View
+                    </div>
+                    <div class="q-menu-item" onclick="var f=document.querySelector('.page-frame.active'); if(f) f.contentWindow.postMessage({type:'FILE_CMD', cmd:'set_mode', mode:'list'},'*');">
+                        <span class="q-menu-check">${currentMode === 'list' ? '✓' : ''}</span> List View
+                    </div>
+                    <div class="q-menu-divider"></div>
+                    <div class="q-menu-item" onclick="var f=document.querySelector('.page-frame.active'); if(f) f.contentWindow.postMessage({type:'FILE_CMD', cmd:'set_sort', sort:'name'},'*');">
+                        <span class="q-menu-check">${currentSort === 'name' ? '✓' : ''}</span> Sort by Name
+                    </div>
+                    <div class="q-menu-item" onclick="var f=document.querySelector('.page-frame.active'); if(f) f.contentWindow.postMessage({type:'FILE_CMD', cmd:'set_sort', sort:'size'},'*');">
+                        <span class="q-menu-check">${currentSort === 'size' ? '✓' : ''}</span> Sort by Size
+                    </div>
+                    <div class="q-menu-item" onclick="var f=document.querySelector('.page-frame.active'); if(f) f.contentWindow.postMessage({type:'FILE_CMD', cmd:'set_sort', sort:'date'},'*');">
+                        <span class="q-menu-check">${currentSort === 'date' ? '✓' : ''}</span> Sort by Date
                     </div>
                 </div>
             `;
+            // Request the parent OS shell to render our generated HTML inside a popup wrapper
             if (window.parent.popHtm) window.parent.popHtm(html);
         };
+
+        // Context Menu intended for clicks on empty grid space
+        function showBackgroundMenu(e) {
+            if (window.parent && window.parent.CylonPopManager) {
+                window.parent.CylonPopManager.showContextMenu(e, [
+                    { label: (currentMode === 'icon' ? '✓ ' : '   ') + 'Icon View', action: () => { localStorage.setItem('cylon_files_mode', 'icon'); window.location.reload(); } },
+                    { label: (currentMode === 'list' ? '✓ ' : '   ') + 'List View', action: () => { localStorage.setItem('cylon_files_mode', 'list'); window.location.reload(); } },
+                    { label: '-------------------', action: () => {} },
+                    { label: (currentSort === 'name' ? '✓ ' : '   ') + 'Sort by Name', action: () => { localStorage.setItem('cylon_files_sort', 'name'); window.location.reload(); } },
+                    { label: (currentSort === 'size' ? '✓ ' : '   ') + 'Sort by Size', action: () => { localStorage.setItem('cylon_files_sort', 'size'); window.location.reload(); } },
+                    { label: (currentSort === 'date' ? '✓ ' : '   ') + 'Sort by Date', action: () => { localStorage.setItem('cylon_files_sort', 'date'); window.location.reload(); } }
+                ]);
+            } else if (CylonSDK.onSystemMenu) {
+                CylonSDK.onSystemMenu();
+            }
+        }
+
+        // Catch clicks and right-clicks on the empty space of the container wrapper
+        let container = document.getElementById('files-container');
+        container.addEventListener('click', (e) => {
+            if (e.target === container) {
+                showBackgroundMenu(e);
+            }
+        });
+        container.addEventListener('contextmenu', (e) => {
+            if (e.target === container) {
+                e.preventDefault();
+                showBackgroundMenu(e);
+            }
+        });
 
         let fileItemsRaw = [];
         
         async function fetchTree(dirPath, level, outArray) {
             let rawFiles = await dos.dir(dirPath);
+            
+            // Sort files for this specific directory layer
+            rawFiles.sort((a, b) => {
+                let isDirA = a.type === 'directory';
+                let isDirB = b.type === 'directory';
+                
+                // Directories always float to the top
+                if (isDirA && !isDirB) return -1;
+                if (!isDirA && isDirB) return 1;
+
+                if (currentSort === 'size') {
+                    return (a.size || 0) - (b.size || 0);
+                } else if (currentSort === 'date') {
+                    let tA = a.timestamp || '';
+                    let tB = b.timestamp || '';
+                    return tB.localeCompare(tA); // Descending (Newest First)
+                } else {
+                    return a.name.localeCompare(b.name);
+                }
+            });
+
             for (let f of rawFiles) {
                 f.isDir = (f.type === 'directory');
-                f.rawName = f.name.replace(/[<>]/g, '');
-                f.fullPath = (dirPath === '/' ? '' : dirPath) + '/' + f.rawName;
+                
+                // Get the raw internal DOS path without HTML tag brackets
+                let internalPath = f.name.replace(/[<>]/g, '');
+                
+                // The display label is strictly the base name (no slashes)
+                f.rawName = internalPath.substring(internalPath.lastIndexOf('/') + 1);
+                
+                // Full absolute path for execution from the drive root
+                f.fullPath = '/' + internalPath; 
                 f.level = level;
+                
                 outArray.push(f);
+                
+                // Recursive tree fetch
                 if (f.isDir && currentMode === 'list') {
                     await fetchTree(f.fullPath, level + 1, outArray);
                 }
@@ -63,11 +160,13 @@
             await fetchTree(currentDir, 0, fileItemsRaw);
             let fileItems = [];
 
+            // Add back navigation if not at root
             if (currentDir !== '/' && currentDir !== '') {
                 fileItems.push({
                     iconPath: 'q/folder.png',
                     label: '.. (Up)',
                     level: 0,
+                    isDir: true,
                     action: async (item, e) => {
                         await window.parent.injectAndExecute('cd ..');
                         window.location.reload(); 
@@ -94,44 +193,44 @@
                     iconPath: getIconFor(f),
                     label: f.rawName,
                     level: f.level,
+                    isDir: f.isDir,
+                    size: f.size,
+                    timestamp: f.timestamp,
                     action: (item, e) => {
                         let items = [];
                         
-                        // 1. Folders
                         if (f.isDir) {
                             items.push({ label: `Open ${f.rawName}`, action: async () => {
-                                await window.parent.injectAndExecute(`cd ${f.rawName}`);
+                                await window.parent.injectAndExecute(`cd "${f.fullPath}"`);
                                 window.location.reload();
                             }});
                         } 
-                        // 2. Files
                         else {
                             let isApp = f.rawName.toLowerCase().endsWith('.htm') || f.rawName.toLowerCase().endsWith('.html') || f.rawName.toLowerCase().endsWith('.cfg');
                             
                             items.push({ label: `Open ${f.rawName}`, action: async () => {
                                 if (isApp) {
-                                    await window.parent.injectAndExecute(f.rawName);
+                                    await window.parent.injectAndExecute(`${f.fullPath}`);
                                 } else {
-                                    await window.parent.injectAndExecute(`load ${f.rawName}`);
+                                    await window.parent.injectAndExecute(`load "${f.fullPath}"`);
                                     window.parent.showTerminal();
                                 }
                             }});
                             
                             if (isApp) {
                                 items.push({ label: 'Add to Desktop', action: async () => {
-                                    let cfgText = await dos.load('cylon-desktop.cfg') || "bgcolor=#008080\nnewline\ncylon-files.htm\ncylon-command.htm\nnewline\ngfx-create.htm\n";
-                                    cfgText = cfgText.trimEnd() + `\n${f.rawName}\n`;
+                                    let cfgText = await dos.load('cylon-desktop.cfg') || "newline\ncylon-files.htm\ncylon-command.htm\nnewline\ngfx-create.htm\n";
+                                    cfgText = cfgText.trimEnd() + `\n${f.fullPath}\n`;
                                     await dos.save('cylon-desktop.cfg', cfgText);
                                     await window.parent.injectAndExecute(`echo Added ${f.rawName} to Desktop`);
                                 }});
                             }
                             
                             items.push({ label: 'Delete', action: () => {
-                                // Double menu technique allows confirming dangerous actions cleanly
                                 setTimeout(() => {
                                     window.parent.CylonPopManager.showContextMenu(e, [
                                         { label: `Confirm Delete ${f.rawName}`, action: async () => {
-                                            await window.parent.injectAndExecute(`delete ${f.rawName} -y`);
+                                            await window.parent.injectAndExecute(`delete "${f.fullPath}" -y`);
                                             window.location.reload();
                                         }}
                                     ]);
@@ -139,7 +238,15 @@
                             }});
                         }
                         
-                        // Trigger the SDK OS context menu at exact click location
+                        // Add View Toggle to file menus for accessibility
+                        items.push({ label: '-------------------', action: () => {} });
+                        let toggleLabel = currentMode === 'icon' ? 'Switch to List View' : 'Switch to Icon View';
+                        let toggleMode = currentMode === 'icon' ? 'list' : 'icon';
+                        items.push({ label: toggleLabel, action: () => {
+                            localStorage.setItem('cylon_files_mode', toggleMode);
+                            window.location.reload();
+                        }});
+                        
                         if (window.parent && window.parent.CylonPopManager) {
                             window.parent.CylonPopManager.showContextMenu(e, items);
                         }
@@ -147,18 +254,91 @@
                 });
             });
 
-            if (currentMode === 'list') CylonSDK.renderListGrid('files-container', fileItems);
-            else CylonSDK.renderIconGrid('files-container', fileItems);
+            if (currentMode === 'list') {
+                renderDetailedList('files-container', fileItems, dos);
+            } else {
+                CylonSDK.renderIconGrid('files-container', fileItems);
+            }
 
         } catch (err) {
             console.error("File Explorer Error:", err);
         }
     };
+    
+    // Custom render method strictly for the List View
+    function renderDetailedList(containerId, items, dos) {
+        let container = document.getElementById(containerId);
+        if (!container) return;
+        
+        container.innerHTML = '';
+        container.className = '';
+        container.style.cssText = 'display: flex; flex-direction: column; overflow-y: auto; height: 100%; box-sizing: border-box; background-color: var(--bg-color, #000); color: var(--fg-color, #0f0); font-family: var(--font-face, monospace);';
 
+        // Sticky Header Row
+        let header = document.createElement('div');
+        header.className = 'list-header';
+        header.innerHTML = `
+            <div class="col-name">Name</div>
+            <div class="col-size">Size</div>
+            <div class="col-date">Date</div>
+        `;
+        container.appendChild(header);
+
+        items.forEach(item => {
+            let row = document.createElement('div');
+            row.className = 'list-row';
+
+            // Calculate indentation based on tree depth
+            let indent = (item.level || 0) * 24;
+            
+            let img = document.createElement('img');
+            img.src = item.iconPath || 'q/file.png';
+            img.className = 'col-icon';
+            img.style.marginLeft = indent + 'px';
+            img.onerror = function() { this.onerror = null; this.src = 'q/file.png'; };
+
+            let nameDiv = document.createElement('div');
+            nameDiv.textContent = item.label;
+            nameDiv.className = 'col-name';
+
+            let sizeDiv = document.createElement('div');
+            sizeDiv.textContent = item.isDir ? '<DIR>' : (item.size != null ? dos.formatSize(item.size) : '');
+            sizeDiv.className = 'col-size';
+
+            let dateDiv = document.createElement('div');
+            let ts = item.timestamp || '';
+            let dateStr = '';
+            if (ts.length === 14) {
+                dateStr = `${ts.substring(0,4)}-${ts.substring(4,6)}-${ts.substring(6,8)} ${ts.substring(8,10)}:${ts.substring(10,12)}`;
+            } else {
+                dateStr = ts;
+            }
+            dateDiv.textContent = dateStr;
+            dateDiv.className = 'col-date';
+
+            row.appendChild(img);
+            row.appendChild(nameDiv);
+            row.appendChild(sizeDiv);
+            row.appendChild(dateDiv);
+
+            if (item.action) {
+                row.onclick = (e) => item.action(item, e);
+            }
+
+            container.appendChild(row);
+        });
+    }
+
+    // Capture and apply commands sent back from the System Menu popup
     window.addEventListener('message', async (e) => {
         if (e.data && e.data.type === 'FILE_CMD') {
             if (e.data.cmd === 'set_mode') {
                 localStorage.setItem('cylon_files_mode', e.data.mode);
+                if (window.parent.hpop) window.parent.hpop();
+                window.location.reload();
+            }
+            if (e.data.cmd === 'set_sort') {
+                localStorage.setItem('cylon_files_sort', e.data.sort);
                 if (window.parent.hpop) window.parent.hpop();
                 window.location.reload();
             }

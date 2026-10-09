@@ -1,5 +1,71 @@
-/* --- QANDY POCKET COMPUTER SDK: UI & VIDEO BINDINGS --- */
+ /* --- QANDY POCKET COMPUTER SDK: UI & VIDEO BINDINGS --- */
 (function() {
+// ========================================================================
+// 0. OS TERMINAL BRIDGING
+// ========================================================================
+// Route native print calls to the Cylon Desktop terminal instead of browser print dialog
+window.print = function(text) {
+    if (window.parent && window.parent !== window) {
+        window.parent.postMessage({ type: 'CYLON_PRINT', text: String(text) }, '*');
+    } else {
+        console.log(text);
+    }
+};
+
+// ========================================================================
+// CYLON OS SYSTEM API BRIDGE
+// Translates local app requests into secure Cylon OS postMessages
+// ========================================================================
+
+// 1. Popup Management (Routes to CylonPopManager in command.js)
+window.pop = window.popHtm = function(html) {
+    if (window.parent !== window) {
+        window.parent.postMessage({ type: 'CYLON_POP_HTM', html: html }, '*');
+    }
+};
+
+window.hpop = function() {
+    if (window.parent !== window) {
+        window.parent.postMessage({ type: 'CYLON_POP_HIDE' }, '*');
+    }
+};
+
+// 2. File System (Routes to CylonDOS)
+window.qdosLoad = async function(filename) {
+    if (window.parent && window.parent.CylonDOS) {
+        return await window.parent.CylonDOS.load(filename);
+    }
+    throw new Error("CylonDOS not available");
+};
+
+// 3. Hardware / System Utilities
+window.dosExit = function() {
+    if (window.parent && typeof window.parent.showTerminal === 'function') {
+        window.parent.showTerminal();
+    }
+};
+
+window.sleep = function(ms) { 
+    return new Promise(resolve => setTimeout(resolve, ms)); 
+};
+
+window.qdosScript = function() { 
+    return Promise.resolve(); // Mock to satisfy older gfx.js dependencies
+};
+
+window.beep = function(freq, dur, vol) {
+    if (window.parent && typeof window.parent.beep === 'function') {
+        window.parent.beep(freq, dur, vol);
+    }
+};
+
+// 4. Input Routing (Catches keypresses and sends them to the active app's DirectX/gfx.js)
+document.addEventListener('keydown', function(e) {
+    if (typeof window.keydown === 'function') {
+        window.keydown(e.key, e);
+    }
+});
+
 // ========================================================================
 // 1. INPUT INTERCEPTION (Keyboard & Textarea handling)
 // ========================================================================
@@ -96,6 +162,21 @@ window.CylonSDK = window.CylonSDK || {};
 window.CylonSDK.apps = {}; // Global app registry for popups
 
 /**
+ * Sync CSS Variables from the Parent OS
+ */
+window.CylonSDK.applyColors = function(vars) {
+    if (!vars) return;
+    let root = document.documentElement;
+    root.style.setProperty('--bg-color', vars.BackgroundColor || '#000');
+    root.style.setProperty('--fg-color', vars.ForegroundColor || '#0f0');
+    root.style.setProperty('--font-face', (vars.Font || 'monospace') + ', monospace');
+    root.style.setProperty('--menu-bg', vars.MenuBgColor || '#111');
+    root.style.setProperty('--menu-fg', vars.MenuFgColor || '#aaa');
+    root.style.setProperty('--sel-bg', vars.SelectBgColor || '#333');
+    root.style.setProperty('--sel-fg', vars.SelectFgColor || '#0f0');
+};
+
+/**
  * Register apps for desktop/popup launching.
  */
 window.CylonSDK.registerApps = function(appMap) {
@@ -108,7 +189,11 @@ window.CylonSDK.registerApps = function(appMap) {
 window.CylonSDK.injectDesktopStyles = function() {
     if (document.getElementById('cylon-sdk-desktop-styles')) return;
     
-    // This defaults to 64px, constraining our 82x82 icons precisely.
+    // Immediately pull colors from parent before injecting styles
+    if (window.parent && window.parent.CylonColors) {
+        window.CylonSDK.applyColors(window.parent.CylonColors);
+    }
+    
     let tileSize = parseInt(localStorage.getItem('qandy_display_res')) || 64; 
     
     const style = document.createElement('style');
@@ -117,9 +202,9 @@ window.CylonSDK.injectDesktopStyles = function() {
         :root { --tile-size: ${tileSize}px; }
         html, body {
             margin: 0; padding: 0; overflow: hidden; height: 100%; width: 100%;
-            background-color: #008080;
-            background-image: url('desktop-bg.jpg');
-            background-size: cover; background-position: center; background-repeat: no-repeat;
+            background-color: var(--bg-color, #000);
+            color: var(--fg-color, #0f0);
+            font-family: var(--font-face, monospace);
         }
         .cylon-grid-container {
             display: grid;
@@ -135,11 +220,11 @@ window.CylonSDK.injectDesktopStyles = function() {
         .gfx-icon img {
             width: var(--tile-size); height: var(--tile-size);
             object-fit: contain; image-rendering: pixelated;
-            filter: drop-shadow(2px 2px 3px rgba(0,0,0,0.5));
+            filter: drop-shadow(2px 2px 3px rgba(0,0,0,0.8));
         }
         .gfx-icon-label {
-            margin-top: 5px; color: #fff; font-family: sans-serif; font-size: 13px;
-            text-align: center; text-shadow: 1px 1px 2px #000, -1px -1px 2px #000;
+            margin-top: 5px; color: var(--fg-color, #0f0); font-family: var(--font-face, sans-serif); font-size: 13px;
+            text-align: center; text-shadow: 1px 1px 2px var(--bg-color, #000), -1px -1px 2px var(--bg-color, #000);
             word-wrap: break-word; width: 100%;
         }
     `;
@@ -148,7 +233,6 @@ window.CylonSDK.injectDesktopStyles = function() {
 
 /**
  * Renders a generic array of items into a grid container.
- * items: [{ iconId: 'Ta', label: 'Desktop', action: function(item){...} }, ...]
  */
 window.CylonSDK.renderIconGrid = function(containerId, items) {
     let container = document.getElementById(containerId);
@@ -163,10 +247,8 @@ window.CylonSDK.renderIconGrid = function(containerId, items) {
         iconWrap.title = item.title || item.label;
 
         let img = document.createElement('img');
-        // Allow absolute paths if requested, otherwise default to i/ folder
         img.src = item.iconPath || `i/${item.iconId}.png`;
         
-        // Fallback if image is missing. Nulling out `onerror` fixes the rapid blinking bug!
         img.onerror = function() { 
             this.onerror = null; 
             this.src = 'q/file.png'; 
@@ -217,7 +299,6 @@ window.CylonSDK.getGFXSectorItems = async function(filename, sectorId) {
                         let id = meta.substring(0, 2);
                         let z = meta.substring(2, 4);
                         
-                        // Try to resolve human-readable label from the global apps registry
                         let app = window.CylonSDK.apps[id];
                         
                         items.push({
@@ -229,7 +310,7 @@ window.CylonSDK.getGFXSectorItems = async function(filename, sectorId) {
                     }
                 });
             }
-            break; // Found sector, stop parsing
+            break; 
         }
     }
     return items;
@@ -260,7 +341,7 @@ window.CylonSDK.showAppPopup = function(item) {
             <div style="margin-top: 10px;">
                 <a href="gfx:launch_${itemId}" style="
                     display: inline-block; padding: 6px 12px;
-                    background-color: #0066cc; color: white;
+                    background-color: var(--sel-bg, #0066cc); color: var(--sel-fg, #fff);
                     text-decoration: none; border-radius: 3px;
                     cursor: pointer; font-size: 12px;
                 ">Open ${app.title}</a>
@@ -268,7 +349,6 @@ window.CylonSDK.showAppPopup = function(item) {
         </div>`;
     }
 
-    // Trigger the OS popup
     if (typeof window.parent.popHtm === 'function') {
         if (window.parent.PopAlign !== undefined) window.parent.PopAlign = "click";
         if (item.zLocation) window.parent.lastClickedZ = parseInt(item.zLocation, 16); 
@@ -276,7 +356,6 @@ window.CylonSDK.showAppPopup = function(item) {
     } else if (typeof popHtm === 'function') {
         popHtm(html);
     } else {
-        // Fallback direct launch if popups aren't available
         if (app && window.parent && window.parent.PageOpen) {
             window.parent.PageOpen(app.file, app.title);
         }
@@ -286,23 +365,21 @@ window.CylonSDK.showAppPopup = function(item) {
 /**
  * Renders a list/tree view of items into a container.
  */
-
 window.CylonSDK.renderListGrid = function(containerId, items) {
     let container = document.getElementById(containerId);
     if (!container) return;
     
     container.innerHTML = '';
-    container.className = ''; // Remove CSS grid classes
-    container.style.cssText = 'display: flex; flex-direction: column; padding: 10px; overflow-y: auto; height: 100%; box-sizing: border-box; background-color: #008080; background-image: url("desktop-bg.jpg"); background-size: cover; background-position: center; background-attachment: fixed;';
+    container.className = '';
+    container.style.cssText = 'display: flex; flex-direction: column; padding: 10px; overflow-y: auto; height: 100%; box-sizing: border-box; background-color: var(--bg-color, #000);';
 
     items.forEach(item => {
         let row = document.createElement('div');
-        row.style.cssText = `display: flex; align-items: center; padding: 6px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.2); transition: background 0.1s;`;
+        row.style.cssText = `display: flex; align-items: center; padding: 6px; cursor: pointer; border-bottom: 1px solid var(--fg-color, #0f0); opacity: 0.8; transition: opacity 0.1s;`;
         
-        row.onmouseover = () => row.style.background = 'rgba(255,255,255,0.1)';
-        row.onmouseout = () => row.style.background = 'transparent';
+        row.onmouseover = () => row.style.opacity = '1';
+        row.onmouseout = () => row.style.opacity = '0.8';
 
-        // Add visual indentation for trees
         let indent = (item.level || 0) * 24;
         row.style.paddingLeft = (6 + indent) + 'px';
 
@@ -313,7 +390,7 @@ window.CylonSDK.renderListGrid = function(containerId, items) {
 
         let label = document.createElement('div');
         label.textContent = item.label;
-        label.style.cssText = 'flex: 1; color: white; font-family: monospace; font-size: 16px; text-shadow: 1px 1px 2px #000;';
+        label.style.cssText = 'flex: 1; color: var(--fg-color, #0f0); font-family: var(--font-face, monospace); font-size: 16px; text-shadow: 1px 1px 2px var(--bg-color, #000);';
 
         row.appendChild(img);
         row.appendChild(label);
@@ -330,13 +407,16 @@ window.CylonSDK.renderListGrid = function(containerId, items) {
 // 3. GLOBAL LISTENERS
 // ========================================================================
 
-// Listen for popup "Open Application" clicks natively and System Menus
 if (!window.cylonSDKLaunchListenerAdded) {
     window.addEventListener('message', function(event) {
         const data = event.data;
         if (!data || typeof data !== 'object') return;
 
-        // Route System Menu requests
+        // Sync OS Theme Colors Live
+        if (data.type === 'QANDY_UPDATE_COLORS') {
+            if (window.CylonSDK.applyColors) window.CylonSDK.applyColors(data.colors);
+        }
+
         if (data.type === 'QANDY_OS_MENU') {
             if (typeof window.CylonSDK.onSystemMenu === 'function') {
                 window.CylonSDK.onSystemMenu();

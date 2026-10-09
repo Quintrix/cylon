@@ -550,7 +550,6 @@
           return { handled: true, output: result ? 'TRUE' : 'FALSE' };
 
         case 'export':
-        case 'backup':
           result = await dos.exportDrive();
           if (args[0]) {
             var blob = new Blob([result], { type: 'application/json' });
@@ -999,12 +998,33 @@ function updateTaskbar() {
                     align-items: center;
                     justify-content: center;
                 `;
-                // Clicking the background closes it
+                
+                // Handle link clicks inside the popup, and background closing
                 popWrapper.addEventListener('click', function(e) {
+                    let link = e.target.closest('a');
+                    if (link) {
+                        let href = link.getAttribute('href');
+                        if (href && href.startsWith('gfx:')) {
+                            e.preventDefault();
+                            let cmd = href.substring(4);
+                            
+                            // Route the command down into the active app iframe
+                            let activeFrame = document.querySelector('.page-frame.active');
+                            if (activeFrame && activeFrame.contentWindow) {
+                                activeFrame.contentWindow.postMessage({ type: 'gfx', cmd: cmd }, '*');
+                            } else {
+                                // Fallback if tested completely standalone
+                                window.postMessage({ type: 'gfx', cmd: cmd }, '*');
+                            }
+                            return; // Stop here, app will close the popup explicitly if needed
+                        }
+                    }
+
                     if (e.target === popWrapper) {
                         window.hpop();
                     }
                 });
+
 
                 let popEl = document.createElement('div');
                 popEl.id = 'cylon-pop';

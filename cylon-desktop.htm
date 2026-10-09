@@ -1,348 +1,316 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cylon Desktop</title>
-    <script src="cylon-sdk.js"></script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cylon Desktop</title>
+<script src="cylon-sdk.js"></script>
+<style>
+    /* Desktop Workspace Styles */
+    body, html {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        background-color: var(--bg-color, #000);
+        color: var(--fg-color, #0f0);
+        font-family: var(--font-face, monospace);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        overflow: hidden; /* Prevent scrollbars when scaling */
+        user-select: none;
+        -webkit-user-select: none;
+    }
+
+    #desktop-wrapper {
+        position: relative;
+        background-color: #000;
+        border: 2px solid var(--sel-bg, #333);
+        box-shadow: 0px 10px 30px rgba(0, 0, 0, 0.8);
+        overflow: hidden;
+        transform-origin: center center; /* Scale from the middle */
+    }
+
+    #bg-canvas {
+        position: absolute;
+        top: 0;
+        left: 0;
+        z-index: 1;
+        /* Ensure upscaled pixel art remains sharp, not blurry */
+        image-rendering: -moz-crisp-edges;
+        image-rendering: -webkit-optimize-contrast;
+        image-rendering: crisp-edges;
+        image-rendering: pixelated;
+    }
+
+    #icons-layer {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        z-index: 10;
+    }
+
+    .icon-wrap {
+        position: absolute;
+        width: 64px;
+        height: 64px;
+        cursor: pointer;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: flex-start;
+        transition: transform 0.1s;
+        border-radius: 4px;
+    }
+
+    .icon-wrap:hover {
+        background-color: rgba(255, 255, 255, 0.1); /* Subtle highlight for the 2x2 area */
+        z-index: 20;
+    }
+
+    .icon-wrap:active {
+        transform: scale(0.95);
+        background-color: rgba(255, 255, 255, 0.2);
+    }
+
+    .icon-img {
+        width: 32px;
+        height: 32px;
+        image-rendering: pixelated;
+        filter: drop-shadow(2px 2px 2px rgba(0,0,0,0.8));
+        /* Push the 32x32 image down so it sits exactly in the center of the 64x64 wrap */
+        margin-top: 16px; 
+    }
+
+    .icon-label {
+        margin-top: 2px;
+        font-size: 11px;
+        font-weight: bold;
+        color: #fff;
+        font-family: sans-serif;
+        text-shadow: 1px 1px 1px #000, -1px -1px 1px #000, 1px -1px 1px #000, -1px 1px 1px #000;
+        text-align: center;
+        line-height: 1;
+        white-space: nowrap; /* Prevent word wrapping so it looks cleaner */
+    }
+</style>
 </head>
 <body>
-    <div id="desktop-container"></div>
-    
+
+<div id="desktop-wrapper">
+    <canvas id="bg-canvas"></canvas>
+    <div id="icons-layer"></div>
+</div>
+
 <script>
-    let currentDesktop = 'cylon-desktop.cfg';
-    let configHeader = []; // Stores theme/colors and comments to preserve them on save
-    let draggedEl = null;
-    let isDragging = false;
+    // New Default Map: Icons are spread out across Z locations corresponding to a 2x2 grid stride
+    const DEFAULT_GFX = `a=W4Ab\nd=18x10\nAa=AuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAu.Aq0FZa|Vhcylon-command.htm--\n~Ar10Za|Vhcylon-files--~As2CZa~Aw11Za|Vhcylon-desktop--~Av2BZa|Vhgfx-create--\nAb=AuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAu.\n`;
 
-    async function loadDesktopConfig(configFile) {
-        CylonSDK.injectDesktopStyles(); // Ensure base SDK styles exist
 
-        if (!window.parent || !window.parent.CylonDOS) {
-            document.getElementById('desktop-container').innerHTML = "<h3 style='color:white;padding:20px;'>Error: CylonDOS not connected.</h3>";
-            return;
+    let currentCols = 14;
+    let currentRows = 10;
+
+    window.onload = async function() {
+        if (window.CylonSDK && window.CylonSDK.injectDesktopStyles) {
+            window.CylonSDK.injectDesktopStyles();
         }
 
         let dos = window.parent.CylonDOS;
-        currentDesktop = configFile;
-        let rawText = await dos.load(configFile);
-        
-        let container = document.getElementById('desktop-container');
-        container.innerHTML = ''; 
-        configHeader = []; // Reset header on load
-        
-        // Apply Flexbox overrides for rotation-safe grid layout
-        container.style.cssText = 'display: flex; flex-wrap: wrap; align-content: flex-start; padding: 20px; width: 100%; height: 100%; box-sizing: border-box; overflow-y: auto;';
-
-        // Add an automatic 'Up/Back' button for sub-desktops (NOT saved to the cfg file)
-        //if (configFile !== 'cylon-desktop.cfg') {
-        //    createIconEl(container, {
-        //        file: 'cylon-desktop.cfg',
-        //        label: '.. (Main Desktop)',
-        //        icon: 'q/folder.png',
-        //        isConfig: true
-        //    });
-        //    
-        //    let br = document.createElement('div');
-        //    br.style.flexBasis = '100%';
-        //    br.style.height = '0';
-        //    container.appendChild(br);
-        //}
-
-        let lines = rawText.split('\n').map(l => l.trim());
-
-        lines.forEach(line => {
-            if (!line) return;
-
-            // Parse Theme Preferences & Comments (Keep these at the top of the file)
-            if (line.startsWith('//') || line.startsWith(';') || line.includes('=')) {
-                configHeader.push(line);
-                
-                if (line.includes('=')) {
-                    let [key, val] = line.split('=').map(s => s.trim());
-                    key = key.toLowerCase();
-                    if (key === 'bgcolor') document.body.style.backgroundColor = val;
-                    if (key === 'bgimage') document.body.style.backgroundImage = `url('${val}')`;
-                    if (key === 'fgcolor') document.body.style.color = val; 
-                }
-                return;
-            }
-
-            let lowerLine = line.toLowerCase();
-
-            // Handle Layout Controls - Notice we assign `.drop-target` and `.dataset.cfgVal` 
-            // so these invisible layout elements can be rearranged via drag and drop!
-            if (lowerLine === 'newline' || lowerLine === '\\n') {
-                container.appendChild(createLayoutNode('newline'));
-            } 
-            else if (lowerLine === 'space' || lowerLine === '""' || lowerLine === "''") {
-                container.appendChild(createLayoutNode('space'));
-            } 
-            else {
-                // Handle Icon Generation
-                let isConfig = lowerLine.endsWith('.cfg');
-                let baseName = line.substring(0, line.lastIndexOf('.'));
-                if (!baseName) baseName = line; 
-                
-                let labelText = baseName.replace(/[-_]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-                let iconPath = isConfig ? 'q/folder.png' : 'q/' + baseName + '.png';
-
-                createIconEl(container, {
-                    file: line,
-                    label: labelText,
-                    icon: iconPath,
-                    isConfig: isConfig,
-                    cfgVal: line // Passes the exact config string text
-                });
-            }
-        });
-    }
-
-    function createLayoutNode(type) {
-        let el = document.createElement('div');
-        el.className = 'drop-target';
-        el.dataset.cfgVal = type;
-        if (type === 'newline') {
-            el.style.flexBasis = '100%';
-            el.style.height = '20px';
-        } else {
-            el.style.width = '80px';
-            el.style.height = '100px';
-            el.style.margin = '10px 5px';
-        }
-        return el;
-    }
-
-    function createIconEl(container, item) {
-        let iconWrap = document.createElement('div');
-        iconWrap.className = 'gfx-icon drop-target';
-        iconWrap.title = item.file; 
-        iconWrap.style.width = '80px';
-        iconWrap.style.margin = '10px 5px';
-        iconWrap.style.display = 'flex';
-        iconWrap.style.flexDirection = 'column';
-        iconWrap.style.alignItems = 'center';
-        iconWrap.style.cursor = 'pointer';
-
-        // HTML5 Drag and Drop Attachments
-        if (item.cfgVal) {
-            iconWrap.dataset.cfgVal = item.cfgVal;
-            iconWrap.draggable = true;
-            iconWrap.ondragstart = handleDragStart;
-            iconWrap.ondragend = handleDragEnd;
+        if (!dos) {
+            document.body.innerHTML = "<h3 style='padding:20px;'>Error: CylonDOS not connected.</h3>";
+            return;
         }
 
-        let img = document.createElement('img');
-        img.src = item.icon;
-        img.style.width = 'var(--tile-size, 64px)';
-        img.style.height = 'var(--tile-size, 64px)';
-        img.style.objectFit = 'contain';
-        img.style.imageRendering = 'pixelated';
-        img.style.filter = 'drop-shadow(2px 2px 3px rgba(0,0,0,0.5))';
-        img.setAttribute('draggable', 'false'); // Prevent browser from dragging the image internally
+        let gfxData = await dos.load('cylon-desktop.gfx');
+        
+        // Auto-upgrade script: If missing OR if it detects the old crowded default map
+        if (!gfxData || gfxData.includes('Aq0FZa|Vhcylon-command.htm--\\n~Ar10Za|Vhcylon-files.htm--')) {
+            gfxData = DEFAULT_GFX;
+            await dos.save('cylon-desktop.gfx', gfxData);
+        }
 
-        img.onerror = function() { 
-            this.onerror = null; 
-            this.src = item.isConfig ? 'q/folder.png' : 'q/file.png'; 
-        };
+        renderDesktop(gfxData);
+        
+        // Keep it scaled properly if screen orientation/size changes
+        window.addEventListener('resize', fitDesktopToScreen);
+    };
 
-        let labelEl = document.createElement('div');
-        labelEl.className = 'gfx-icon-label';
-        labelEl.textContent = item.label;
-        labelEl.style.marginTop = '5px';
-        labelEl.style.color = document.body.style.color || '#ffffff'; 
+    // Dynamically scale the desktop wrapper to fill the available screen space
+    function fitDesktopToScreen() {
+        const wrapper = document.getElementById('desktop-wrapper');
+        const logicalWidth = currentCols * 32;
+        const logicalHeight = currentRows * 32;
+        
+        const scaleX = window.innerWidth / logicalWidth;
+        const scaleY = window.innerHeight / logicalHeight;
+        
+        // 0.98 ensures it doesn't clip tightly against the very edge of the iframe
+        const scale = Math.min(scaleX, scaleY) * 0.98;
+        
+        wrapper.style.transform = `scale(${scale})`;
+    }
 
-        iconWrap.appendChild(img);
-        iconWrap.appendChild(labelEl);
+    function extractLabel(logic, id) {
+        if (logic && logic.includes('Vh')) {
+            let match = logic.match(/Vh(.*?)(--|$)/);
+            if (match) {
+                let name = match[1];
+                name = name.replace(/\.html?$/, '').replace(/^cylon-/, '').replace(/^gfx-/, '');
+                return name.charAt(0).toUpperCase() + name.slice(1);
+            }
+        }
+        
+        if (id === 'As') return 'Compiler';
+        if (id === 'Aq') return 'Command';
+        
+        return 'App ' + id;
+    }
 
-        iconWrap.onclick = (e) => {
-            if (isDragging) return; // Ignore click if we just finished dragging
+    function renderDesktop(gfxData) {
+        let lines = gfxData.replace(/\r/g, '').split('\n');
+        let sectorData = "";
 
-            let items = [];
-            items.push({
-                label: `Open ${item.label}`,
-                action: async () => {
-                    if (item.isConfig) loadDesktopConfig(item.file);
-                    else await window.parent.injectAndExecute(item.file);
+        for(let line of lines) {
+            if (line.startsWith('d=')) {
+                let dims = line.substring(2).trim().split('x');
+                currentCols = parseInt(dims[0], 10);
+                currentRows = parseInt(dims[1], 10);
+            }
+            if (line.startsWith('Aa=')) {
+                sectorData = line.substring(3).trim();
+            }
+        }
+
+        let dotIdx = sectorData.indexOf('.');
+        let mapStr = dotIdx !== -1 ? sectorData.substring(0, dotIdx) : sectorData;
+        let objStr = dotIdx !== -1 ? sectorData.substring(dotIdx + 1) : "";
+        
+        if (!mapStr || mapStr.length < currentCols * currentRows * 2) {
+            mapStr = "Au".repeat(currentCols * currentRows);
+        }
+
+        const wrapper = document.getElementById('desktop-wrapper');
+        const canvas = document.getElementById('bg-canvas');
+        const iconsLayer = document.getElementById('icons-layer');
+        
+        wrapper.style.width = (currentCols * 32) + 'px';
+        wrapper.style.height = (currentRows * 32) + 'px';
+        canvas.width = currentCols * 32;
+        canvas.height = currentRows * 32;
+        iconsLayer.innerHTML = '';
+        
+        let ctx = canvas.getContext('2d');
+        
+        for (let i = 0; i < currentCols * currentRows; i++) {
+            let tileCode = mapStr.substring(i*2, i*2+2);
+            if(tileCode.length === 2) {
+                let img = new Image();
+                img.src = 't/' + tileCode + '.png';
+                img.onload = () => {
+                    let x = i % currentCols;
+                    let y = Math.floor(i / currentCols);
+                    ctx.drawImage(img, x * 32, y * 32, 32, 32);
+                };
+            }
+        }
+
+        if (objStr) {
+            let objects = objStr.replace(/\\n/g, '').split('~');
+            
+            objects.forEach(obj => {
+                if (!obj.trim()) return;
+                
+                let parts = obj.split('|');
+                let meta = parts[0];
+                let logic = parts[1] || "";
+                
+                if (meta.length < 4) return;
+                
+                let id = meta.substring(0, 2);
+                let zHex = meta.substring(2, 4);
+                let z = parseInt(zHex, 16); 
+                
+                let x = z % currentCols;
+                let y = Math.floor(z / currentCols);
+                
+                let labelText = extractLabel(logic, id);
+                let filename = null;
+                if (logic && logic.includes('Vh')) {
+                    let match = logic.match(/Vh(.*?)(--|$)/);
+                    if (match) filename = match[1];
                 }
+
+                let wrap = document.createElement('div');
+                wrap.className = 'icon-wrap';
+                
+                // Align the top-left of the 64x64 container strictly to the Z coordinate tile
+                // This forces the icon to span a perfect 2x2 grid block
+                wrap.style.left = (x * 32) + 'px';
+                wrap.style.top = (y * 32) + 'px';
+                
+                let img = document.createElement('img');
+                img.className = 'icon-img';
+                img.src = 'i/' + id + '.png';
+                img.onerror = function() { this.src = 'q/file.png'; };
+                
+                let lbl = document.createElement('div');
+                lbl.className = 'icon-label';
+                lbl.textContent = labelText;
+                
+                wrap.appendChild(img);
+                wrap.appendChild(lbl);
+                
+                wrap.onclick = (e) => {
+                    e.stopPropagation();
+                    if (filename && window.parent && window.parent.PageOpen) {
+                        window.parent.PageOpen(filename);
+                    } else {
+                        if (window.parent && window.parent.CylonPopManager) {
+                            window.parent.CylonPopManager.showContextMenu(e, [
+                                { label: 'Under Construction', action: () => {} }
+                            ]);
+                        }
+                    }
+                };
+
+                wrap.oncontextmenu = (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (window.parent && window.parent.CylonPopManager) {
+                        window.parent.CylonPopManager.showContextMenu(e, [
+                            { label: 'Open ' + labelText, action: () => {
+                                if (filename && window.parent.PageOpen) window.parent.PageOpen(filename);
+                            }},
+                            { label: 'Edit Desktop', action: () => {
+                                if (window.parent.PageOpen) window.parent.PageOpen('gfx-compiler.htm');
+                            }}
+                        ]);
+                    }
+                };
+                
+                iconsLayer.appendChild(wrap);
             });
-            
+        }
+
+        wrapper.oncontextmenu = (e) => {
+            if (e.target.closest('.icon-wrap')) return; 
+            e.preventDefault();
             if (window.parent && window.parent.CylonPopManager) {
-                window.parent.CylonPopManager.showContextMenu(e, items);
+                window.parent.CylonPopManager.showContextMenu(e, [
+                    { label: 'Edit Desktop', action: () => { 
+                        if (window.parent.PageOpen) window.parent.PageOpen('gfx-compiler.htm'); 
+                    }},
+                    { label: 'Refresh', action: () => window.location.reload() }
+                ]);
             }
         };
-        container.appendChild(iconWrap);
+
+        // Scale up to fit the window immediately after DOM creation
+        fitDesktopToScreen();
     }
-
-    // --- DRAG AND DROP / FILE RECONSTRUCTION LOGIC ---
-
-    function handleDragStart(e) {
-        isDragging = true;
-        draggedEl = this;
-        e.dataTransfer.effectAllowed = 'move';
-        e.dataTransfer.setData('text/plain', this.dataset.cfgVal);
-        setTimeout(() => this.style.opacity = '0.4', 0); // Hide original slightly
-    }
-
-    function handleDragEnd(e) {
-        this.style.opacity = '1';
-        draggedEl = null;
-        setTimeout(() => isDragging = false, 50); // Prevent instant click firing
-        saveDesktopLayout();
-    }
-
-    // Translates the DOM sequence directly back into the text file format
-    async function saveDesktopLayout() {
-        if (!window.parent || !window.parent.CylonDOS) return;
-        
-        let newLines = [...configHeader]; 
-        newLines.push(''); // Formatting blank line
-        
-        let container = document.getElementById('desktop-container');
-        for (let child of container.children) {
-            // If it has a cfgVal, it belongs in the text file!
-            // (This safely ignores the dynamic 'Up' button)
-            if (child.dataset.cfgVal) {
-                newLines.push(child.dataset.cfgVal);
-            }
-        }
-        
-        let newConfigText = newLines.join('\n') + '\n';
-        await window.parent.CylonDOS.save(currentDesktop, newConfigText);
-    }
-
-    function initDesktop() {
-        let container = document.getElementById('desktop-container');
-        
-        // Handle dragging OVER existing items (rearranging)
-        container.addEventListener('dragover', (e) => {
-            e.preventDefault(); 
-            if (!draggedEl) return;
-            
-            let target = e.target.closest('.drop-target');
-            if (target && target !== draggedEl) {
-                let rect = target.getBoundingClientRect();
-                
-                let isNewline = (target.dataset.cfgVal === 'newline' || target.dataset.cfgVal === '\\n');
-                if (isNewline) {
-                    if (e.clientY > rect.top + (rect.height / 2)) target.after(draggedEl);
-                    else target.before(draggedEl);
-                } else {
-                    if (e.clientX > rect.left + (rect.width / 2)) target.after(draggedEl);
-                    else target.before(draggedEl);
-                }
-            }
-        });
-
-        // Handle dropping into EMPTY space (dynamically injects needed spaces & newlines!)
-        container.addEventListener('drop', (e) => {
-            e.preventDefault();
-            if (!draggedEl) return;
-
-            let target = e.target.closest('.drop-target');
-            
-            // Only inject spacers if we dropped into the background (not directly onto an icon)
-            if (!target || target === container) {
-                const rect = container.getBoundingClientRect();
-                
-                // Adjust coordinates relative to scrolling position
-                const dropX = Math.max(0, e.clientX - rect.left + container.scrollLeft);
-                const dropY = Math.max(0, e.clientY - rect.top + container.scrollTop);
-
-                // Grid cell footprint approximate sizes
-                const cellW = 90;  // 80px width + 10px margins
-                const cellH = 110; // icon height + label height + margins
-
-                let dropCol = Math.floor(dropX / cellW);
-                let dropRow = Math.floor(dropY / cellH);
-
-                // Filter out the active drag element for geometry checks
-                let children = Array.from(container.children).filter(c => c.dataset.cfgVal && c !== draggedEl);
-                
-                let lastRow = 0;
-                let lastCol = -1;
-
-                // Find the bounds of the last actual item on the desktop
-                if (children.length > 0) {
-                    let lastChild = children[children.length - 1];
-                    let lastRect = lastChild.getBoundingClientRect();
-                    let lx = lastRect.right - rect.left + container.scrollLeft;
-                    let ly = lastRect.bottom - rect.top + container.scrollTop;
-                    
-                    lastRow = Math.floor((ly - 1) / cellH);
-                    lastCol = Math.floor((lx - 1) / cellW);
-                    
-                    if (lastChild.dataset.cfgVal === 'newline' || lastChild.dataset.cfgVal === '\\n') {
-                        lastCol = -1;
-                    }
-                }
-
-                // CASE 1: Dropped strictly beyond the end of all current items
-                if (dropRow > lastRow || (dropRow === lastRow && dropCol > lastCol)) {
-                    container.appendChild(draggedEl);
-                    
-                    let newLinesNeeded = Math.min(dropRow - lastRow, 50); // Cap at 50 max
-                    for (let i = 0; i < newLinesNeeded; i++) {
-                        container.insertBefore(createLayoutNode('newline'), draggedEl);
-                    }
-                    
-                    let startCol = (newLinesNeeded > 0) ? -1 : lastCol;
-                    let spacesNeeded = Math.min(dropCol - (startCol + 1), 50);
-                    
-                    for (let i = 0; i < spacesNeeded; i++) {
-                        container.insertBefore(createLayoutNode('space'), draggedEl);
-                    }
-                } 
-                // CASE 2: Dropped into a "hole" in the middle of the existing layout
-                else {
-                    let insertBeforeNode = null;
-                    for (let child of children) {
-                        let r = child.getBoundingClientRect();
-                        let cx = r.left - rect.left + container.scrollLeft;
-                        let cy = r.top - rect.top + container.scrollTop;
-                        let cCol = Math.floor(cx / cellW);
-                        let cRow = Math.floor(cy / cellH);
-                        
-                        if (cRow > dropRow || (cRow === dropRow && cCol > dropCol)) {
-                            insertBeforeNode = child;
-                            break;
-                        }
-                    }
-
-                    if (insertBeforeNode) {
-                        container.insertBefore(draggedEl, insertBeforeNode);
-                        
-                        let prev = draggedEl.previousElementSibling;
-                        let prevCol = -1;
-                        if (prev && prev.dataset.cfgVal && prev.dataset.cfgVal !== 'newline') {
-                            let pr = prev.getBoundingClientRect();
-                            let px = pr.right - rect.left + container.scrollLeft;
-                            prevCol = Math.floor((px - 1) / cellW);
-                        }
-                        
-                        let spacesNeeded = Math.min(dropCol - (prevCol + 1), 50);
-                        for (let i = 0; i < spacesNeeded; i++) {
-                            container.insertBefore(createLayoutNode('space'), draggedEl);
-                        }
-                    }
-                }
-            }
-            
-            // `handleDragEnd` fires instantly after this and commits the result via `saveDesktopLayout`
-        });
-
-        // Boot straight into the root configuration file
-        loadDesktopConfig('cylon-desktop.cfg');
-    }
-
-    // Listen for OS Tab Switching
-    window.addEventListener('message', (e) => {
-        if (e.data.type === 'QANDY_PAGE_ACTIVATED') {
-            loadDesktopConfig(currentDesktop);
-        }
-    });
-
-    window.onload = initDesktop;
 </script>
 </body>
 </html>

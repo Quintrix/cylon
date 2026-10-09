@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cylon Desktop</title>
+    <script src="cylon-sdk.js"></script>
+</head>
+<body>
+    <div id="desktop-container"></div>
+    
+<script>
+    let currentDesktop = 'cylon-desktop.cfg';
+    let configHeader = []; 
+    let draggedEl = null;
+    let isDragging = false;
+
+    async function loadDesktopConfig(configFile) {
+        CylonSDK.injectDesktopStyles();
+
+        if (!window.parent || !window.parent.CylonDOS) {
+            document.getElementById('desktop-container').innerHTML = "<h3 style='color:var(--fg-color,#fff);padding:20px;'>Error: CylonDOS not connected.</h3>";
+            return;
+        }
+
+        let dos = window.parent.CylonDOS;
+        currentDesktop = configFile;
+        let rawText = await dos.load(configFile);
+        
+        let container = document.getElementById('desktop-container');
+        container.innerHTML = ''; 
+        configHeader = []; 
+        
+        container.style.cssText = 'display: flex; flex-wrap: wrap; align-content: flex-start; padding: 20px; width: 100%; height: 100%; box-sizing: border-box; overflow-y: auto;';
+
+        let lines = rawText.split('\n').map(l => l.trim());
+
+        lines.forEach(line => {
+            if (!line) return;
+
+            if (line.startsWith('//') || line.startsWith(';') || line.includes('=')) {
+                configHeader.push(line);
+                
+                // Allow custom backgrounds per-desktop, but fall back to the global terminal background natively.
+                if (line.includes('=')) {
+                    let [key, val] = line.split('=').map(s => s.trim());
+                    key = key.toLowerCase();
+                    if (key === 'bgimage') document.body.style.backgroundImage = `url('${val}')`;
+                }
+                return;
+            }
+
+            let lowerLine = line.toLowerCase();
+
+            if (lowerLine === 'newline' || lowerLine === '\\n') {
+                container.appendChild(createLayoutNode('newline'));
+            } 
+            else if (lowerLine === 'space' || lowerLine === '""' || lowerLine === "''") {
+                container.appendChild(createLayoutNode('space'));
+            } 
+            else {
+                let isConfig = lowerLine.endsWith('.cfg');
+                let baseName = line.substring(0, line.lastIndexOf('.'));
+                if (!baseName) baseName = line; 
+                
+                let labelText = baseName.replace(/[-_]/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                let iconPath = isConfig ? 'q/folder.png' : 'q/' + baseName + '.png';
+
+                createIconEl(container, {
+                    file: line,
+                    label: labelText,
+                    icon: iconPath,
+                    isConfig: isConfig,
+                    cfgVal: line 
+                });
+            }
+        });
+    }
+
+    function createLayoutNode(type) {
+        let el = document.createElement('div');
+        el.className = 'drop-target';
+        el.dataset.cfgVal = type;
+        if (type === 'newline') {
+            el.style.flexBasis = '100%';
+            el.style.height = '20px';
+        } else {
+            el.style.width = '80px';
+            el.style.height = '100px';
+            el.style.margin = '10px 5px';
+        }
+        return el;
+    }
+
+    function createIconEl(container, item) {
+        let iconWrap = document.createElement('div');
+        iconWrap.className = 'gfx-icon drop-target';
+        iconWrap.title = item.file; 
+        iconWrap.style.width = '80px';
+        iconWrap.style.margin = '10px 5px';
+        iconWrap.style.display = 'flex';
+        iconWrap.style.flexDirection = 'column';
+        iconWrap.style.alignItems = 'center';
+        iconWrap.style.cursor = 'pointer';
+
+        if (item.cfgVal) {
+            iconWrap.dataset.cfgVal = item.cfgVal;
+            iconWrap.draggable = true;
+            iconWrap.ondragstart = handleDragStart;
+            iconWrap.ondragend = handleDragEnd;
+        }
+
+        let img = document.createElement('img');
+        img.src = item.icon;
+        img.style.width = 'var(--tile-size, 64px)';
+        img.style.height = 'var(--tile-size, 64px)';
+        img.style.objectFit = 'contain';
+        img.style.imageRendering = 'pixelated';
+        img.style.filter = 'drop-shadow(2px 2px 3px rgba(0,0,0,0.5))';
+        img.setAttribute('draggable', 'false');
+
+        img.onerror = function() { 
+            this.onerror = null; 
+            this.src = item.isConfig ? 'q/folder.png' : 'q/file.png'; 
+        };
+
+        let labelEl = document.createElement('div');
+        labelEl.className = 'gfx-icon-label';
+        labelEl.textContent = item.label;
+        labelEl.style.marginTop = '5px';
+        labelEl.style.color = 'var(--fg-color, #0f0)'; 
+
+        iconWrap.appendChild(img);
+        iconWrap.appendChild(labelEl);
+
+        iconWrap.onclick = (e) => {
+            if (isDragging) return;
+
+            let items = [];
+            items.push({
+                label: `Open ${item.label}`,
+                action: async () => {
+                    if (item.isConfig) loadDesktopConfig(item.file);
+                    else await window.parent.injectAndExecute(item.file);
+                }
+            });
+            
+            if (window.parent && window.parent.CylonPopManager) {
+                window.parent.CylonPopManager.showContextMenu(e, items);
+            }
+        };
+        container.appendChild(iconWrap);
+    }
+
+    function handleDragStart(e) {
+        isDragging = true;
+        draggedEl = this;
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', this.dataset.cfgVal);
+        setTimeout(() => this.style.opacity = '0.4', 0); 
+    }
+
+    function handleDragEnd(e) {
+        this.style.opacity = '1';
+        draggedEl = null;
+        setTimeout(() => isDragging = false, 50); 
+        saveDesktopLayout();
+    }
+
+    async function saveDesktopLayout() {
+        if (!window.parent || !window.parent.CylonDOS) return;
+        
+        let newLines = [...configHeader]; 
+        newLines.push(''); 
+        
+        let container = document.getElementById('desktop-container');
+        for (let child of container.children) {
+            if (child.dataset.cfgVal) {
+                newLines.push(child.dataset.cfgVal);
+            }
+        }
+        
+        let newConfigText = newLines.join('\n') + '\n';
+        await window.parent.CylonDOS.save(currentDesktop, newConfigText);
+    }
+
+    function initDesktop() {
+        let container = document.getElementById('desktop-container');
+        
+        container.addEventListener('dragover', (e) => {
+            e.preventDefault(); 
+            if (!draggedEl) return;
+            
+            let target = e.target.closest('.drop-target');
+            if (target && target !== draggedEl) {
+                let rect = target.getBoundingClientRect();
+                
+                let isNewline = (target.dataset.cfgVal === 'newline' || target.dataset.cfgVal === '\\n');
+                if (isNewline) {
+                    if (e.clientY > rect.top + (rect.height / 2)) target.after(draggedEl);
+                    else target.before(draggedEl);
+                } else {
+                    if (e.clientX > rect.left + (rect.width / 2)) target.after(draggedEl);
+                    else target.before(draggedEl);
+                }
+            }
+        });
+
+        container.addEventListener('drop', (e) => {
+            e.preventDefault();
+            if (!draggedEl) return;
+
+            let target = e.target.closest('.drop-target');
+            
+            if (!target || target === container) {
+                const rect = container.getBoundingClientRect();
+                const dropX = Math.max(0, e.clientX - rect.left + container.scrollLeft);
+                const dropY = Math.max(0, e.clientY - rect.top + container.scrollTop);
+
+                const cellW = 90;  
+                const cellH = 110; 
+
+                let dropCol = Math.floor(dropX / cellW);
+                let dropRow = Math.floor(dropY / cellH);
+
+                let children = Array.from(container.children).filter(c => c.dataset.cfgVal && c !== draggedEl);
+                
+                let lastRow = 0;
+                let lastCol = -1;
+
+                if (children.length > 0) {
+                    let lastChild = children[children.length - 1];
+                    let lastRect = lastChild.getBoundingClientRect();
+                    let lx = lastRect.right - rect.left + container.scrollLeft;
+                    let ly = lastRect.bottom - rect.top + container.scrollTop;
+                    
+                    lastRow = Math.floor((ly - 1) / cellH);
+                    lastCol = Math.floor((lx - 1) / cellW);
+                    
+                    if (lastChild.dataset.cfgVal === 'newline' || lastChild.dataset.cfgVal === '\\n') {
+                        lastCol = -1;
+                    }
+                }
+
+                if (dropRow > lastRow || (dropRow === lastRow && dropCol > lastCol)) {
+                    container.appendChild(draggedEl);
+                    
+                    let newLinesNeeded = Math.min(dropRow - lastRow, 50); 
+                    for (let i = 0; i < newLinesNeeded; i++) {
+                        container.insertBefore(createLayoutNode('newline'), draggedEl);
+                    }
+                    
+                    let startCol = (newLinesNeeded > 0) ? -1 : lastCol;
+                    let spacesNeeded = Math.min(dropCol - (startCol + 1), 50);
+                    
+                    for (let i = 0; i < spacesNeeded; i++) {
+                        container.insertBefore(createLayoutNode('space'), draggedEl);
+                    }
+                } 
+                else {
+                    let insertBeforeNode = null;
+                    for (let child of children) {
+                        let r = child.getBoundingClientRect();
+                        let cx = r.left - rect.left + container.scrollLeft;
+                        let cy = r.top - rect.top + container.scrollTop;
+                        let cCol = Math.floor(cx / cellW);
+                        let cRow = Math.floor(cy / cellH);
+                        
+                        if (cRow > dropRow || (cRow === dropRow && cCol > dropCol)) {
+                            insertBeforeNode = child;
+                            break;
+                        }
+                    }
+
+                    if (insertBeforeNode) {
+                        container.insertBefore(draggedEl, insertBeforeNode);
+                        
+                        let prev = draggedEl.previousElementSibling;
+                        let prevCol = -1;
+                        if (prev && prev.dataset.cfgVal && prev.dataset.cfgVal !== 'newline') {
+                            let pr = prev.getBoundingClientRect();
+                            let px = pr.right - rect.left + container.scrollLeft;
+                            prevCol = Math.floor((px - 1) / cellW);
+                        }
+                        
+                        let spacesNeeded = Math.min(dropCol - (prevCol + 1), 50);
+                        for (let i = 0; i < spacesNeeded; i++) {
+                            container.insertBefore(createLayoutNode('space'), draggedEl);
+                        }
+                    }
+                }
+            }
+        });
+
+        loadDesktopConfig('cylon-desktop.cfg');
+    }
+
+    window.addEventListener('message', (e) => {
+        if (e.data.type === 'QANDY_PAGE_ACTIVATED') {
+            loadDesktopConfig(currentDesktop);
+        }
+    });
+
+    window.onload = initDesktop;
+</script>
+</body>
+</html>
