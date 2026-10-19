@@ -454,6 +454,13 @@ function keyboard() {
     // Expose for external copy/paste events from host OS
     window.pasteText = function(text) {
         if (hasSelection()) deleteSelection();
+        
+        if (window.proxyInputMaxLen !== null && typeof window.proxyInputMaxLen !== 'undefined') {
+            let available = window.proxyInputMaxLen - inputBuffer.length;
+            if (available <= 0) return;
+            text = text.slice(0, available);
+        }
+
         inputBuffer = inputBuffer.slice(0, cursorPos) + text + inputBuffer.slice(cursorPos);
         cursorPos += text.length;
         renderInputLine();
@@ -475,12 +482,14 @@ function keyboard() {
         var shiftHeld = (typeof e.shift !== 'undefined') ? e.shift : !!window.shift;
 
         if (e.id === 'back') {
+            if (osMode === 'app') { window.sendVirtualKey('Backspace'); return; }
             if (hasSelection()) { deleteSelection(); }
             else if (cursorPos > 0) {
                 inputBuffer = inputBuffer.slice(0, cursorPos - 1) + inputBuffer.slice(cursorPos);
                 cursorPos--;
             }
         } else if (e.id === 'del') {
+            if (osMode === 'app') { window.sendVirtualKey('Delete'); return; }
             if (hasSelection()) {
                 if (shiftHeld) { var r = selRange(); clipboard = inputBuffer.slice(r[0], r[1]); }
                 deleteSelection();
@@ -488,6 +497,7 @@ function keyboard() {
                 inputBuffer = inputBuffer.slice(0, cursorPos) + inputBuffer.slice(cursorPos + 1);
             }
         } else if (e.id === 'ins') {
+            if (osMode === 'app') { window.sendVirtualKey('Insert'); return; }
             if (shiftHeld) {
                 if (hasSelection()) deleteSelection();
                 if (clipboard) {
@@ -496,22 +506,34 @@ function keyboard() {
                 }
             } else { insertMode = !insertMode; }
         } else if (e.id === 'left') {
+            if (osMode === 'app') { window.sendVirtualKey('ArrowLeft'); return; }
             if (shiftHeld) { if (selAnchor === null) selAnchor = cursorPos; cursorPos = clampCursor(cursorPos - 1); }
             else { cursorPos = hasSelection() ? selRange()[0] : clampCursor(cursorPos - 1); selAnchor = null; }
         } else if (e.id === 'right') {
+            if (osMode === 'app') { window.sendVirtualKey('ArrowRight'); return; }
             if (shiftHeld) { if (selAnchor === null) selAnchor = cursorPos; cursorPos = clampCursor(cursorPos + 1); }
             else { cursorPos = hasSelection() ? selRange()[1] : clampCursor(cursorPos + 1); selAnchor = null; }
         } else if (e.id === 'home') {
+            if (osMode === 'app') { window.sendVirtualKey('Home'); return; }
             if (shiftHeld) { if (selAnchor === null) selAnchor = cursorPos; } else { selAnchor = null; }
             cursorPos = 0;
         } else if (e.id === 'end') {
+            if (osMode === 'app') { window.sendVirtualKey('End'); return; }
             if (shiftHeld) { if (selAnchor === null) selAnchor = cursorPos; } else { selAnchor = null; }
             cursorPos = inputBuffer.length;
-
-
+        } else if (e.id === 'up') {
+            if (osMode === 'app') { window.sendVirtualKey('ArrowUp'); return; }
+            navigateHistory(-1);
+            cursorPos = inputBuffer.length;
+            selAnchor = null;
+        } else if (e.id === 'down') {
+            if (osMode === 'app') { window.sendVirtualKey('ArrowDown'); return; }
+            navigateHistory(1);
+            cursorPos = inputBuffer.length;
+            selAnchor = null;
         } else if (e.id === 'enter') {
+            if (osMode === 'app') { window.sendVirtualKey('Enter'); return; }
             if (osMode === 'app-edit') {
-                // Submit single-line fields seamlessly
                 var activeFrame = document.querySelector('.page-frame.active');
                 if (activeFrame) {
                     activeFrame.contentWindow.postMessage({
@@ -520,21 +542,14 @@ function keyboard() {
                         value: inputBuffer
                     }, '*');
                 }
-                osMode = 'app';
-                inputBuffer = "";
-                cursorPos = 0;
-                var title = activeFrame ? activeFrame.dataset.title : 'App';
-                document.getElementById('kb-prompt').textContent = `[ ${title} ]`;
+                window.setOSMode('app');
                 window.hideFullKeyboard();
-                renderInputLine();
             } else if (osMode === 'app-textarea') {
-                // Insert a native line break in multi-line fields
                 if (hasSelection()) deleteSelection();
                 if (insertMode) { inputBuffer = inputBuffer.slice(0, cursorPos) + '\n' + inputBuffer.slice(cursorPos); }
                 else { inputBuffer = inputBuffer.slice(0, cursorPos) + '\n' + inputBuffer.slice(cursorPos + 1); }
                 cursorPos++;
                 
-                // Keep visually updating the app underneath as you type new lines
                 var activeFrame = document.querySelector('.page-frame.active');
                 if (activeFrame) {
                     activeFrame.contentWindow.postMessage({
@@ -543,9 +558,7 @@ function keyboard() {
                         value: inputBuffer
                     }, '*');
                 }
-                renderInputLine();
             } else {
-                // Normal Terminal Enter behavior
                 command(inputBuffer);
                 inputBuffer = "";
                 cursorPos = 0;
@@ -553,23 +566,16 @@ function keyboard() {
                 if (window.updatePrompt) window.updatePrompt();
                 hideFullKeyboard();
             }
-            
-            
-                        
-            
-            
-        } else if (e.id === 'up') {
-            navigateHistory(-1);
-            cursorPos = inputBuffer.length;
-            selAnchor = null;
-        } else if (e.id === 'down') {
-            navigateHistory(1);
-            cursorPos = inputBuffer.length;
-            selAnchor = null;
         } else if (e.id === 'esc') {
+            if (osMode === 'app') { window.sendVirtualKey('Escape'); return; }
             hideFullKeyboard();
         } else if (e.char) {
+            if (osMode === 'app') { window.sendVirtualKey(e.char); return; }
             if (hasSelection()) deleteSelection();
+            
+            let willAddLength = insertMode || cursorPos === inputBuffer.length;
+            if (window.proxyInputMaxLen !== null && typeof window.proxyInputMaxLen !== 'undefined' && willAddLength && inputBuffer.length >= window.proxyInputMaxLen) return;
+
             if (insertMode) { inputBuffer = inputBuffer.slice(0, cursorPos) + e.char + inputBuffer.slice(cursorPos); }
             else { inputBuffer = inputBuffer.slice(0, cursorPos) + e.char + inputBuffer.slice(cursorPos + 1); }
             cursorPos++;

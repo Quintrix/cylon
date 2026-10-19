@@ -41,7 +41,7 @@ var MAX_FILE_BYTES = 64 * 1024;             // 64 KB per file
 var MAX_DRIVE_FILES = 20000;
 var SESSION_COOKIE = 'q';
 var TYPE_MAX_BYTES = 65536; // 64 KB display limit
-var VALID_NAME_RE = /^(?!\.)[A-Za-z0-9 \-_.()+=!]+$/;
+var VALID_NAME_RE = /^(?!\.)(?!.*[\\/])[A-Za-z0-9 \-_.()+=!%,:;\[\]\^_{}@]+$/;
 
 // ── Request logging ───────────────────────────────────────────────────────────
 

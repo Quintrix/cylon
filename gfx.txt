@@ -241,9 +241,11 @@
                   variables are global.
           
                    W0 — first spawn map sector, the 'lobby'
-                   W1 — first byte of next unique player id
-                   W2 — second byte of the next unique player id
-                   W3-W9 — reserved for future use
+                   W1 — first spawn z-location
+                   W2 — first byte of next unique player id
+                   W3 — second byte of the next unique player id
+                   W4 — lower bounds of map 
+                   W5-W9 — reserved for future use
      
           Wa-Wz — local, can be used by game developers for points, levels, quest flags, etc.
           

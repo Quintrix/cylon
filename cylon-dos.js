@@ -16,6 +16,7 @@
  *
  * Public API
  *   Mount table:  mount(source, name, opts)  umount(name)  mounts()
+ *                 opts.type = 'idb' | 'ls' | 'ram' | 'rom' (or a "type:" prefix on source)
  *                 setDrive(name)  pwd()  mountedDrive  cwd
  *   Partitions:   disks()  partitions()  getPartition(ref)
  *                 createPartition(name, bytes)  resizePartition(ref, bytes)
@@ -51,9 +52,10 @@
   var MAX_QUOTA = 2 * 1024 * 1024 * 1024 * 1024 ;
   var RAM_DEFAULT_QUOTA = 32 * 1024 * 1024;
   var MAX_ROM_BYTES = 64 * 1024 * 1024;
-  var NAME_RE = /^(?!\.)(?!.*[\\/])[A-Za-z0-9 \-_.()+=!]+$/;
-  var DRIVE_RE = /^[A-Za-z0-9]{1,8}$/;
+  var NAME_RE = /^(?!\.)(?!.*[\\/])[A-Za-z0-9 \-_.()+=!%,:;\[\]\^_{}@]+$/;
+  var DRIVE_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}$/;
   var DEVICE_RE = /^idb(\d+)p(\d+)$/i;
+  
   var REF_RE = /^([A-Za-z0-9][A-Za-z0-9_.-]{0,63}):([\s\S]*)$/;
   var RESERVED_NAMES = ['none'];
 
@@ -647,6 +649,23 @@
     return m.name;
   }
 
+  var MOUNT_TYPES = {
+    idb: 'idb', indexdb: 'idb', indexeddb: 'idb',
+    ls: 'ls', localstorage: 'ls',
+    ram: 'ram', rom: 'rom', host: 'host'
+  };
+
+  function mountType(text) {
+    return MOUNT_TYPES[String(text == null ? '' : text).trim().toLowerCase()] || null;
+  }
+
+  // Default drive name for a file/URL source: its file name, exactly as given.
+  function sourceName(spec) {
+    spec = String(spec || '').trim();
+    if (!spec || spec.charAt(0) === '{') return '';
+    return baseName(spec.split(/[?#]/)[0]);
+  }
+
   async function mount(source, name, options) {
     if (name && typeof name === 'object') { options = name; name = null; }
     options = options || {};
@@ -655,11 +674,19 @@
     if (!source) fail('mount source required');
     await migrate();
 
-    var kind, rest;
+    // The caller states the device type: either options.type ('idb', 'ls',
+    // 'ram', 'rom') or an explicit "type:" prefix on the source. The source's
+    // spelling (.json, http://) is never used to guess what it is.
+    var kind = null, rest = source;
     var scheme = /^(idb|rom|ram|ls|host):([\s\S]*)$/i.exec(source);
     if (scheme) { kind = scheme[1].toLowerCase(); rest = scheme[2].trim(); }
-    else if (/^https?:\/\//i.test(source) || /\.json$/i.test(source)) { kind = 'rom'; rest = source; }
-    else { kind = 'idb'; rest = source; }
+    if (options.type != null && String(options.type).trim() !== '') {
+      var wanted = mountType(options.type);
+      if (!wanted) fail('unknown mount type: ' + options.type + ' (use idb, ls, ram or rom)');
+      if (kind && kind !== wanted) fail('source says "' + kind + ':" but the mount type is "' + wanted + '"');
+      kind = wanted;
+    }
+    if (!kind) fail('mount type required: idb, ls, ram or rom (' + source + ')');
 
     var m;
     if (kind === 'idb') {
@@ -667,7 +694,7 @@
       if (!rec) fail('no such partition: ' + rest + ' (see: fdisk -l)');
       var already = mountedAs(rec.name);
       if (already.length) fail('partition ' + rec.name + ' is already mounted as ' + already[0]);
-      m = { name: name || rec.name, type: 'idb', source: DISK + 'p' + rec.index, partition: rec.name,
+      m = { name: name || rec.name, type: 'idb', source: 'idb:' + rec.name, partition: rec.name,
             readOnly: !!options.readOnly, backend: idbBackend(rec.name) };
     } else if (kind === 'rom') {
       var archive = decodeArchive(await loadArchiveText(rest, options));
@@ -676,8 +703,8 @@
       if (total > MAX_ROM_BYTES) fail('rom image too large (' + formatSize(total) + ')');
       var store = memStore();
       entries.forEach(function (e) { store.set(e.path, e); });
-      var derived = archive.drive && DRIVE_RE.test(String(archive.drive)) ? String(archive.drive)
-        : baseName(String(rest).split('?')[0]).replace(/\.json$/i, '');
+      var derived = sourceName(rest) ||
+        (archive.drive && DRIVE_RE.test(String(archive.drive)) ? String(archive.drive) : '');
       if (!name && !DRIVE_RE.test(derived)) fail('cannot derive a drive name; specify one');
       m = { name: name || derived, type: 'rom', source: rest.charAt(0) === '{' ? '(inline)' : rest,
             readOnly: true, backend: kvBackend('rom', store, { readOnly: true }) };
@@ -696,7 +723,7 @@
         entries.forEach(function (e) { store.set(e.path, e); });
       }
       
-      m = { name: name || 'ram', type: 'ram', source: rest ? 'ram:' + rest : 'ram:', readOnly: !!options.readOnly,
+      m = { name: name || sourceName(rest) || 'ram', type: 'ram', source: rest ? 'ram:' + rest : 'ram:', readOnly: !!options.readOnly,
             backend: kvBackend('ram', store, { quota: quota }) };
     } else if (kind === 'ls') {
       if (!global.localStorage) fail('localStorage is not available');

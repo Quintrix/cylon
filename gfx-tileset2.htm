@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Qandy Open Source Tileset</title>
+    
+    <style>
+        :root {
+            --bg-color: #0d0d12;
+            --text-color: #e0e0e0;
+            --link-color: #6699ff;
+            --link-hover: #9F9FA9;
+            --border-color: #1a233a;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        header {
+            width: 100%;
+            text-align: center;
+            padding: 20px 0 10px 0;
+            border-bottom: 1px solid var(--border-color);
+            background-color: #050508;
+        }
+
+        h1 {
+            margin: 0 0 15px 0;
+            font-size: 24px;
+            font-weight: 400;
+        }
+
+        nav {
+            display: flex;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 20px;
+            margin-bottom: 10px;
+        }
+
+        nav a {
+            color: var(--link-color);
+            text-decoration: none;
+            font-weight: bold;
+            transition: color 0.2s;
+            cursor: pointer;
+        }
+
+        nav a:hover, nav a.active {
+            color: var(--link-hover);
+        }
+
+        #content {
+            width: 100%;
+            max-width: 1240px;
+            padding: 30px 20px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        /* Tile Grids */
+        .tile-row {
+            display: flex;
+            justify-content: center;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin-bottom: 20px;
+            padding: 15px;
+            background-color: #12121a;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            width: 100%;
+        }
+
+        .tile-cell {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            width: 60px;
+            font-family: monospace;
+            font-size: 14px;
+            color: #aaa;
+        }
+
+        .tile-cell img {
+            margin-bottom: 8px;
+            border-radius: 4px;
+        }
+
+        /* Map Canvas */
+        #mapContainer {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-top: 20px;
+        }
+
+        canvas {
+            border: 2px solid var(--border-color);
+            border-radius: 4px;
+            background-color: #000;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+        }
+
+        .loading {
+            color: #aaa;
+            font-style: italic;
+            margin: 20px 0;
+        }
+
+        .back-btn {
+            margin-top: 20px;
+            padding: 8px 16px;
+            background-color: #1a233a;
+            color: var(--link-color);
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            text-decoration: none;
+        }
+        
+        .back-btn:hover {
+            background-color: #2a3556;
+        }
+    </style>
+
+    <!-- Pre-initialize globals for world.js -->
+    <script>
+        var mapx = 7; 
+        var mapy = 11; 
+        var maps = []; 
+        var sign = [];
+    </script>
+
+    <!-- Load external dependencies -->
+    <script src="world.js"></script>
+    <script src="qandy-gfx.js"></script>
+</head>
+<body>
+
+    <header>
+        <h1>Open Source Tileset</h1>
+        <nav id="mainNav">
+            <a onclick="loadView('T', 'A', 'Z')">Tile Set</a>
+            <a onclick="loadView('I', 'A', 'Z')">Item Codes</a>
+            <a onclick="loadView('CT', 'A', 'Z')">Cylon Tiles</a>
+            <a onclick="loadView('CI', 'A', 'Z')">Cylon Items</a>
+            <a onclick="loadView('P', 'V', 'X')">Punch Codes</a>
+            <a onclick="loadView('C', 'A', 'Z')">Characters</a>
+            <a onclick="drawMap()">World Map</a>
+        </nav>
+    </header>
+
+    <main id="content">
+        <!-- Content gets injected here by JavaScript -->
+    </main>
+
+    <script>
+        // Fallback Base64 Image
+        const fallbackImg = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABsAAAAaCAYAAABGiCfwAAAACXBIWXMAAAsSAAALEgHS3X78AAAAKElEQVRIie3NMQEAAAgDILV/51nBywsK0Enqy7xNMplMJpPJZDLZ0QI7tAMxEF7bywAAAABJRU5ErkJggg==';
+
+        function handleImgError(img) {
+            img.onerror = null; // Prevent infinite fallback loops
+            img.src = fallbackImg;
+        }
+
+        // Initialize App based on URL query params (if any)
+        document.addEventListener("DOMContentLoaded", () => {
+            const urlParams = new URLSearchParams(window.location.search);
+            
+            // Check for dynamic ID script inclusion
+            if (urlParams.get('id') === 'yes') {
+                const script = document.createElement('script');
+                script.src = "client-itemid.js";
+                document.head.appendChild(script);
+            }
+
+            // Read initial state from URL or fallback to defaults
+            const initType = urlParams.get('T') || 'T';
+            const initS = urlParams.get('S') || 'A';
+            const initE = urlParams.get('E') || 'Z';
+
+            loadView(initType, initS, initE);
+        });
+
+        // Main Router/Render function for Tiles & Items
+        function loadView(type, startChar, endChar) {
+            const content = document.getElementById('content');
+            let html = '';
+            
+            const LS = startChar.charCodeAt(0);
+            const LE = endChar.charCodeAt(0);
+            const isItemIDLoaded = typeof ItemID === 'function';
+
+            // Standard Tile/Item logic
+            if (['T', 'CT', 'I', 'CI'].includes(type)) {
+                const dir = type.includes('T') ? 't' : 'i';
+                const jStart = type.includes('C') ? 113 : 97; // 'q' vs 'a'
+                const jEnd = type.includes('C') ? 123 : 113;  // '{' vs 'q'
+
+                for (let i = LS; i <= LE; i++) {
+                    html += `<div class="tile-row">`;
+                    for (let j = jStart; j < jEnd; j++) {
+                        const charCode = String.fromCharCode(i, j);
+                        html += `
+                            <div class="tile-cell">
+                                <img src="${dir}/${charCode}.png" onerror="handleImgError(this)" width="32" height="32" alt="${charCode}">
+                                <span>${charCode}</span>
+                            </div>`;
+                    }
+                    html += `</div>`;
+                }
+            } 
+            
+            // Punch Codes logic
+            else if (type === 'P') {
+                for (let i = LS; i <= LE; i++) {
+                    html += `<div class="tile-row">`;
+                    
+                    // Row 1
+                    for (let j = 97; j < 115; j++) {
+                        const charCode = String.fromCharCode(i, j);
+                        html += `
+                            <div class="tile-cell">
+                                <img src="i/${charCode}.png" onerror="handleImgError(this)" width="32" height="32" alt="${charCode}">
+                                <span>${charCode}</span>
+                            </div>`;
+                    }
+                    
+                    html += `</div><div class="tile-row">`;
+                    
+                    // Row 2
+                    for (let j = 115; j < 133; j++) {
+                        const n = (j < 123) ? j : (j - 75);
+                        const charCode = String.fromCharCode(i, n);
+                        html += `
+                            <div class="tile-cell">
+                                <img src="i/${charCode}.png" onerror="handleImgError(this)" width="32" height="32" alt="${charCode}">
+                                <span>${charCode}</span>
+                            </div>`;
+                    }
+                    html += `</div><br><br>`;
+                }
+            } 
+            
+            // Character logic
+            else if (type === 'C') {
+                for (let i = LS; i <= LE; i++) {
+                    html += `<div class="tile-row">`;
+                    for (let j = 48; j < 58; j++) {
+                        const charCode = String.fromCharCode(i, j);
+                        const itemIdTxt = isItemIDLoaded ? `<br>${ItemID(charCode)}` : '';
+                        html += `
+                            <div class="tile-cell" style="width:80px;">
+                                <img src="c/${charCode}.png" onerror="handleImgError(this)" width="32" height="64" alt="${charCode}">
+                                <span>${charCode}${itemIdTxt}</span>
+                            </div>`;
+                    }
+                    html += `</div>`;
+                }
+            }
+
+            content.innerHTML = html;
+        }
+
+        // Map Drawer Application
+        function drawMap() {
+            const content = document.getElementById('content');
+            content.innerHTML = `<div class="loading">Loading world map...</div><div id="mapContainer"></div>`;
+            
+            const canvas = document.createElement('canvas');
+            const totalWidth = 26 * mapx * 4;
+            const totalHeight = 10 * mapy * 4;
+            canvas.width = totalWidth;
+            canvas.height = totalHeight;
+            const ctx = canvas.getContext('2d', { alpha: false }); // Optimization
+            
+            const imageCache = {};
+            const imagesToLoad = [];
+            let imagesLoaded = 0;
+            const uniqueTiles = new Set();
+            
+            // 1. Gather Unique Tiles
+            for (let y1 = 65; y1 < 75; y1++) {
+                for (let x1 = 97; x1 < 123; x1++) {
+                    const PMap = String.fromCharCode(y1, x1);
+                    if (!maps[PMap]) { 
+                        maps[PMap] = "Ua".repeat(mapx * mapy) + ".."; 
+                    }
+                    
+                    for (let y2 = 0; y2 < mapy; y2++) {
+                        for (let x2 = 0; x2 < mapx; x2++) {
+                            const index = ((y2 * (mapx + 1)) + x2) * 2;
+                            const tileCode = maps[PMap].substring(index, index + 2);
+                            
+                            if (tileCode && tileCode !== '..' && !uniqueTiles.has(tileCode)) {
+                                uniqueTiles.add(tileCode);
+                                imagesToLoad.push(tileCode);
+                            }
+                        }
+                    }
+                }
+            }
+            
+            const loadingText = content.querySelector('.loading');
+            loadingText.innerHTML = `Loading world map (${imagesToLoad.length} unique tiles)...`;
+            
+            const totalImages = imagesToLoad.length;
+            if (totalImages === 0) {
+                renderCanvas();
+                return;
+            }
+            
+            // 2. Preload Images
+            imagesToLoad.forEach(tileCode => {
+                const img = new Image();
+                img.onload = img.onerror = () => {
+                    imagesLoaded++;
+                    if (imagesLoaded === totalImages) {
+                        renderCanvas();
+                    }
+                };
+                img.src = `m/${tileCode}.png`;
+                imageCache[tileCode] = img;
+            });
+            
+            // 3. Draw on Canvas
+            function renderCanvas() {
+                for (let y1 = 65; y1 < 75; y1++) {
+                    for (let x1 = 97; x1 < 123; x1++) {
+                        const PMap = String.fromCharCode(y1, x1);
+                        const sectionX = (x1 - 97) * mapx * 4;
+                        const sectionY = (y1 - 65) * mapy * 4;
+                        
+                        for (let y2 = 0; y2 < mapy; y2++) {
+                            for (let x2 = 0; x2 < mapx; x2++) {
+                                const index = ((y2 * (mapx + 1)) + x2) * 2;
+                                const tileCode = maps[PMap].substring(index, index + 2);
+                                
+                                if (tileCode && tileCode !== '..' && imageCache[tileCode]?.complete) {
+                                    const pixelX = sectionX + (x2 * 4);
+                                    const pixelY = sectionY + (y2 * 4);
+                                    ctx.drawImage(imageCache[tileCode], pixelX, pixelY, 4, 4);
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                const container = document.getElementById('mapContainer');
+                loadingText.style.display = 'none';
+                container.appendChild(canvas);
+                
+                // Pure DOM back button (No page refresh!)
+                const backBtn = document.createElement('button');
+                backBtn.className = 'back-btn';
+                backBtn.innerText = 'Back to Tileset';
+                backBtn.onclick = () => loadView('T', 'A', 'Z');
+                container.appendChild(backBtn);
+            }
+        }
+    </script>
+</body>
+</html>

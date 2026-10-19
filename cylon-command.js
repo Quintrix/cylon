@@ -12,7 +12,8 @@
     r: 'readOnly', ro: 'readOnly', readonly: 'readOnly',
     s: 'size', size: 'size',
     y: 'yes', yes: 'yes', f: 'yes', force: 'yes',
-    l: 'list', k: 'keep', keep: 'keep'
+    l: 'list', k: 'keep', keep: 'keep',
+    u: 'uninstall', uninstall: 'uninstall'
   };
   var VALUE_FLAGS = { size: true };
   var DRIVE_TOKEN_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,63}:$/;
@@ -29,7 +30,6 @@
     return tokens;
   }
 
-  // Separates -x / --flag tokens from positional arguments.
   function splitFlags(args) {
     var flags = {};
     var rest = [];
@@ -49,7 +49,7 @@
   }
 
   function errorText(error) {
-    return 'Error: ' + (error && error.message ? error.message : String(error));
+    return 'Error: [.4]' + (error && error.message ? error.message : String(error)+'[.4]');
   }
 
   function usage(text) {
@@ -88,28 +88,36 @@
     '  mkdir <path>                   Create a directory',
     '  rmdir <path>                   Remove an empty directory',
     '  save <file> <text>             Save text to a file',
-    '  load <file>                    Display a file',
+    '  load <file>                    Smart launch/execute a file based on extension',
+    '  type <file>                    Dump raw text of a file to terminal',
     '  copy <src> <dst>               Copy a file or directory (across drives too)',
     '  rename <old> <new>             Rename or move within a drive',
     '  delete <file>                  Delete a file',
     '  exists <path>                  Test whether a path exists',
-    '  export [filename]              Export the current drive as JSON',
-    '  import <json|url>              Import a JSON archive into the current drive',
-    '  install [-y]                   Preview or execute installation of the factory image',
-    '  update <file|*> [-y]           Preview or fetch newer PAGES files from the server',
+    '  export [drive] [filename]      Export a drive as JSON',
+    '  import <file> [type] [drive]   Import JSON (creates/mounts drive if type given)',
+    '  install [desktop file] [-y]    Install Cylon OS with selected desktop',
+    '  uninstall [-y]                 Delete Cylon DOS from indexDB',
+    '  update <file|*> [-y]           Update file on indexDB with newer version',
     '  echo [text]                    Print text to the console',
     '  cls                            Clear the terminal screen',
+    '  reboot [-y]                    Reboot Cylon DOS', 
     '  help [command]                 Show help (e.g. "help mount" or "help fdisk")\n'
   ].join('\n');
 
   var HELP_MOUNT = [
     'Mount Command Help:\n',
-    '  mount                          Show the mount table',
-    '  mount <source> [name] [-r]     Mount a device. Sources:',
-    '                                   main, idb0p1     an IndexedDB partition',
-    '                                   rom:<url|.json>  a read-only JSON image (LiveCD)',
-    '                                   ram:[url|.json]  volatile RAM drive  (-s <size>)',
-    '                                   ls:<name>        localStorage drive  (-s <size>)\n'
+    '  mount                               Show the mount table',
+    '  mount <file> <where> [name] [-r]    Mount a drive. <where> says what kind:',
+    '                                        idb  IndexedDB partition named <file>',
+    '                                        ls   localStorage drive named <file>   (-s <size>)',
+    '                                        ram  RAM drive loaded from <file|url>  (-s <size>)',
+    '                                        rom  read-only image from <file|url>',
+    '  mount ram:                          Blank RAM drive named "ram"\n',
+    '  The drive is named after <file> unless you give a [name]. Examples:',
+    '    mount cylon.json idb',
+    '    mount cylon.json ram',
+    '    mount https://example.com/live.json rom live\n'
   ].join('\n');
 
   var HELP_FDISK = [
@@ -135,8 +143,6 @@
         out.push('(no partitions - create one with: fdisk new <name> [size])');
         return;
       }
-      var rows = [['Device', 'Label', 'Size', 'Used', 'Entries', 'Boot', 'Mounted']];
-      
       var rows = [['Type', 'Partition', 'Size', 'Used', 'Entries', 'Boot', 'Mounted']];
       disk.partitions.forEach(function (p) {
         rows.push(['indexDB', p.name, dos.formatSize(p.quota), dos.formatSize(p.used), p.count, p.boot ? '*' : '', ownedBy(p)]);
@@ -199,16 +205,11 @@
     }
   }
 
-  /* ------------------------------------------------------------------ */
-  /* update: sync PAGES files against the server                        */
-  /* ------------------------------------------------------------------ */
-
   function wildcardToRegExp(pattern) {
     var esc = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
     return new RegExp('^' + esc + '$');
   }
 
-  // Resolves a bare filename or wildcard (e.g. '*', 'gfx*') against PAGES.
   function matchPages(pattern) {
     if (typeof PAGES === 'undefined') throw new Error('PAGES is not defined (cylon.htm did not load)');
     var names = [];
@@ -225,7 +226,6 @@
     return isNaN(d.getTime()) ? null : d;
   }
 
-  // Local file timestamps are stored as YYYYMMDDHHMMSS (see cylon-dos.js timestamp()).
   function parseLocalStamp(stamp) {
     var m = /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})$/.exec(String(stamp || ''));
     if (!m) return null;
@@ -239,8 +239,6 @@
       p(d.getHours()) + ':' + p(d.getMinutes());
   }
 
-  // Checks one PAGES file against the server: does it exist locally, and is
-  // the server's copy newer than the local save timestamp?
   async function checkPageUpdate(file, localEntry) {
     var localDate = localEntry ? parseLocalStamp(localEntry.timestamp) : null;
     var row = { file: file, localDate: localDate, remoteDate: null, needsUpdate: false, reason: '', error: null };
@@ -314,7 +312,6 @@
       return out.join('\n');
     }
 
-    // -y: apply updates
     var results = [['File', 'Result']];
     for (var j = 0; j < rows.length; j++) {
       var r = rows[j];
@@ -332,6 +329,12 @@
     }
     return table(results);
   }
+
+  var MOUNT_WHERE = {
+    idb: 'idb', indexdb: 'idb', indexeddb: 'idb',
+    ls: 'ls', localstorage: 'ls',
+    ram: 'ram', rom: 'rom'
+  };
 
   async function mountCommand(dos, args, flags) {
     if (!args.length) {
@@ -355,13 +358,27 @@
     }
     var options = { readOnly: !!flags.readOnly };
     if (flags.size) options.quota = dos.parseSize(flags.size);
-    var name = await dos.mount(args[0], args[1], options);
+
+    var source = args[0];
+    var where = args[1] ? MOUNT_WHERE[String(args[1]).toLowerCase()] : null;
+    var driveName;
+    if (where) {
+      options.type = where;
+      driveName = args[2];
+    } else if (/^(idb|rom|ram|ls|host):/i.test(source)) {
+      driveName = args[1];            
+    } else if (args[1]) {
+      throw new Error('unknown mount location: ' + args[1] + ' (use idb, ls, ram or rom)');
+    } else {
+      return usage('mount <file> <idb|ls|ram|rom> [name] [-r] [-s size]');
+    }
+    var name = await dos.mount(source, driveName, options);
     var rows2 = await dos.mounts();
     var info = rows2.filter(function (r) { return r.name === name; })[0];
     return 'Mounted ' + name + ':/ (' + info.type + ', ' + (info.readOnly ? 'read-only' : 'read-write') + ')';
   }
 
-  async function handleCylonCommand(line) {
+async function handleCylonCommand(line) {
     if (!global.CylonDOS) return { handled: false };
 
     line = String(line || '');
@@ -371,10 +388,21 @@
     var dos = global.CylonDOS;
     var result;
 
+    if (command === 'iferror') {
+        if (global.CylonLastError) {
+            global.CylonLastError = ''; 
+            var restOfLine = line.substring(line.toLowerCase().indexOf('iferror') + 7).trim();
+            return await handleCylonCommand(restOfLine);
+        } else {
+            return { handled: true, output: '' };
+        }
+    }
+
+    global.CylonLastError = '';
+
     if (!command) return { handled: true, output: '' };
 
     try {
-      // "live:" on its own switches the current drive, like DOS.
       if (DRIVE_TOKEN_RE.test(rawCommand) && !tokens.length) {
         dos.setDrive(rawCommand);
         return { handled: true, output: dos.pwd() };
@@ -393,14 +421,6 @@
 
         case 'mount':
           return { handled: true, output: await mountCommand(dos, args, flags) };
-
-        case 'mountrom': // legacy: mountrom <drive> [url]
-          if (!args[0]) return { handled: true, output: usage('mountrom <drive> [url]') };
-          var romOptions = { readOnly: true };
-          var romRaw = line.replace(/^\s*\S+\s+\S+\s*/, '');
-          if (/^\{/.test(romRaw)) romOptions.data = romRaw;
-          await dos.mount('rom:' + (args[1] || args[0] + '.json'), args[0], romOptions);
-          return { handled: true, output: 'ROM Mounted: ' + args[0] + ':/ (Read-Only)' };
 
         case 'umount':
         case 'unmount':
@@ -428,53 +448,149 @@
           return { handled: true, output: 'Formatted ' + target.device + ' "' + target.name + '" (' + result.erased +
             ' entries erased). Mount it with: mount ' + target.name };
 
+        case 'uninstall':
+          flags.uninstall = true; 
+
         case 'install':
-          var parts = await dos.partitions();
-          var cylonPart = parts.filter(function(p) { return p.name === 'cylon'; })[0];
-          var imageName = 'cylon.json';
-          var action = cylonPart ? 'Format existing partition "cylon" and reinstall the factory image.'
-            : 'Create a new partition named "cylon" and install the factory image.';
+              var parts = await dos.partitions();
+              var cylonPart = parts.filter(function(p) { return p.name === 'cylon' || p.name === 'cylon.json'; })[0];
+              var dtPart = parts.filter(function(p) { return p.name === 'desktop' || p.name === 'cylon-desktop.gfx'; })[0];
 
-          if (!flags.yes) {
-            return { handled: true, output: [
-              'Install plan:',
-              '  Source:      ' + imageName,
-              '  Target:      cylon (IndexedDB partition)',
-              '  Files:       All system files (full archive)',
-              '  Boot drive:  yes',
-              '  Action:      ' + action,
-              '',
-              'No changes have been made.',
-              'To continue, run: install -y'
-            ].join('\n') };
-          }
+              if (flags.uninstall) {
+                if (!cylonPart && !dtPart) {
+                  return { handled: true, output: 'System is not installed.' };
+                }
 
-          if (cylonPart) {
-            try { await dos.umount('cylon'); } catch (e) {}
-            await dos.formatPartition('cylon');
-          } else {
-            await dos.createPartition('cylon', dos.constants.DEFAULT_QUOTA);
-          }
+                var uncmds = [];
+                var mnts = await dos.mounts();
+        
+                if (!mnts.some(function(m) { return m.name === 'ram'; })) uncmds.push('mount ram:');
+                uncmds.push('ram:');
+        
+                if (cylonPart) {
+                    if (mnts.some(function(m) { return m.name === 'cylon'; })) uncmds.push('umount cylon');
+                    uncmds.push('fdisk delete ' + cylonPart.name + ' -y');
+                }
+                if (dtPart) {
+                    if (mnts.some(function(m) { return m.name === 'desktop'; })) uncmds.push('umount desktop');
+                    uncmds.push('fdisk delete ' + dtPart.name + ' -y');
+                }            
+        
+                uncmds.push('echo Uninstallation sequence complete!');
+                uncmds.push('echo Please restart the system.');
+                uncmds.push('echo Run: reboot -y');
 
-          await dos.setBootPartition('cylon');
-          await dos.mount('cylon');
+                if (!flags.yes) {
+                  var unLines = [
+                    'To uninstall Cylon OS, the following commands will be executed:'
+                  ];
+                  for (var j = 0; j < uncmds.length; j++) unLines.push('  ' + uncmds[j]);
+                  unLines.push('To proceed, run: uninstall -y');
+                  return { handled: true, output: unLines.join('\n') };
+                }
 
-          try {
-            var res = await fetch(imageName);
-            if (!res.ok) {
-              return { handled: true, output: 'Install failed: could not load ' + imageName + ' (HTTP ' + res.status + ').' };
-            }
-            var jsonText = await res.text();
-            await dos.importDrive(jsonText, { drive: 'cylon' });
-            return { handled: true, output: 'Installation complete! System copied to "cylon:". Type "cylon:" to switch drives.' };
-          } catch (e) {
-            return { handled: true, output: 'Install failed: ' + (e && e.message ? e.message : String(e)) + '. The "cylon" partition was prepared but not populated.' };
-          }
-          
+                setTimeout(async function() {
+                  try {
+                    for (var i = 0; i < uncmds.length; i++) {
+                       if (await global.injectAndExecute(uncmds[i]) === false) throw new Error('step failed: ' + uncmds[i]);
+                    }
+                  } catch (e) {
+                    global.injectAndExecute('echo Uninstall macro failed: ' + e.message + '');
+                  }
+                }, 50);
+
+                return { handled: true, output: 'Initializing automated uninstall script...' };
+              }
+
+              var sourceGfx = 'cylon-desktop.gfx'; 
+              var profileStr = '';
+              if (args[0]) {
+                  profileStr = args[0] + ' ';
+                  var pLower = args[0].toLowerCase();
+                  if (pLower === 'cell' || pLower === 'monitor' || pLower === 'tv') {
+                      sourceGfx = 'cylon-desktop-' + pLower + '.gfx';
+                  } else {
+                      sourceGfx = args[0]; 
+                  }
+              }
+
+              if ((cylonPart || dtPart) && !flags.yes) {
+                return { handled: true, output: [
+                  'System already installed, input \'update\' to update or \'uninstall\' to remove.'
+                ].join('\n') };
+              }
+      
+              var mnts = await dos.mounts();
+              var installcmds = [];
+              
+              if (!mnts.some(function(m) { return m.name === 'ram'; })) installcmds.push('mount ram:');
+              installcmds.push('ram:');
+      
+              ['cylon', 'cylon.json', 'desktop', 'cylon-desktop.gfx', sourceGfx].forEach(function(n) {
+                if (mnts.some(function(m) { return m.name === n && m.type !== 'idb'; })) installcmds.push('umount ' + n);
+              });
+      
+              installcmds.push('import cylon.json idb cylon');
+              installcmds.push('fdisk boot cylon');
+              installcmds.push('import ' + sourceGfx + ' idb desktop');
+              installcmds.push('cylon:');
+              installcmds.push('echo Installation sequence complete!');
+              installcmds.push('echo Please restart the system to boot from IndexedDB.');
+              installcmds.push('echo Run: reboot -y');
+
+              if (!cylonPart && !dtPart && !flags.yes) {
+                var inLines = [
+                  '',
+                  'This installs Cylon OS to your browser\'s IndexedDB.',
+                  'Desktop profile selected: ' + (args[0] || 'default (' + sourceGfx + ')'),
+                  'To proceed, run: install ' + profileStr + '-y',
+                  ''
+                ];
+                return { handled: true, output: inLines.join('\n') };
+              }
+
+              setTimeout(async function() {
+                try {
+                  for (var i = 0; i < installcmds.length; i++) {
+                     if (await global.injectAndExecute(installcmds[i]) === false) throw new Error('step failed: ' + installcmds[i]);
+                  }
+                } catch (e) {
+                  global.injectAndExecute('echo Install macro failed: ' + e.message + '');
+                }
+              }, 50);
+              return { handled: true, output: 'Initializing automated installation script...' };
+
         case 'update':
           if (!args[0]) return { handled: true, output: usage('update <file|pattern> [-y]  (e.g. update *, update gfx*)') };
           return { handled: true, output: await updateCommand(dos, args, flags) };
 
+        case 'reboot':
+          if (!flags.yes) {
+            return { handled: true, output: 'To confirm reboot, input reboot -y' };
+          }
+          setTimeout(function() {
+             if (typeof window !== 'undefined') window.location.reload();
+          }, 500);
+          return { handled: true, output: 'Rebooting system...' };
+
+        case 'gfx':
+                  if (!args[0]) return { handled: true, output: usage('gfx <tile|fill|tele|icon|run> [data]') };
+                  var gfxCmd = args[0].toLowerCase();
+                  
+                  // Extract raw trailing string natively to preserve all spaces/quotes
+                  var matchGfx = line.match(/^\s*gfx\s+\S+\s+(.*)$/i);
+                  var gfxData = matchGfx ? matchGfx[1] : '';
+
+                  var activeFrame = document.querySelector('.page-frame.active');
+                  var targetWindow = activeFrame ? activeFrame.contentWindow : window;
+
+                  targetWindow.postMessage({
+                      type: 'QANDY_GFX_CMD',
+                      cmd: gfxCmd,
+                      data: gfxData
+                  }, '*');
+                  return { handled: true, output: 'GFX Engine: ' + gfxCmd + (gfxData ? ' ' + gfxData : '') };
+          
         case 'pwd':
           return { handled: true, output: dos.pwd() };
 
@@ -517,11 +633,47 @@
           await dos.save(args[0], args.slice(1).join(' '));
           return { handled: true, output: 'File saved.' };
 
+        // === UPGRADED SMART LOAD / TYPE COMMANDS ===
         case 'load':
         case 'type':
-          if (!args[0]) return { handled: true, output: usage('load <file>') };
-          result = await dos.load(args.join(' '));
-          return { handled: true, output: result === null ? 'File not found.' : result };
+          if (!args[0]) return { handled: true, output: usage((command === 'type' ? 'type' : 'load') + ' <file>') };
+          var filePath = args.join(' ');
+          result = await dos.load(filePath);
+          
+          if (result === null) return { handled: true, output: 'File not found.' };
+
+          if (command === 'type') {
+              return { handled: true, output: result }; // Strictly text dump
+          }
+
+          var lowerPath = filePath.toLowerCase();
+          
+          // Execute OS applications seamlessly
+          if (lowerPath.endsWith('.htm') || lowerPath.endsWith('.html')) {
+              await global.PageOpen(filePath);
+              return { handled: true, output: 'Opened ' + filePath };
+          } 
+          // Evaluate pure JS natively
+          else if (lowerPath.endsWith('.js')) {
+              try {
+                  var runFn = new Function(result);
+                  runFn();
+                  return { handled: true, output: 'Executed ' + filePath };
+              } catch(e) {
+                  return { handled: true, output: 'JS Error: ' + e.message };
+              }
+          } 
+          // Pop image rendering inside a responsive OS Window
+          else if (lowerPath.endsWith('.png') || lowerPath.endsWith('.jpg') || lowerPath.endsWith('.gif')) {
+              var imgSrc = result.startsWith('data:image') ? result : filePath;
+              if (global.CylonPopManager && typeof global.CylonPopManager.callPopHtm === 'function') {
+                  global.CylonPopManager.callPopHtm('<div style="display:flex;width:100%;height:100%;align-items:center;justify-content:center;background:var(--bg-color,#000);" onclick="hpop()"><img style="max-width:90%;max-height:90%;image-rendering:pixelated;border:2px solid var(--fg-color,#0f0);cursor:pointer;" src="' + imgSrc + '"></div>');
+              }
+              return { handled: true, output: 'Displayed image ' + filePath };
+          }
+
+          // Fallback, display contents
+          return { handled: true, output: result };
 
         case 'copy':
         case 'cp':
@@ -550,36 +702,77 @@
           return { handled: true, output: result ? 'TRUE' : 'FALSE' };
 
         case 'export':
-          result = await dos.exportDrive();
-          if (args[0]) {
+          var targetDrive = null;
+          var fileName = null;
+
+          if (args.length >= 2) {
+              targetDrive = args[0];
+              fileName = args[1];
+          } else if (args.length === 1) {
+              fileName = args[0];
+          }
+
+          result = await dos.exportDrive(targetDrive);
+          
+          if (fileName) {
             var blob = new Blob([result], { type: 'application/json' });
             var url = URL.createObjectURL(blob);
             var anchor = document.createElement('a');
             anchor.href = url;
-            anchor.download = args[0];
+            anchor.download = fileName;
             anchor.click();
             setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
-            return { handled: true, output: 'Drive exported to ' + args[0] };
+            return { handled: true, output: 'Drive exported to ' + fileName };
           }
           return { handled: true, output: result };
 
         case 'import':
-          if (!args[0]) return { handled: true, output: usage('import <json|url>') };
-          // Use the raw text: tokenizing would strip the quotes out of inline JSON.
-          result = line.replace(/^\s*\S+\s*/, '').trim();
-          if (result.charAt(0) !== '{') {
-            var res = await fetch(result);
-            if (!res.ok) throw new Error('cannot load ' + result + ': HTTP ' + res.status);
-            result = await res.text();
+          if (!args[0]) return { handled: true, output: usage('import <file> [type] [drive]') };
+          var fileArg = args[0];
+          var typeArg = args[1];
+          var driveArg = args[2];
+          
+          var rawText = line.replace(/^\s*\S+\s*/, '').trim();
+          
+          if (fileArg.charAt(0) !== '{') {
+            var isFile = false;
+            try { isFile = await dos.exists(fileArg); } catch (e) {}
+            
+            if (isFile) {
+                rawText = await dos.load(fileArg);
+            } else {
+                var res = await fetch(fileArg);
+                if (!res.ok) throw new Error('cannot load ' + fileArg + ': HTTP ' + res.status);
+                rawText = await res.text();
+            }
           }
-          await dos.importDrive(result);
-          return { handled: true, output: 'Drive imported.' };
+          
+          var targetDrive = null;
+          if (typeArg && driveArg && fileArg.charAt(0) !== '{') {
+              typeArg = typeArg.toLowerCase();
+              if (typeArg === 'idb') {
+                  var parts = await dos.partitions();
+                  if (!parts.some(function(p) { return p.name === driveArg; })) {
+                      await dos.createPartition(driveArg);
+                  }
+              }
+              var mnts = await dos.mounts();
+              if (!mnts.some(function(m) { return m.name === driveArg; })) {
+                  var mountSource = (typeArg === 'ram') ? 'ram:' : driveArg;
+                  await dos.mount(mountSource, driveArg, { type: typeArg });
+              }
+              targetDrive = driveArg;
+          }
+          
+          await dos.importDrive(rawText, { drive: targetDrive });
+          return { handled: true, output: 'Drive imported' + (targetDrive ? ' to ' + targetDrive + ':/' : '.') };
 
         default:
           return { handled: false };
       }
     } catch (error) {
-      return { handled: true, output: errorText(error) };
+    	global.CylonLastError = errorText(error);
+      return { handled: true, ok: false, output: errorText(error) };
     }
   }
 
@@ -622,9 +815,8 @@ function updateTaskbar() {
 
       button.textContent = frame.dataset.title;
       
-       // If not active, click switches to it. If active, click opens menu to close it.
       button.onclick = function (e) {
-        if (e) e.stopPropagation(); // Prevent bubbling up to #input-bar which triggers the keyboard
+        if (e) e.stopPropagation(); 
         
         if (filename !== activePage) {
             global.showPage(filename);
@@ -634,7 +826,6 @@ function updateTaskbar() {
                     { label: 'Close ' + frame.dataset.title, action: () => global.PageClose(filename) }
                 ]);
             } else {
-                // Fallback just in case CylonPopManager wasn't loaded 
                 global.PageClose(filename);
             }
         }
@@ -644,7 +835,7 @@ function updateTaskbar() {
     });
   }  
 
-  global.showTerminal = function () {
+global.showTerminal = function () {
     var video = document.getElementById('video-layer');
     var container = pageContainer();
 
@@ -659,11 +850,8 @@ function updateTaskbar() {
 
     activePage = null;
 
-    //if (typeof global.showFullKeyboard === 'function') {
-    //  global.showFullKeyboard(); // Command is a terminal type, so explicitly show the keyboard
-    //}
-
     updateTaskbar();
+    if (typeof global.setOSMode === 'function') global.setOSMode('terminal');
   };
 
   global.showPage = function (filename) {
@@ -684,7 +872,6 @@ function updateTaskbar() {
       var isActive = (name === filename);
       openPages[name].classList.toggle('active', isActive);
       
-      // Tell the iframe application it has been brought to the foreground
       if (isActive && openPages[name].contentWindow) {
           openPages[name].contentWindow.postMessage({ type: 'QANDY_PAGE_ACTIVATED' }, '*');
       }
@@ -695,14 +882,9 @@ function updateTaskbar() {
     }
 
     updateTaskbar();
+    if (typeof global.setOSMode === 'function') global.setOSMode('app');
   };
 
-  /*
-   * Load an application from the current CylonDOS drive.
-   *
-   * The application is stored in IndexedDB or the current mounted drive.
-   * It is not loaded from the web server.
-   */
   global.PageOpen = async function (filename, title) {
     filename = pageName(filename);
 
@@ -729,11 +911,6 @@ function updateTaskbar() {
 
     frame.className = 'page-frame';
     frame.dataset.title = pageTitle(filename, title);
-
-    /*
-     * srcdoc loads the HTML returned by CylonDOS instead of requesting
-     * filename from the web server.
-     */
     frame.srcdoc = html;
 
     pageContainer().appendChild(frame);
@@ -769,49 +946,33 @@ function updateTaskbar() {
 
 })(typeof window !== 'undefined' ? window : globalThis);
 
+
 // ============================================================================
 // cylon-command.js - Pop Function Compatibility Layer for Cylon OS
 // ============================================================================
-// Bridges Qandy Pop Functions (popHtm, hpop, popWeb, hpopWeb) to work on both
-// cylon-command.htm (text terminal) and cylon-desktop.htm (graphic desktop)
 
 (function() {
     "use strict";
 
-    // ========================================================================
-    // 1. CROSS-ENVIRONMENT POP MANAGER
-    // ========================================================================
-
     const CylonPopManager = {
-        // Track which context (terminal or desktop) we're in
         activeContext: null,
         pendingPop: null,
         
-        // Initialize the manager - detect which frame/context we're running in
         init: function() {
-            // Detect if we're in cylon-command.htm (terminal) or cylon-desktop.htm (graphic)
             try {
-                // Check if parent is the main Cylon OS (cylon.htm)
                 if (window.parent && window.parent !== window) {
-                    // We're in an iframe - determine which one
                     if (window.location.pathname.includes('command')) {
                         this.activeContext = 'terminal';
                     } else if (window.location.pathname.includes('desktop')) {
                         this.activeContext = 'desktop';
                     }
                 }
-            } catch (e) {
-                console.warn('CylonPopManager: Could not determine context', e);
-            }
+            } catch (e) {}
 
-            // Listen for pop events from either context
             window.addEventListener('message', (e) => this.handlePopMessage(e));
-            
-            // Expose Pop Functions to both contexts
             this.exposePopFunctions();
         },
 
-        // Route pop operations to the appropriate context
         handlePopMessage: function(e) {
             if (!e.data || typeof e.data !== 'object') return;
 
@@ -830,29 +991,15 @@ function updateTaskbar() {
             }
         },
 
-        // ====================================================================
-        // 2. POP FUNCTION IMPLEMENTATIONS
-        // ====================================================================
-
-        /**
-         * popHtm(html) - Display HTML in a popup
-         * Works in both terminal and desktop contexts
-         */
         callPopHtm: function(html) {
             if (!html) return;
-
             if (window.parent && window.parent !== window && typeof window.parent.popHtm === 'function' && window.parent.popHtm !== window.popHtm) {
-                // Use parent's popHtm if available and if we are safely inside an iframe wrapper
                 window.parent.popHtm(html);
             } else {
-                // Fallback: create a simple pop div in current context
                 this.createSimplePop(html);
             }
         },
 
-        /**
-         * hpop() - Hide/close the current popup
-         */
         callHpop: function() {
             if (window.parent && window.parent !== window && typeof window.parent.hpop === 'function' && window.parent.hpop !== window.hpop) {
                 window.parent.hpop();
@@ -862,14 +1009,12 @@ function updateTaskbar() {
             }
         },
 
-        // ==== ADVANCED MENU / CONTEXT POPUP IMPLEMENTATION ====
         showContextMenu: function(e, items) {
-            this.callHpop(); // Ensure standard popups are hidden
+            this.callHpop(); 
 
             let absX = e.clientX || 0;
             let absY = e.clientY || 0;
 
-            // Auto-detect and translate iframe offsets if the event bubbled from an app
             if (e.view && e.view !== window && e.view !== window.parent) {
                 let frames = document.querySelectorAll('iframe');
                 for (let i = 0; i < frames.length; i++) {
@@ -899,7 +1044,6 @@ function updateTaskbar() {
             wrapper.innerHTML = '';
 
             let menu = document.createElement('div');
-            // DOS/Windows style file menu styling
             menu.style.cssText = `
                 position: absolute; background: #c0c0c0;
                 border-top: 2px solid #fff; border-left: 2px solid #fff;
@@ -931,11 +1075,9 @@ function updateTaskbar() {
 
             wrapper.appendChild(menu);
 
-            // Align precisely so a double tap lands squarely on the first menu item
             menu.style.left = Math.max(0, absX - 12) + 'px';
             menu.style.top = Math.max(0, absY - 8) + 'px';
             
-            // Re-adjust if off screen
             setTimeout(() => {
                let r = menu.getBoundingClientRect();
                if (r.right > window.innerWidth) menu.style.left = (window.innerWidth - r.width - 5) + 'px';
@@ -943,13 +1085,8 @@ function updateTaskbar() {
             }, 0);
         },
 
-        /**
-        /**
-         * popWeb(url) - Display a web page in a scaled popup
-         */
         callPopWeb: function(url) {
             if (!url) return;
-
             if (window.parent && window.parent !== window && typeof window.parent.popWeb === 'function' && window.parent.popWeb !== window.popWeb) {
                 window.parent.popWeb(url);
             } else {
@@ -957,9 +1094,6 @@ function updateTaskbar() {
             }
         },
 
-        /**
-         * hpopWeb() - Hide/close the web popup
-         */
         callHpopWeb: function() {
             if (window.parent && window.parent !== window && typeof window.parent.hpopWeb === 'function' && window.parent.hpopWeb !== window.hpopWeb) {
                 window.parent.hpopWeb();
@@ -969,9 +1103,6 @@ function updateTaskbar() {
             }
         },
 
-        /**
-         * Set pop alignment: "center", "click", "full"
-         */
         setPopAlign: function(align) {
             if (window.parent && window.parent !== window && window.parent.PopAlign !== undefined) {
                 window.parent.PopAlign = align;
@@ -979,10 +1110,6 @@ function updateTaskbar() {
                 window.PopAlign = align;
             }
         },
-
-        // ====================================================================
-        // 3. FALLBACK IMPLEMENTATIONS (for standalone/offline contexts)
-        // ====================================================================
 
         createSimplePop: function(html) {
             let popWrapper = document.getElementById('cylon-pop-wrapper');
@@ -999,7 +1126,6 @@ function updateTaskbar() {
                     justify-content: center;
                 `;
                 
-                // Handle link clicks inside the popup, and background closing
                 popWrapper.addEventListener('click', function(e) {
                     let link = e.target.closest('a');
                     if (link) {
@@ -1007,16 +1133,13 @@ function updateTaskbar() {
                         if (href && href.startsWith('gfx:')) {
                             e.preventDefault();
                             let cmd = href.substring(4);
-                            
-                            // Route the command down into the active app iframe
                             let activeFrame = document.querySelector('.page-frame.active');
                             if (activeFrame && activeFrame.contentWindow) {
                                 activeFrame.contentWindow.postMessage({ type: 'gfx', cmd: cmd }, '*');
                             } else {
-                                // Fallback if tested completely standalone
                                 window.postMessage({ type: 'gfx', cmd: cmd }, '*');
                             }
-                            return; // Stop here, app will close the popup explicitly if needed
+                            return; 
                         }
                     }
 
@@ -1024,7 +1147,6 @@ function updateTaskbar() {
                         window.hpop();
                     }
                 });
-
 
                 let popEl = document.createElement('div');
                 popEl.id = 'cylon-pop';
@@ -1090,48 +1212,17 @@ function updateTaskbar() {
             webPopWrapper.style.visibility = 'visible';
         },
 
-        // ====================================================================
-        // 4. EXPOSE GLOBAL FUNCTIONS
-        // ====================================================================
-
         exposePopFunctions: function() {
             const self = this;
-
-            // Global popHtm() - display HTML popup
-            window.popHtm = function(html) {
-                self.callPopHtm(html);
-            };
-
-            // Global hpop() - hide popup
-            window.hpop = function() {
-                self.callHpop();
-            };
-
-            // Global popWeb() - display web popup
-            window.popWeb = function(url) {
-                self.callPopWeb(url);
-            };
-
-            // Global hpopWeb() - hide web popup
-            window.hpopWeb = function() {
-                self.callHpopWeb();
-            };
-
-            // Global setPopAlign() - set popup alignment
-            window.setPopAlign = function(align) {
-                self.setPopAlign(align);
-            };
-
-            // Convenience aliases (matching qandy-core.js)
+            window.popHtm = function(html) { self.callPopHtm(html); };
+            window.hpop = function() { self.callHpop(); };
+            window.popWeb = function(url) { self.callPopWeb(url); };
+            window.hpopWeb = function() { self.callHpopWeb(); };
+            window.setPopAlign = function(align) { self.setPopAlign(align); };
             window.pop = window.popHtm;
         }
     };
 
-    // ========================================================================
-    // 5. INITIALIZATION HOOK
-    // ========================================================================
-
-    // Auto-initialize when DOM is ready
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', () => {
             CylonPopManager.init();
@@ -1140,7 +1231,6 @@ function updateTaskbar() {
         CylonPopManager.init();
     }
 
-    // Expose the manager globally for debugging
     window.CylonPopManager = CylonPopManager;
 
 })();

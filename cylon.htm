@@ -17,8 +17,6 @@
             margin: 0 !important;
             padding: 0 !important;
         }
-    }
-
     </style>
     <link rel="manifest" href="manifest.json">
     <meta name="theme-color" content="#000000">
@@ -84,6 +82,7 @@ let proxyInputId = null;
 // DOS Boot State Variables
 let dosInitialized = false;
 let dosInitializing = null;
+window.proxyInputMaxLen = null; // NEW
 
 const PAGES = Object.freeze(new Set([
     'cylon.htm',
@@ -94,8 +93,8 @@ const PAGES = Object.freeze(new Set([
     'cylon-files.cfg',
     'cylon-desktop.htm',
     'cylon-desktop.cfg',
-    'cylon-colors.htm',
-    'cylon-colors.cfg',
+    'cylon-desktop.gfx',
+    'cylon-theme.htm',
     'gfx.js',
     'gfx-tileset.htm',
     'gfx-create.htm',
@@ -220,18 +219,48 @@ function print(html) {
 }
 
 // Special print for DOS output to preserve table spacing and newlines
+// Special print for DOS output with robust ANSI-style [.0] - [.9] state tracking
 function printDOS(text) {
+    let activeFg = null;
+    let activeBg = null;
+    let spanOpen = false;
+
     let formatted = escapeHTML(String(text == null ? '' : text))
-        // 1. Convert {.color} to an opening span tag (e.g. {.yellow})
-        .replace(/\{\.([a-zA-Z0-9#]+)\}/g, '<span style="color: $1;">')
-        // 2. Convert {.} to a closing span tag
-        .replace(/\{\.\}/g, '</span>')
-        // 3. Keep your existing spacing and newline rules
+        // Process color codes sequentially to prevent messy nesting
+        .replace(/\[\.([0-9]?)\]/g, function(match, code) {
+            // [.] Reset everything
+            if (code === '') {
+                activeFg = null;
+                activeBg = null;
+                let res = spanOpen ? '</span>' : '';
+                spanOpen = false;
+                return res;
+            }
+            
+            let num = parseInt(code, 10);
+            if (num === 0) activeFg = `var(--fg-color)`;
+            else if (num >= 1 && num <= 4) activeFg = `var(--text-fg${num})`;
+
+            if (num === 5) activeBg = `var(--bg-color)`;
+            else if (num >= 6 && num <= 9) activeBg = `var(--text-bg${num})`;
+            
+            let res = spanOpen ? '</span>' : '';
+            spanOpen = true;
+            let style = '';
+            if (activeFg) style += `color: ${activeFg}; `;
+            if (activeBg) style += `background-color: ${activeBg}; `;
+            return res + `<span style="${style}">`;
+        });
+
+    if (spanOpen) formatted += '</span>';
+
+    // Apply standard spacing rules
+    formatted = formatted
         .replace(/ {2,}/g, run => ' ' + new Array(run.length).join('&nbsp;'))
         .replace(/\r?\n/g, '<br>');
+        
     print(formatted);
 }
-
 // ============================================================================
 // 3. DOS INTEGRATION METHODS
 // ============================================================================
@@ -261,54 +290,77 @@ function updatePrompt() {
 
 window.updatePrompt = updatePrompt; // Expose globally for the virtual keyboard
 
+// ==== STATE & VIRTUAL KEY DISPATCH ====
+window.setOSMode = function(mode, promptText) {
+    osMode = mode;
+    inputBuffer = "";
+    cursorPos = 0;
+    selAnchor = null;
+
+    var promptEl = document.getElementById('kb-prompt');
+    if (!promptEl) return;
+
+    if (mode === 'terminal') {
+        if (window.updatePrompt) window.updatePrompt();
+    } else if (mode === 'app') {
+        var activeFrame = document.querySelector('.page-frame.active');
+        var title = activeFrame ? activeFrame.dataset.title : 'App';
+        promptEl.textContent = `[ ${title} ]`;
+    } else if (mode === 'app-edit' || mode === 'app-textarea') {
+        if (promptText) promptEl.textContent = promptText;
+    }
+
+    if (window.renderInputLine) window.renderInputLine();
+};
+
+window.sendVirtualKey = function(keyName) {
+    var activeFrame = document.querySelector('.page-frame.active');
+    if (activeFrame && activeFrame.contentWindow) {
+        activeFrame.contentWindow.postMessage({ type: 'QANDY_VKEY', key: keyName }, '*');
+    }
+};
+
 // ==== CORE ARCHITECTURE: CLI DRIVEN GUI MACROS ====
-window.injectAndExecute = async function(cmdStr) {
-    // Drop back to terminal mode for command execution log
-    if (osMode !== 'terminal' && osMode !== 'app') osMode = 'app'; 
+window.injectAndExecute = async function(cmdStr, opts) {
+    if (osMode !== 'terminal' && osMode !== 'app') window.setOSMode('app'); 
     
-    // Visually populate the input buffer
     inputBuffer = cmdStr;
     cursorPos = inputBuffer.length;
     if (window.renderInputLine) window.renderInputLine();
     
-    // Execute the command natively
-    await command(cmdStr);
+    var ok = await command(cmdStr, opts);
     
-    // Clear buffer after execution
     inputBuffer = "";
     cursorPos = 0;
     selAnchor = null;
     if (window.updatePrompt) window.updatePrompt();
     if (window.renderInputLine) window.renderInputLine();
+    return ok !== false;
 };
 
 window.addEventListener('message', function(e) {
     if (e.data.type === 'QANDY_REQ_INPUT') {
-        osMode = e.data.isMultiline ? 'app-textarea' : 'app-edit';
+        window.setOSMode(
+            e.data.isMultiline ? 'app-textarea' : 'app-edit',
+            `${e.data.id}: `
+        );
         proxyInputId = e.data.id;
+        window.proxyInputMaxLen = e.data.maxLength || null;
         
-        // Grab the existing value from the text box so we can edit it
         inputBuffer = e.data.value || ""; 
         cursorPos = inputBuffer.length;
         
-        // Set the prompt using the element's ID for debugging
-        document.getElementById('kb-prompt').textContent = `${e.data.id}: `;        
-
         window.showFullKeyboard();
         window.updateOverlayInput();
 
         if (e.data.rect) window.panToRect(e.data.rect);
     } else if (e.data.type === 'CYLON_PRINT') {
-        // Handle incoming print calls from the SDK
         if (typeof print === 'function') print(e.data.text);
     } else if (e.data.type === 'QANDY_INPUT_RECT') {
         window.panToRect(e.data.rect);
     } else if (e.data.type === 'QANDY_SET_MODE') {
-        osMode = e.data.mode;
-        if (osMode === 'terminal') {
-            window.showFullKeyboard();
-            if (window.updatePrompt) window.updatePrompt();
-        }
+        window.setOSMode(e.data.mode);
+        if (osMode === 'terminal') { window.showFullKeyboard(); }
     } else if (e.data.type === 'QANDY_PASTE') {
         if (window.pasteText) window.pasteText(e.data.text);
     }
@@ -322,35 +374,35 @@ window.addEventListener('paste', function(e) {
     }
 });
 
+// Boot is just the commands a user could type themselves.
 async function bootMount() {
     var dos = window.CylonDOS;
-    var dbExists = false;
+    var run = function (cmd) { return window.injectAndExecute(cmd, { boot: true }); };
+    
+    var dbs = window.indexedDB && window.indexedDB.databases ? await window.indexedDB.databases() : [];
+    var dbExists = dbs.some(function(db) { return db.name === 'CylonDOS'; });
 
-    if (window.indexedDB && window.indexedDB.databases) {
-        var dbs = await window.indexedDB.databases();
-        dbExists = dbs.some(function(db) { return db.name === 'CylonDOS'; });
-    }
-
+    // 1. Installed: boot from the IndexedDB partition
     if (dbExists) {
         var parts = await dos.partitions();
         var boot = parts.filter(function (p) { return p.boot; })[0] ||
                    parts.filter(function (p) { return p.name === 'cylon'; })[0];
-                   
-        if (boot) {
-            await dos.mount(boot.name);
-            dos.setDrive(boot.name);
+
+        if (boot && await run('mount ' + boot.name + ' idb')) {
+            await run(boot.name + ':');
             return;
         }
     }
 
-    try {
-        await dos.mount('ram:cylon.json', 'ram');
-        dos.setDrive('ram');
-        printDOS("{.yellow}System booted to RAM drive, run 'install' to setup indexDB{.}\n");
-    } catch (e) {
-        await dos.mount('ram:', 'ram');
-        dos.setDrive('ram');
-        printDOS("{.yellow}Booted to RAM drive (cylon.json not found).\nInput 'export cylon.json' to download your work later{.}\n");
+    // 2. Not installed: attempt to boot from the cylon.json image into RAM
+    if (await run('mount cylon.json ram cylon')) {
+        await run('cylon:');
+        printDOS("[.2]System booted to RAM drive, run 'install' to setup indexDB[.]\n");
+    } else {
+        // 3. No image available: blank RAM drive
+        await run('mount ram:');
+        await run('ram:');
+        printDOS("[.2]Booted to RAM drive (cylon.json not found).\nInput 'export cylon.json' to download your work later[.]\n");
     }
 }
 
@@ -358,49 +410,65 @@ async function bootMount() {
 // SYSTEM BOOT - load cylon.cfg
 // ============================================================================
 
+// Applies CSS variables globally and alerts all open iframes
 window.CylonColors = {};
 
-// Applies CSS variables globally and alerts all open iframes
-window.applyColorConfig = function(cfgText) {
+// Hot-reloads the global CSS variables by reading directly from /a/ theme variables
+window.applyThemeFromAlpha = async function() {
+    let dos = window.CylonDOS;
     let vars = {
-        "Font": "monospace", "BackgroundColor": "#000", "ForegroundColor": "#0f0",
-        "MenuBgColor": "#111", "MenuFgColor": "#aaa", "SelectBgColor": "#333", "SelectFgColor": "#0f0",
-        // Inject the newly configured defaults here
-        "InputFg": "#0f0", "InputBg": "#000", "CaseBg": "#080808", "CaseFg": "#0a0",
-        "KeyBg": "#222", "KeyFg": "#fff", "KeyHlBg": "#666", "KeyHlFg": "#fff"
+        "themeFont": "monospace", "themeBackground": "#000", "themeForeground": "#0f0",
+        "themeMenuBG": "#111", "themeMenuFG": "#aaa", "themeSelectBG": "#333", "themeSelectFG": "#0f0",
+        "themeInputFG": "#0f0", "themeInputBG": "#000", "themeCaseBG": "#080808", "themeCaseFG": "#0a0",
+        "themeKeyUpBG": "#222", "themeKeyUpFG": "#fff", "themeKeyDownBG": "#666", "themeKeyDownFG": "#fff",
+        // NEW: Terminal ANSI Color Palette
+        "themeTextFg1": "#000000", "themeTextFg2": "#ffff00", "themeTextFg3": "#ff0000", "themeTextFg4": "#00ff00",
+        "themeTextBg6": "#ffffff", "themeTextBg7": "#ffff00", "themeTextBg8": "#800080", "themeTextBg9": "#008000"    };
+
+    try {
+        if (await dos.exists('/a')) {
+            for (let v of Object.keys(vars)) {
+                if (await dos.exists('/a/' + v)) {
+                    vars[v] = (await dos.load('/a/' + v)).trim();
+                }
+            }
+        }
+    } catch(e) { console.warn("Could not load /a/ theme vars", e); }
+    
+    window.CylonColors = {
+        BackgroundColor: vars.themeBackground, ForegroundColor: vars.themeForeground,
+        Font: vars.themeFont, MenuBgColor: vars.themeMenuBG, MenuFgColor: vars.themeMenuFG,
+        SelectBgColor: vars.themeSelectBG, SelectFgColor: vars.themeSelectFG,
+        // Expose to apps
+        TextFg0: vars.themeTextFg0, TextFg1: vars.themeTextFg1, TextFg2: vars.themeTextFg2, TextFg3: vars.themeTextFg3, TextFg4: vars.themeTextFg4,
+        TextBg5: vars.themeTextBg5, TextBg6: vars.themeTextBg6, TextBg7: vars.themeTextBg7, TextBg8: vars.themeTextBg8, TextBg9: vars.themeTextBg9
     };
-    
-    if (cfgText) {
-        cfgText.split('\n').forEach(line => {
-            let parts = line.split('=');
-            if (parts.length >= 2) vars[parts[0].trim()] = parts.slice(1).join('=').trim();
-        });
-    }
-    window.CylonColors = vars;
-    
+
     let root = document.documentElement;
-    root.style.setProperty('--font-face', vars.Font + ', monospace');
-    root.style.setProperty('--bg-color', vars.BackgroundColor);
-    root.style.setProperty('--fg-color', vars.ForegroundColor);
-    root.style.setProperty('--menu-bg', vars.MenuBgColor);
-    root.style.setProperty('--menu-fg', vars.MenuFgColor);
-    root.style.setProperty('--sel-bg', vars.SelectBgColor);
-    root.style.setProperty('--sel-fg', vars.SelectFgColor);
+    root.style.setProperty('--font-face', vars.themeFont + ', monospace');
+    root.style.setProperty('--bg-color', vars.themeBackground);
+    root.style.setProperty('--fg-color', vars.themeForeground);
+    root.style.setProperty('--menu-bg', vars.themeMenuBG);
+    root.style.setProperty('--menu-fg', vars.themeMenuFG);
+    root.style.setProperty('--sel-bg', vars.themeSelectBG);
+    root.style.setProperty('--sel-fg', vars.themeSelectFG);
 
-    // Bind new variables to the global CSS Root
-    root.style.setProperty('--input-fg', vars.InputFg);
-    root.style.setProperty('--input-bg', vars.InputBg);
-    root.style.setProperty('--case-bg', vars.CaseBg);
-    root.style.setProperty('--case-fg', vars.CaseFg);
-    root.style.setProperty('--key-bg', vars.KeyBg);
-    root.style.setProperty('--key-fg', vars.KeyFg);
-    root.style.setProperty('--key-hl-bg', vars.KeyHlBg);
-    root.style.setProperty('--key-hl-fg', vars.KeyHlFg);
+    root.style.setProperty('--input-fg', vars.themeInputFG);
+    root.style.setProperty('--input-bg', vars.themeInputBG);
+    root.style.setProperty('--case-bg', vars.themeCaseBG);
+    root.style.setProperty('--case-fg', vars.themeCaseFG);
+    root.style.setProperty('--key-bg', vars.themeKeyUpBG);
+    root.style.setProperty('--key-fg', vars.themeKeyUpFG);
+    root.style.setProperty('--key-hl-bg', vars.themeKeyDownBG);
+    root.style.setProperty('--key-hl-fg', vars.themeKeyDownFG);
 
-    // Broadcast the new colors to any apps currently open in iframes
+    // NEW: Inject Text Palette CSS Variables
+    for(let i=1; i<=4; i++) root.style.setProperty(`--text-fg${i}`, vars[`themeTextFg${i}`]);
+    for(let i=6; i<=9; i++) root.style.setProperty(`--text-bg${i}`, vars[`themeTextBg${i}`]);
+
     document.querySelectorAll('iframe.page-frame').forEach(frame => {
         if (frame.contentWindow) {
-            frame.contentWindow.postMessage({type: 'QANDY_UPDATE_COLORS', colors: vars}, '*');
+            frame.contentWindow.postMessage({type: 'QANDY_UPDATE_COLORS', colors: window.CylonColors}, '*');
         }
     });
 };
@@ -408,23 +476,14 @@ window.applyColorConfig = function(cfgText) {
 window.desktopInit = async function() {
     let dos = window.CylonDOS;
     
-    // 1. Load system colors BEFORE autoexec loads any apps
-    try {
-        if (await dos.exists('cylon-colors.cfg')) {
-            window.applyColorConfig(await dos.load('cylon-colors.cfg'));
-        } else {
-            window.applyColorConfig(""); // Apply defaults if missing
-        }
-    } catch(e) { 
-        console.warn("Theme load error", e); 
-        window.applyColorConfig(""); 
-    }
+    // 1. Load system colors from /a/ retro-objects BEFORE autoexec loads apps
+    await window.applyThemeFromAlpha();
 
     // 2. Check for cylon.cfg (our autoexec file)
     let cfgText = "";
     if (await dos.exists('cylon.cfg')) { cfgText = await dos.load('cylon.cfg'); }
     
-    // 3. Process the file line-by-line
+    // 3. Process the autoexec file line-by-line
     let lines = cfgText.split('\n');
     for (let line of lines) {
         line = line.trim();
@@ -459,7 +518,7 @@ window.cylonDOSInitialize = initializeDos;
 // ============================================================================
 
 // Changed to async to natively support DOS operations seamlessly
-async function command(cmdStr) {
+async function command(cmdStr, opts) {
     cmdStr = cmdStr.trim();
     
     if (cmdStr) {
@@ -481,24 +540,24 @@ async function command(cmdStr) {
 
     // --- CYLON DOS COMMAND INTERCEPT ---
     if (window.CylonDOS && window.handleCylonCommand) {
-        await initializeDos(); // Ensure DOS is loaded before dispatching
+        // Ensure DOS is loaded before dispatching (the bootloader runs *inside* init, so it skips this)
+        if (!(opts && opts.boot)) await initializeDos();
         try {
             let result = await window.handleCylonCommand(cmdStr);
             updatePrompt();
             if (result && result.handled) {
                 if (result.output) printDOS(result.output);
-                return; // Stop here, DOS handled the command successfully.
+                return result.ok !== false; // Stop here, DOS handled the command (false = it failed).
             }
         } catch (error) {
-            printDOS("Error: " + (error.message || String(error)));
-            return; 
+            printDOS("Error: [.4]" + (error.message || String(error))+"[.]");
+            return false; 
         }
     }
 
     // --- LEGACY APP / SYSTEM COMMANDS ---
     if (cmdStr.toLowerCase() === 'exit') {
         showTerminal();
-        print("Returned to terminal.");
         return;
     }
 
@@ -517,7 +576,7 @@ async function command(cmdStr) {
       return;
     }
 
-    print("Unknown command: " + escapeHTML(cmdStr));
+    print("Error: [.4]Unknown command: " + escapeHTML(cmdStr)+"[.]");
 }
 
 // ----------------------------------------------------------------------------
@@ -627,12 +686,14 @@ function loadNext() {
     var promptEl = document.getElementById('kb-prompt');
     if (promptEl) promptEl.textContent = sysPrompt;
 
-    print("<br>2029 Qandy Pocket Computer v1w - Quintrix and Crew Software<br>Alpha Testing Prototype Release - Free Public Domain Software<br>DISCLAIMER: Written with the assistance of Artificial Intelligence<br>");
-    
     // --- Initialize DOS AFTER the welcome message, not behind the click-overlay
     initializeDos().catch(function(err) {
-        printDOS("DOS Init Error: " + (err.message || String(err)));
+        printDOS("Error: [.4]" + (err.message || String(err))+"[.]");
     });
+
+    printDOS("\n[.3]2029 Qandy Pocket Computer v.2c - Quintrix and Crew Software[.]\n");
+    printDOS("[.2]Alpha Testing Prototype Release - Free Public Domain Software[.]\n");
+    printDOS("[.1]DISCLAIMER: Written with the assistance of Artificial Intelligence[.]\n\n");
 
     document.getElementById('video-layer').addEventListener('click', function() {
         if (typeof hideFullKeyboard === 'function') hideFullKeyboard();

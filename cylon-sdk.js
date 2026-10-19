@@ -1,4 +1,4 @@
- /* --- QANDY POCKET COMPUTER SDK: UI & VIDEO BINDINGS --- */
+/* --- QANDY POCKET COMPUTER SDK: UI & VIDEO BINDINGS --- */
 (function() {
 // ========================================================================
 // 0. OS TERMINAL BRIDGING
@@ -49,22 +49,50 @@ window.sleep = function(ms) {
     return new Promise(resolve => setTimeout(resolve, ms)); 
 };
 
-window.qdosScript = function() { 
-    return Promise.resolve(); // Mock to satisfy older gfx.js dependencies
-};
-
 window.beep = function(freq, dur, vol) {
     if (window.parent && typeof window.parent.beep === 'function') {
         window.parent.beep(freq, dur, vol);
     }
 };
 
-// 4. Input Routing (Catches keypresses and sends them to the active app's DirectX/gfx.js)
+// 4. Input Routing
 document.addEventListener('keydown', function(e) {
     if (typeof window.keydown === 'function') {
         window.keydown(e.key, e);
     }
 });
+
+// 5. Terminal Command Execution
+window.CylonCommand = async function(cmdStr) {
+    if (window.parent && typeof window.parent.injectAndExecute === 'function') {
+        return await window.parent.injectAndExecute(cmdStr);
+    } else {
+        throw new Error("Cylon OS terminal interface not available.");
+    }
+};
+
+// 6. Macro / Batch Script Execution
+// Evaluates a multi-line string of commands, executing each sequentially.
+window.CylonScript = async function(scriptText) {
+    if (typeof scriptText !== 'string') return false;
+    
+    // Support both literal newlines and escaped \n strings
+    let lines = scriptText.replace(/\\n/g, '\n').split('\n');
+    
+    for (let cmd of lines) {
+        cmd = cmd.trim();
+        // Ignore empty lines and comments (// or ;)
+        if (cmd && !cmd.startsWith('//') && !cmd.startsWith(';')) {
+            await window.CylonCommand(cmd);
+        }
+    }
+    return true;
+};
+
+// Backwards compatibility alias for older applications
+window.qdosScript = async function(scriptText) { 
+    return await window.CylonScript(scriptText);
+};
 
 // ========================================================================
 // 1. INPUT INTERCEPTION (Keyboard & Textarea handling)
@@ -115,16 +143,29 @@ function handleInputTap(e) {
     if (el && (el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && el.type === 'text'))) {
         el.setAttribute('inputmode', 'none');
 
-        if (e.type === 'pointerdown' || (e.type === 'mousedown' && e.pointerType === undefined)) {
+        if (e.type === 'pointerdown' || (e.type === 'mousedown' && e.pointerType === undefined) || e.type === 'touchstart') {
+            
+            // Prevent native input from gaining focus to eliminate the double cursor
+            e.preventDefault();
+            if (document.activeElement) document.activeElement.blur();
+            
+            // Pass focus back to the parent so physical keyboard input goes to Qandy terminal!
+            if (window.parent && window.parent !== window) {
+                window.parent.focus();
+            }
+
             if (!el.id) el.id = 'qandy-input-auto-' + (autoIdCounter++);
             
+            let maxLen = el.hasAttribute('maxlength') ? parseInt(el.getAttribute('maxlength'), 10) : null;
+
             window.parent.postMessage({
                 type: 'QANDY_REQ_INPUT',
                 id: el.id,
                 value: el.value,
                 isMultiline: el.tagName === 'TEXTAREA',
                 label: getFieldLabel(el),
-                rect: rectOf(el)
+                rect: rectOf(el),
+                maxLength: maxLen // Pass to Qandy OS
             }, '*');
 
             trackElement(el);
@@ -407,32 +448,54 @@ window.CylonSDK.renderListGrid = function(containerId, items) {
 // 3. GLOBAL LISTENERS
 // ========================================================================
 
-if (!window.cylonSDKLaunchListenerAdded) {
-    window.addEventListener('message', function(event) {
-        const data = event.data;
-        if (!data || typeof data !== 'object') return;
+global.showTerminal = function () {
+    var video = document.getElementById('video-layer');
+    var container = pageContainer();
 
-        // Sync OS Theme Colors Live
-        if (data.type === 'QANDY_UPDATE_COLORS') {
-            if (window.CylonSDK.applyColors) window.CylonSDK.applyColors(data.colors);
-        }
+    if (video) video.style.display = 'flex';
+    if (container) container.style.display = 'none';
 
-        if (data.type === 'QANDY_OS_MENU') {
-            if (typeof window.CylonSDK.onSystemMenu === 'function') {
-                window.CylonSDK.onSystemMenu();
-            }
-        }
-        if (data.type === 'gfx' && data.cmd && data.cmd.startsWith('launch_')) {
-            let itemId = data.cmd.substring('launch_'.length);
-            let app = window.CylonSDK.apps[itemId];
+    document.body.classList.remove('app-mode');
 
-            if (app && window.parent && window.parent.PageOpen) {
-                if (typeof window.parent.hpop === 'function') window.parent.hpop();
-                else if (typeof hpop === 'function') hpop();
-                window.parent.PageOpen(app.file, app.title);
-            }
-        }
+    Object.keys(openPages).forEach(function (filename) {
+      openPages[filename].classList.remove('active');
     });
-    window.cylonSDKLaunchListenerAdded = true;
-}
+
+    activePage = null;
+
+    updateTaskbar();
+    if (typeof global.setOSMode === 'function') global.setOSMode('terminal');
+  };
+
+  global.showPage = function (filename) {
+    var video = document.getElementById('video-layer');
+    var container = pageContainer();
+    var frame = openPages[filename];
+
+    if (!frame) return;
+
+    if (video) video.style.display = 'none';
+    if (container) container.style.display = 'block';
+
+    document.body.classList.add('app-mode');
+
+    activePage = filename;
+
+    Object.keys(openPages).forEach(function (name) {
+      var isActive = (name === filename);
+      openPages[name].classList.toggle('active', isActive);
+      
+      if (isActive && openPages[name].contentWindow) {
+          openPages[name].contentWindow.postMessage({ type: 'QANDY_PAGE_ACTIVATED' }, '*');
+      }
+    });
+    
+    if (typeof global.hideFullKeyboard === 'function') {
+      global.hideFullKeyboard();
+    }
+
+    updateTaskbar();
+    if (typeof global.setOSMode === 'function') global.setOSMode('app');
+  };
+
 })();

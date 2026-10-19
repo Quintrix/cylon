@@ -114,13 +114,10 @@ window.gfxInit = async function() {
     for (var i = 0; i < queue.length; i++) { queue[i](); }
   }
 
-  if (typeof popup !== 'undefined') document.body.appendChild(popup);
-  // move txt screen over to reveal gfx (Only if it exists in the DOM)
-  var txtEl = document.getElementById('txt');
-  if (txtEl) {
-      txtEl.style.top = '50px';
-      txtEl.style.left = '350px';
-  }
+  document.body.appendChild(popup);
+  // move txt screen over to reveal gfx
+  document.getElementById('txt').style.top = '50px';
+  document.getElementById('txt').style.left = '350px';
 }
 
 window.gfxConnect = async function(serverIndex) {
@@ -128,8 +125,8 @@ window.gfxConnect = async function(serverIndex) {
   try {
     await gfxFetchMap(gfxDrive);
   } catch (e) {
-    if (typeof print === 'function') await print("Error: " + e.message + "\n\n");
-    if (typeof dosExit === 'function') dosExit();
+    await print("Error: " + e.message + "\n\n");
+    dosExit();
     return;
   }
   
@@ -145,8 +142,8 @@ window.gfxConnect = async function(serverIndex) {
     return;
   }
 
-  if (typeof print === 'function') await print("Error: No session token\n\n");
-  if (typeof dosExit === 'function') dosExit();
+  await print("Error: No session token\n\n");
+  dosExit;
 };
 
 window.gfxTiles = function(sector) {
@@ -255,7 +252,8 @@ window.gfxChar = function(charID, avatarStr, zPos) {
       redBar.id = meterDomId + "_r";
       redBar.src = "i/Zm.png";
       redBar.style.position = "absolute";
-      greenBar.style.top = "0px"; // Ensure alignment
+      redBar.style.height = "6px";
+      redBar.style.top = "0px";
       
       meterEl.appendChild(greenBar);
       meterEl.appendChild(redBar);
@@ -477,7 +475,7 @@ window.gfxVisualTick = function() {
     
     if (playerWalk > -1) {
     	// if player is walking, let client know it is time to take next step
-    	if (typeof walkdown === 'function') walkdown();
+    	walkdown();
     }
     
 }
@@ -487,7 +485,7 @@ var tiles = [];
 async function gfxFetchMap(filename) {
   filename = filename || "capflag.gfx";
   try {
-    if (typeof print === 'function') await print("Loading " + filename + "...<br>");
+    await print("Loading " + filename + "...\n");
     
     var gfxContent = await qdosLoad(filename);
     if (!gfxContent) { throw new Error("Failed to load " + filename); }
@@ -533,7 +531,7 @@ async function gfxFetchMap(filename) {
     return true;
     
   } catch (e) {
-    if (typeof print === 'function') await print("<span style='color:red;'>Error loading " + filename + ": " + e.message + "</span><br>");
+    await print("Error loading " + filename + ": " + e.message + "\n");
     return false;
   }
 }
@@ -1020,7 +1018,7 @@ function gfxClick(bytecode) {
       break;
             
     case "SD": // Server-Down (send command to server)
-      if (typeof hpop === 'function') hpop();
+      hpop();
       gfxDo=data;
       break;   
     
@@ -1074,35 +1072,26 @@ window.gfxZClick = function(z, clickedElement) {
     }
   }
   
-  if (htm && typeof pop === 'function') { pop(htm); }
+  if (htm) { pop(htm); }
 }
 
+splash(1000);
+
 async function splash(durationMs) {
-  var outFn = (typeof print === 'function') ? print : console.log;
-
-  // If running inside Cylon OS, the terminal is HTML-based and doesn't process VT100 ANSI codes
-  if (window.parent && window.parent.CylonDOS) {
-    await outFn("<br><span style='color:var(--fg-color, #0f0); font-weight:bold;'>Quintrix and Crew Software<br>Multiplayer Graphics Engine</span><br><br>");
-    window.GFX = 1;
-    return;
-  }
-
-  // --- Legacy ANSI Fallback for external terminals ---
-  var _CURSOR = typeof CURSOR !== 'undefined' ? CURSOR : 0; 
-  if (typeof CURSOR !== 'undefined') CURSOR = 0;
-  
-  await outFn("\n\n\n");
-  var header = "Quintrix and Crew Software";
-  var footer = "Multiplayer Graphics Engine";
+  _CURSOR=CURSOR; CURSOR=0;
+  await print("\n\n\n");
+  header="Quintrix and Crew Software";
+  footer="Multiplayer Graphics Engine";
   const L1 = header.split('');
   const L2 = footer.split('');
+  // State: 0=Black, 1=Dark(22), 2=Mid(28), 3=Bright(46)
   let state1 = new Array(L1.length).fill(0);
   let state2 = new Array(L2.length).fill(0);
   const colors = ["\x1b[30m", "\x1b[38;5;22m", "\x1b[38;5;28m", "\x1b[38;5;46m"];
   const startTime = Date.now();
-  
   while (state1.concat(state2).some(s => s < 3)) {
-    let output = "\x1b[2A"; 
+    let output = "\x1b[2A"; // Move up to overwrite
+    // Randomly "evolve" characters
     for (let i = 0; i < state1.length; i++) {
       if (state1[i] < 3 && Math.random() > 0.8) state1[i]++;
       output += colors[state1[i]] + L1[i];
@@ -1112,30 +1101,22 @@ async function splash(durationMs) {
       if (state2[i] < 3 && Math.random() > 0.8) state2[i]++;
       output += colors[state2[i]] + L2[i];
     }
-    if (typeof CURMORE !== 'undefined' && CURMORE > -1) { CURMORE = 0; }
-    await outFn(output + "\x1b[0m\n");
-    if (typeof sleep === 'function') await sleep(40); 
+    if (CURMORE>-1) { CURMORE=0; }
+    // beeping sound effects
+    //if (Math.random() > 0.2) { 
+    //  // High-pitched, very short blips (800Hz to 1200Hz)
+    //  let freq = 700 + Math.floor(Math.random() * 400);
+    //  beep(freq, 10); // 20ms duration is a sharp 'click' or 'tick'
+    //}
+    await print(output + "\x1b[0m\n");
+    await sleep(40); // Fast enough to look like data "streaming" in
+    // Safety timeout to prevent infinite loops
     if (Date.now() - startTime > durationMs) break; 
   }
-  await outFn("\x1b[2A\x1b[38;5;46m"+header+"\n"+footer+"\x1b[0m\n");
-  if (typeof CURSOR !== 'undefined') CURSOR = _CURSOR; 
-  await outFn("\n");
-  window.GFX = 1;
+  await print("\x1b[2A\x1b[38;5;46m"+header+"\n"+footer+"\x1b[0m\n");
+  CURSOR=_CURSOR; await print("\n");
+  window.GFX=1;
 }
-
-splash(1000);
-
-// Listen for gfx link clicks forwarded from Cylon OS popups
-window.addEventListener('message', function(e) {
-    if (e.data && e.data.type === 'gfx' && e.data.cmd) {
-        // Ignore "launch_" commands which are meant for the OS desktop launcher
-        if (!e.data.cmd.startsWith('launch_')) {
-            if (typeof gfxClick === 'function') {
-                gfxClick(e.data.cmd);
-            }
-        }
-    }
-});
 
 // Backwards compatibility aliases
 window.LMap = window.LoadMap;

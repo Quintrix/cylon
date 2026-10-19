@@ -5,312 +5,222 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Cylon Desktop</title>
 <script src="cylon-sdk.js"></script>
+<script src="cylon-gfx.js"></script>
 <style>
-    /* Desktop Workspace Styles */
-    body, html {
-        margin: 0;
-        padding: 0;
-        width: 100%;
-        height: 100%;
-        background-color: var(--bg-color, #000);
-        color: var(--fg-color, #0f0);
-        font-family: var(--font-face, monospace);
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        overflow: hidden; /* Prevent scrollbars when scaling */
-        user-select: none;
-        -webkit-user-select: none;
-    }
-
-    #desktop-wrapper {
-        position: relative;
-        background-color: #000;
-        border: 2px solid var(--sel-bg, #333);
-        box-shadow: 0px 10px 30px rgba(0, 0, 0, 0.8);
-        overflow: hidden;
-        transform-origin: center center; /* Scale from the middle */
-    }
-
-    #bg-canvas {
-        position: absolute;
-        top: 0;
-        left: 0;
-        z-index: 1;
-        /* Ensure upscaled pixel art remains sharp, not blurry */
-        image-rendering: -moz-crisp-edges;
-        image-rendering: -webkit-optimize-contrast;
-        image-rendering: crisp-edges;
-        image-rendering: pixelated;
-    }
-
-    #icons-layer {
-        position: absolute;
-        top: 0;
-        left: 0;
-        width: 100%;
-        height: 100%;
-        z-index: 10;
-    }
-
-    .icon-wrap {
-        position: absolute;
-        width: 64px;
-        height: 64px;
-        cursor: pointer;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: flex-start;
-        transition: transform 0.1s;
-        border-radius: 4px;
-    }
-
-    .icon-wrap:hover {
-        background-color: rgba(255, 255, 255, 0.1); /* Subtle highlight for the 2x2 area */
-        z-index: 20;
-    }
-
-    .icon-wrap:active {
-        transform: scale(0.95);
-        background-color: rgba(255, 255, 255, 0.2);
-    }
-
-    .icon-img {
-        width: 32px;
-        height: 32px;
-        image-rendering: pixelated;
-        filter: drop-shadow(2px 2px 2px rgba(0,0,0,0.8));
-        /* Push the 32x32 image down so it sits exactly in the center of the 64x64 wrap */
-        margin-top: 16px; 
-    }
-
-    .icon-label {
-        margin-top: 2px;
-        font-size: 11px;
-        font-weight: bold;
-        color: #fff;
-        font-family: sans-serif;
-        text-shadow: 1px 1px 1px #000, -1px -1px 1px #000, 1px -1px 1px #000, -1px 1px 1px #000;
-        text-align: center;
-        line-height: 1;
-        white-space: nowrap; /* Prevent word wrapping so it looks cleaner */
-    }
+/* Desktop Workspace Styles */
+body, html {
+margin: 0;
+padding: 0;
+width: 100%;
+height: 100%;
+background-color: var(--bg-color, #000);
+color: var(--fg-color, #0f0);
+font-family: var(--font-face, monospace);
+display: flex;
+align-items: center;
+justify-content: center;
+overflow: hidden;
+user-select: none;
+-webkit-user-select: none;
+}
+ 
+#desktop-wrapper {
+   position: relative;
+   background-color: #000;
+   border: 2px solid var(--sel-bg, #333);
+   box-shadow: 0px 10px 30px rgba(0, 0, 0, 0.8);
+   overflow: hidden;
+}
+ 
+#bg-canvas {
+   position: absolute;
+   top: 0;
+   left: 0;
+   width: 100%;
+   height: 100%;
+   z-index: 1;
+   image-rendering: -moz-crisp-edges;
+   image-rendering: -webkit-optimize-contrast;
+   image-rendering: crisp-edges;
+   image-rendering: pixelated;
+}
+ 
+#tiles-layer {
+   position: absolute;
+   top: 0;
+   left: 0;
+   width: 100%;
+   height: 100%;
+   z-index: 5;
+}
+ 
+#icons-layer {
+   position: absolute;
+   top: 0;
+   left: 0;
+   width: 100%;
+   height: 100%;
+   z-index: 10;
+}
+ 
+.icon-wrap {
+   position: absolute;
+   cursor: pointer;
+   display: flex;
+   flex-direction: column;
+   align-items: center;
+   justify-content: center;
+   border-radius: 4px;
+   transition: background-color 0.1s;
+}
+ 
+.icon-wrap:hover {
+   background-color: rgba(255, 255, 255, 0.1);
+   z-index: 20;
+}
+ 
+.icon-wrap:active {
+   transform: scale(0.95);
+   background-color: rgba(255, 255, 255, 0.2);
+}
+ 
+.icon-img {
+   max-width: 60%;
+   max-height: 55%;
+   object-fit: contain;
+   image-rendering: pixelated;
+   filter: drop-shadow(2px 2px 2px rgba(0,0,0,0.8));
+}
+ 
+.icon-label {
+   margin-top: 4px;
+   font-size: clamp(9px, 2vmin, 14px);
+   font-weight: bold;
+   color: #fff;
+   font-family: sans-serif;
+   text-shadow: 1px 1px 1px #000, -1px -1px 1px #000, 1px -1px 1px #000, -1px 1px 1px #000;
+   text-align: center;
+   line-height: 1.1;
+   width: 90%;
+   white-space: nowrap;
+   overflow: hidden;
+   text-overflow: ellipsis;
+}
 </style>
 </head>
 <body>
-
 <div id="desktop-wrapper">
-    <canvas id="bg-canvas"></canvas>
-    <div id="icons-layer"></div>
+   <canvas id="bg-canvas"></canvas>
+   <div id="tiles-layer"></div>
+   <div id="icons-layer"></div>
 </div>
-
 <script>
-    // New Default Map: Icons are spread out across Z locations corresponding to a 2x2 grid stride
-    const DEFAULT_GFX = `a=W4Ab\nd=18x10\nAa=AuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAu.Aq0FZa|Vhcylon-command.htm--\n~Ar10Za|Vhcylon-files--~As2CZa~Aw11Za|Vhcylon-desktop--~Av2BZa|Vhgfx-create--\nAb=AuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAuAu.\n`;
-
-
-    let currentCols = 14;
-    let currentRows = 10;
-
-    window.onload = async function() {
-        if (window.CylonSDK && window.CylonSDK.injectDesktopStyles) {
-            window.CylonSDK.injectDesktopStyles();
-        }
-
-        let dos = window.parent.CylonDOS;
-        if (!dos) {
-            document.body.innerHTML = "<h3 style='padding:20px;'>Error: CylonDOS not connected.</h3>";
-            return;
-        }
-
-        let gfxData = await dos.load('cylon-desktop.gfx');
-        
-        // Auto-upgrade script: If missing OR if it detects the old crowded default map
-        if (!gfxData || gfxData.includes('Aq0FZa|Vhcylon-command.htm--\\n~Ar10Za|Vhcylon-files.htm--')) {
-            gfxData = DEFAULT_GFX;
-            await dos.save('cylon-desktop.gfx', gfxData);
-        }
-
-        renderDesktop(gfxData);
-        
-        // Keep it scaled properly if screen orientation/size changes
-        window.addEventListener('resize', fitDesktopToScreen);
-    };
-
-    // Dynamically scale the desktop wrapper to fill the available screen space
-    function fitDesktopToScreen() {
-        const wrapper = document.getElementById('desktop-wrapper');
-        const logicalWidth = currentCols * 32;
-        const logicalHeight = currentRows * 32;
-        
-        const scaleX = window.innerWidth / logicalWidth;
-        const scaleY = window.innerHeight / logicalHeight;
-        
-        // 0.98 ensures it doesn't clip tightly against the very edge of the iframe
-        const scale = Math.min(scaleX, scaleY) * 0.98;
-        
-        wrapper.style.transform = `scale(${scale})`;
-    }
-
-    function extractLabel(logic, id) {
-        if (logic && logic.includes('Vh')) {
-            let match = logic.match(/Vh(.*?)(--|$)/);
-            if (match) {
-                let name = match[1];
-                name = name.replace(/\.html?$/, '').replace(/^cylon-/, '').replace(/^gfx-/, '');
-                return name.charAt(0).toUpperCase() + name.slice(1);
-            }
-        }
-        
-        if (id === 'As') return 'Compiler';
-        if (id === 'Aq') return 'Command';
-        
-        return 'App ' + id;
-    }
-
-    function renderDesktop(gfxData) {
-        let lines = gfxData.replace(/\r/g, '').split('\n');
-        let sectorData = "";
-
-        for(let line of lines) {
-            if (line.startsWith('d=')) {
-                let dims = line.substring(2).trim().split('x');
-                currentCols = parseInt(dims[0], 10);
-                currentRows = parseInt(dims[1], 10);
-            }
-            if (line.startsWith('Aa=')) {
-                sectorData = line.substring(3).trim();
-            }
-        }
-
-        let dotIdx = sectorData.indexOf('.');
-        let mapStr = dotIdx !== -1 ? sectorData.substring(0, dotIdx) : sectorData;
-        let objStr = dotIdx !== -1 ? sectorData.substring(dotIdx + 1) : "";
-        
-        if (!mapStr || mapStr.length < currentCols * currentRows * 2) {
-            mapStr = "Au".repeat(currentCols * currentRows);
-        }
-
-        const wrapper = document.getElementById('desktop-wrapper');
-        const canvas = document.getElementById('bg-canvas');
-        const iconsLayer = document.getElementById('icons-layer');
-        
-        wrapper.style.width = (currentCols * 32) + 'px';
-        wrapper.style.height = (currentRows * 32) + 'px';
-        canvas.width = currentCols * 32;
-        canvas.height = currentRows * 32;
-        iconsLayer.innerHTML = '';
-        
-        let ctx = canvas.getContext('2d');
-        
-        for (let i = 0; i < currentCols * currentRows; i++) {
-            let tileCode = mapStr.substring(i*2, i*2+2);
-            if(tileCode.length === 2) {
-                let img = new Image();
-                img.src = 't/' + tileCode + '.png';
-                img.onload = () => {
-                    let x = i % currentCols;
-                    let y = Math.floor(i / currentCols);
-                    ctx.drawImage(img, x * 32, y * 32, 32, 32);
-                };
-            }
-        }
-
-        if (objStr) {
-            let objects = objStr.replace(/\\n/g, '').split('~');
-            
-            objects.forEach(obj => {
-                if (!obj.trim()) return;
-                
-                let parts = obj.split('|');
-                let meta = parts[0];
-                let logic = parts[1] || "";
-                
-                if (meta.length < 4) return;
-                
-                let id = meta.substring(0, 2);
-                let zHex = meta.substring(2, 4);
-                let z = parseInt(zHex, 16); 
-                
-                let x = z % currentCols;
-                let y = Math.floor(z / currentCols);
-                
-                let labelText = extractLabel(logic, id);
-                let filename = null;
-                if (logic && logic.includes('Vh')) {
-                    let match = logic.match(/Vh(.*?)(--|$)/);
-                    if (match) filename = match[1];
-                }
-
-                let wrap = document.createElement('div');
-                wrap.className = 'icon-wrap';
-                
-                // Align the top-left of the 64x64 container strictly to the Z coordinate tile
-                // This forces the icon to span a perfect 2x2 grid block
-                wrap.style.left = (x * 32) + 'px';
-                wrap.style.top = (y * 32) + 'px';
-                
-                let img = document.createElement('img');
-                img.className = 'icon-img';
-                img.src = 'i/' + id + '.png';
-                img.onerror = function() { this.src = 'q/file.png'; };
-                
-                let lbl = document.createElement('div');
-                lbl.className = 'icon-label';
-                lbl.textContent = labelText;
-                
-                wrap.appendChild(img);
-                wrap.appendChild(lbl);
-                
-                wrap.onclick = (e) => {
-                    e.stopPropagation();
-                    if (filename && window.parent && window.parent.PageOpen) {
-                        window.parent.PageOpen(filename);
-                    } else {
-                        if (window.parent && window.parent.CylonPopManager) {
-                            window.parent.CylonPopManager.showContextMenu(e, [
-                                { label: 'Under Construction', action: () => {} }
-                            ]);
-                        }
-                    }
-                };
-
-                wrap.oncontextmenu = (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    if (window.parent && window.parent.CylonPopManager) {
-                        window.parent.CylonPopManager.showContextMenu(e, [
-                            { label: 'Open ' + labelText, action: () => {
-                                if (filename && window.parent.PageOpen) window.parent.PageOpen(filename);
-                            }},
-                            { label: 'Edit Desktop', action: () => {
-                                if (window.parent.PageOpen) window.parent.PageOpen('gfx-compiler.htm');
-                            }}
-                        ]);
-                    }
-                };
-                
-                iconsLayer.appendChild(wrap);
-            });
-        }
-
-        wrapper.oncontextmenu = (e) => {
-            if (e.target.closest('.icon-wrap')) return; 
-            e.preventDefault();
-            if (window.parent && window.parent.CylonPopManager) {
-                window.parent.CylonPopManager.showContextMenu(e, [
-                    { label: 'Edit Desktop', action: () => { 
-                        if (window.parent.PageOpen) window.parent.PageOpen('gfx-compiler.htm'); 
-                    }},
-                    { label: 'Refresh', action: () => window.location.reload() }
-                ]);
-            }
-        };
-
-        // Scale up to fit the window immediately after DOM creation
-        fitDesktopToScreen();
-    }
+window.onload = async function() {
+if (window.CylonSDK && window.CylonSDK.injectDesktopStyles) {
+window.CylonSDK.injectDesktopStyles();
+}
+ 
+if (!window.CylonCommand || !window.qdosLoad) {
+document.body.innerHTML = "<h3 style='padding:20px;'>Error: Cylon OS not fully connected.</h3>";
+return;
+}
+ 
+window.keydown = function(key, e) {
+   if (!window.CylonGFX) return;
+   
+   // Interrupt auto-walking if user takes manual control
+   window.CylonGFX.targetCursorZ = -1;
+   window.CylonGFX.pendingCursorAction = null;
+ 
+   let handled = false;
+   if (key === 'ArrowUp')    { window.CylonGFX.moveCursor(0, -1); handled = true; }
+   if (key === 'ArrowDown')  { window.CylonGFX.moveCursor(0, 1); handled = true; }
+   if (key === 'ArrowLeft')  { window.CylonGFX.moveCursor(-1, 0); handled = true; }
+   if (key === 'ArrowRight') { window.CylonGFX.moveCursor(1, 0); handled = true; }
+   if (key === 'Enter')      { window.CylonGFX.executeCursor(); handled = true; }
+   
+   if (handled && e) {
+       e.preventDefault(); // Prevent iframe from scrolling
+   }
+};
+ 
+// ====================================================================
+// OS BOOT SCRIPT - Transparent terminal logic driven by iferror
+// ====================================================================
+ 
+await window.CylonCommand(`desktop:`);
+await window.CylonCommand(`iferror mount desktop idb`);
+await window.CylonCommand(`iferror import cylon-desktop.gfx ram desktop`);
+await window.CylonCommand(`iferror mount ram: ram desktop`);
+await window.CylonCommand(`cylon:`);
+await window.CylonCommand(`iferror ram:`);
+ 
+// Initialize the Graphics Engine on the desktop root sector
+if (window.CylonGFX) {
+   let startSector = 'Aa';
+   try {
+       let loaded = await window.qdosLoad('desktop:/a/gfxSector');
+       if (loaded) {
+           let s = loaded.trim();
+           if (s.length === 2) startSector = s;
+       }
+   } catch(e) {}
+   
+   await window.CylonGFX.init('desktop:/w/' + startSector);
+} else {
+   console.error("CylonGFX Engine missing!");
+}
+ 
+// Keep it scaled properly if screen orientation/size changes
+window.addEventListener('resize', fitDesktopToScreen);
+ 
+if (window.ResizeObserver) {
+new ResizeObserver(fitDesktopToScreen).observe(document.body);
+}
+};
+ 
+// Calculate container sizing logically scaling or adhering to static tiles
+function fitDesktopToScreen() {
+   if (!window.CylonGFX) return;
+ 
+   const wrapper = document.getElementById('desktop-wrapper');
+   const screenW = window.innerWidth;
+   const screenH = window.innerHeight;
+ 
+   const cols = window.CylonGFX.gridWide;
+   const rows = window.CylonGFX.gridTall;
+ 
+   // Failsafe: Avoid applying sizing calculations if DOM/iframe geometry isn't ready
+   if (!cols || !rows || screenW === 0 || screenH === 0) return;
+ 
+   let w, h;
+ 
+   // Utilize the stretching parameter properly
+   if (window.CylonGFX.gfxGridStretch) {
+       const aspect = cols / rows;
+       w = screenW;
+       h = screenW / aspect;
+ 
+       // If the calculated height exceeds the window, constrain by height instead
+       if (h > screenH) {
+           h = screenH;
+           w = screenH * aspect;
+       }
+ 
+       // 98% allows a slight visual border clearance on the edges
+       w = Math.floor(w * 0.98);
+       h = Math.floor(h * 0.98);
+   } else {
+       // Strictly adhere to TileSize without stretching
+       w = cols * window.CylonGFX.gfxTileSize;
+       h = rows * window.CylonGFX.gfxTileSize;
+   }
+ 
+   wrapper.style.width = w + 'px';
+   wrapper.style.height = h + 'px';
+}
+ 
 </script>
+ 
 </body>
 </html>
