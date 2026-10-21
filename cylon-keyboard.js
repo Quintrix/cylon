@@ -1,3 +1,4 @@
+
 window.normalKeys = {
     '`':'`', '1':'1', '2':'2', '3':'3', '4':'4', '5':'5', '6':'6', '7':'7', '8':'8', '9':'9', '0':'0',
     '-':'-', '=':'=', '[':'[', ']':']', '\\':'\\', ';':';', "'":"'", ',':',', '.':'.', '/':'/',
@@ -359,12 +360,14 @@ function keyboard() {
         if (window.updatePrompt) window.updatePrompt(); // Use the global function
         document.getElementById('kb-overlay').classList.add('is-open');
         document.body.classList.add('kb-open');
+        if (window.fitScreenToGrid) setTimeout(window.fitScreenToGrid, 50); // Inform OS Grid Wrapper
     };
 
     window.hideFullKeyboard = function() {
         document.getElementById('kb-overlay').classList.remove('is-open');
         document.body.classList.remove('kb-open');
         window.resetPan();
+        if (window.fitScreenToGrid) setTimeout(window.fitScreenToGrid, 50); // Inform OS Grid Wrapper
     };
 
     // --- KEYBOARD-AVOIDANCE PANNING ---------------------------------------

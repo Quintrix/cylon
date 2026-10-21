@@ -3,11 +3,22 @@
 // "Everything is a file. The filesystem is the physics engine."
 // ============================================================================
 
+// --- Unification with multiplayer gfx.js state variables ---
+window.playerItem = "Si";   // Desktop defaults to Cursor 1 ('Si')
+window.playerZ = -1;        // z-location of player/cursor
+window.lastClickZ = -1;     // Tracks the last physical mapped screen coordinate clicked
+window.playerAvatar = "";   // player's avatar modifiers (if any)
+window.playerInven = "";    // inventory 
+window.playerId = "";       // unique 4 character player id
+window.playerWalk = -1;     // z-location player clicks to walk to, -1 = standing still
+window.playerDo = null;     // callback/command to execute when destination is reached
+window.map = "A1";          // map player-item is currently on
+
 window.CylonGFX = {
     // --- GFX Configuration Defaults ---
     gfxTileSize: 64,
     gfxTileDir: 't/',
-    gfxIconDir: 'q/',
+    gfxIconDir: 'q/',   // Default system icons (Desktop uses q/ for icons/cursors)
     gfxCharDir: 'c/',
     gfxMapsDir: 'm/',
     gridWide: 8, 
@@ -19,78 +30,84 @@ window.CylonGFX = {
     gfxLowerBound: 'Hh',  // Bottom-Right map grid sector limit
     gfxAirLock: false,    // True: Scroll triggers ON edge tile. False: Scroll triggers PAST edge tile.
 
-    gfxCommandLog: false, // NEW: If true, saves are echoed natively in the command terminal
+    gfxCommandLog: false, // If true, saves are echoed natively in the command terminal
 
     fillTileCode: null, // Holds the active brush code (e.g., 'Za')
 
     // --- Cursor Walk Variables ---
     gfxCycle: 200,             // Tick speed in ms
-    targetCursorZ: -1,         // Destination point
-    pendingCursorAction: null, // Queued execution logic
     cursorInterval: null,      // Internal loop pointer
 
-    // Backwards compatibility aliases for older scripts expecting mapx/mapy
+    // Backwards compatibility aliases
     get mapx() { return this.gridWide; },
     set mapx(v) { this.gridWide = v; },
     get mapy() { return this.gridTall; },
     set mapy(v) { this.gridTall = v; },
+    get targetCursorZ() { return window.playerWalk; },
+    set targetCursorZ(v) { window.playerWalk = v; },
+    get pendingCursorAction() { return window.playerDo; },
+    set pendingCursorAction(v) { window.playerDo = v; },
 
     // --- State Variables ---
     currentPath: '',
-    cursorZ: 0, // In-memory cursor state
     gfxGrid: false, 
 
-    // --- NEW: Unified Save Method ---
+    // --- Unified Save Method ---
     persistState: async function(path, data) {
-        // Guarantee data is a string and handle empty/newline payloads gracefully
         let safeData = String(data || "\\n");
         
         if (this.gfxCommandLog && typeof window.CylonCommand === 'function') {
-            // Verbose: Send to terminal GUI
-            // CLI requires single line strings. Convert real newlines to '\\n' for the parser.
             let cliData = safeData.replace(/\n/g, '\\n');
-            if (cliData.trim() === '') cliData = '\\n'; // Ensure DOS <text> argument is never empty
+            if (cliData.trim() === '') cliData = '\\n'; 
             
             await window.CylonCommand(`save ${path} ${cliData}`);
         } else if (window.parent && window.parent.CylonDOS) {
-            // Silent: Direct to IndexedDB/RAM
             await window.parent.CylonDOS.save(path, safeData);
         }
     },
 
     init: async function(startPath) {
-        // Setup message listeners
         this.setupListeners();
       
         this.currentPath = startPath;
+        
+        let parts = startPath.replace(/\/$/, '').split('/');
+        window.map = parts[parts.length - 1] || "A1";
+        
         let drive = startPath.split(':')[0]; 
         
         if (window.CylonSDK && window.CylonSDK.injectDesktopStyles) {
             window.CylonSDK.injectDesktopStyles();
         }
 
+        // Handle safe headless boot mode for native OS initialization
+        let dosObj = window.parent && window.parent.CylonDOS ? window.parent.CylonDOS : window.CylonDOS;
+        if (!dosObj) return;
+
         // 1. Load GFX Variables from VFS
-        let tDir = await window.qdosLoad(`${drive}:/a/gfxTileDir`);
-        let iDir = await window.qdosLoad(`${drive}:/a/gfxIconDir`);
-        let cDir = await window.qdosLoad(`${drive}:/a/gfxCharDir`);
-        let mDir = await window.qdosLoad(`${drive}:/a/gfxMapsDir`);
-        let tSize = await window.qdosLoad(`${drive}:/a/gfxTileSize`);
+        let tDir = await this.qdosLoadSafe(dosObj, `${drive}:/a/gfxTileDir`);
+        let iDir = await this.qdosLoadSafe(dosObj, `${drive}:/a/gfxIconDir`);
+        let cDir = await this.qdosLoadSafe(dosObj, `${drive}:/a/gfxCharDir`);
+        let mDir = await this.qdosLoadSafe(dosObj, `${drive}:/a/gfxMapsDir`);
+        let tSize = await this.qdosLoadSafe(dosObj, `${drive}:/a/gfxTileSize`);
         
-        let gWide = await window.qdosLoad(`${drive}:/a/gfxGridWide`);
-        if (!gWide) gWide = await window.qdosLoad(`${drive}:/a/mapx`); // Legacy Fallback
+        let gWide = await this.qdosLoadSafe(dosObj, `${drive}:/a/gfxGridWide`);
+        if (!gWide) gWide = await this.qdosLoadSafe(dosObj, `${drive}:/a/mapx`); 
         
-        let gTall = await window.qdosLoad(`${drive}:/a/gfxGridTall`);
-        if (!gTall) gTall = await window.qdosLoad(`${drive}:/a/mapy`); // Legacy Fallback
+        let gTall = await this.qdosLoadSafe(dosObj, `${drive}:/a/gfxGridTall`);
+        if (!gTall) gTall = await this.qdosLoadSafe(dosObj, `${drive}:/a/mapy`); 
         
-        let gStretch = await window.qdosLoad(`${drive}:/a/gfxGridStretch`);
-        let cz = await window.qdosLoad(`${drive}:/a/gfxCursorZ`);
+        let gStretch = await this.qdosLoadSafe(dosObj, `${drive}:/a/gfxGridStretch`);
+        let cz = await this.qdosLoadSafe(dosObj, `${drive}:/a/playerZ`);
+        if (!cz) cz = await this.qdosLoadSafe(dosObj, `${drive}:/a/gfxCursorZ`); // Legacy
+        
+        let pItem = await this.qdosLoadSafe(dosObj, `${drive}:/a/playerItem`);
         
         // --- Spatial Navigation Variables ---
-        let rWorld = await window.qdosLoad(`${drive}:/a/gfxRoundWorld`);
-        let lBound = await window.qdosLoad(`${drive}:/a/gfxLowerBound`);
-        let aLock = await window.qdosLoad(`${drive}:/a/gfxAirLock`);
-        
-        let cLog = await window.qdosLoad(`${drive}:/a/gfxCommandLog`);
+        let rWorld = await this.qdosLoadSafe(dosObj, `${drive}:/a/gfxRoundWorld`);
+        let lBound = await this.qdosLoadSafe(dosObj, `${drive}:/a/gfxLowerBound`);
+        let aLock = await this.qdosLoadSafe(dosObj, `${drive}:/a/gfxAirLock`);
+        let cLog = await this.qdosLoadSafe(dosObj, `${drive}:/a/gfxCommandLog`);
 
         // 2. Apply Valid Variables
         if (tDir) this.gfxTileDir = tDir.trim();
@@ -107,21 +124,30 @@ window.CylonGFX = {
         if (aLock) this.gfxAirLock = (aLock.trim().toLowerCase() === 'true');
         if (cLog) this.gfxCommandLog = (cLog.trim().toLowerCase() === 'true');
 
-        // Load custom walk cycle time
-        let cycleStr = await window.qdosLoad(`${drive}:/a/gfxCycle`);
+        let cycleStr = await this.qdosLoadSafe(dosObj, `${drive}:/a/gfxCycle`);
         if (cycleStr) {
             let val = parseFloat(cycleStr.trim());
             if (!isNaN(val)) this.gfxCycle = Math.floor(val * 1000); 
         }
 
-        // 3. Restore Cursor & Start Clock
-        this.cursorZ = cz ? parseInt(cz, 10) : 0;
-        if (isNaN(this.cursorZ)) this.cursorZ = 0;
+        // 3. Restore Player/Cursor State
+        if (pItem) window.playerItem = pItem.trim();
+        
+        window.playerZ = cz ? parseInt(cz, 10) : 0;
+        if (isNaN(window.playerZ)) window.playerZ = 0;
         
         this.startCursorTick();
 
         window.dispatchEvent(new Event('resize'));
         await this.renderScreen();
+    },
+
+    qdosLoadSafe: async function(dos, path) {
+        try {
+            return await dos.load(path);
+        } catch(e) {
+            return null;
+        }
     },
 
     setupListeners: function() {
@@ -134,32 +160,24 @@ window.CylonGFX = {
             this._listenersAdded = true;
         }
 
-        const wrapper = document.getElementById('desktop-wrapper');
+        // Works inside the cylon.htm terminal wrapper, OR inside a desktop frame!
+        const wrapper = document.getElementById('screen-wrapper') || document.getElementById('desktop-wrapper');
+        
         if (wrapper && !this._bgClickBound) {
-            // Unify all left clicks (icons and background alike)
             wrapper.addEventListener('pointerup', (e) => {
                 if (e.button !== 0 && e.pointerType === 'mouse') return;
                 
-                // === NEW UX: TOUCH/CLICK TO DISMISS MENU ===
                 if (window.parent && window.parent.CylonPopManager) {
-                    // Check if a context menu is currently open in the parent DOM.
-                    // NOTE: Change '.context-menu' to the actual CSS class or ID of your pop window!
-                    let activeMenu = window.parent.document.querySelector('.context-menu'); 
-                    
-                    // If the menu exists and is visible on screen...
-                    if (activeMenu && activeMenu.style.display !== 'none') {
-                        // Close it via the OS Manager (or fallback to hiding it manually)
+                    let contextWrapper = window.parent.document.getElementById('cylon-context-wrapper'); 
+                    if (contextWrapper && contextWrapper.style.display !== 'none') {
                         if (typeof window.parent.CylonPopManager.hideContextMenu === 'function') {
                             window.parent.CylonPopManager.hideContextMenu();
                         } else {
-                            activeMenu.style.display = 'none'; 
+                            contextWrapper.style.display = 'none'; 
                         }
-                        
-                        // ABORT! Return early so the cursor DOES NOT move and a new menu doesn't open.
-                        return; 
+                        return; // Prevent cursor moving since they were simply trying to close the menu
                     }
                 }
-                // ===========================================
                 
                 let rect = wrapper.getBoundingClientRect();
                 let pctX = (e.clientX - rect.left) / rect.width;
@@ -167,19 +185,25 @@ window.CylonGFX = {
                 let x = Math.floor(pctX * this.gridWide);
                 let y = Math.floor(pctY * this.gridTall);
                 
-                // Keep it strictly clamped to visual bounds
                 x = Math.max(0, Math.min(x, this.gridWide - 1));
                 y = Math.max(0, Math.min(y, this.gridTall - 1));
                 let z = y * this.gridWide + x;
                 
-                this.walkToZ(z, () => this.showTileMenu(z));
+                // Expose globally for terminal mapping equations
+                window.lastClickZ = z;
+                if (window.parent && window.parent !== window) {
+                    window.parent.lastClickZ = z;
+                }
+                
+                // Only initiate graphic cursor actions if we are actively rendering a desktop layer
+                if (wrapper.id === 'desktop-wrapper') {
+                    this.walkToZ(z, () => this.showTileMenu(z));
+                }
             });
 
-            // Handle right clicks directly (instantly snap cursor and show menu)
             wrapper.addEventListener('contextmenu', (e) => {
                 e.preventDefault();
 
-                // Force close any existing menus first
                 if (window.parent && window.parent.document) {
                     window.parent.document.dispatchEvent(new Event('click'));
                 }
@@ -194,9 +218,16 @@ window.CylonGFX = {
                 y = Math.max(0, Math.min(y, this.gridTall - 1));
                 let z = y * this.gridWide + x;
 
-                this.targetCursorZ = -1; // stop walking
-                this.setCursorZ(z);
-                this.showTileMenu(z);
+                window.lastClickZ = z;
+                if (window.parent && window.parent !== window) {
+                    window.parent.lastClickZ = z;
+                }
+
+                if (wrapper.id === 'desktop-wrapper') {
+                    window.playerWalk = -1; 
+                    this.setCursorZ(z);
+                    this.showTileMenu(z);
+                }
             });
 
             this._bgClickBound = true;
@@ -212,22 +243,20 @@ window.CylonGFX = {
             case 'fill':
                 if (data) {
                     this.fillTileCode = data;
-                    if (this.gfxCommandLog) window.parent.print(`[.4]GFX Fill Mode ENGAGED: brush set to [${data}][.]\n`);
+                    if (this.gfxCommandLog && window.parent.print) window.parent.print(`[.4]GFX Fill Mode ENGAGED: brush set to [${data}][.]\n`);
                 } else {
                     this.fillTileCode = null;
-                    if (this.gfxCommandLog) window.parent.print(`[.2]GFX Fill Mode DISABLED.[.]\n`);
+                    if (this.gfxCommandLog && window.parent.print) window.parent.print(`[.2]GFX Fill Mode DISABLED.[.]\n`);
                 }
                 break;
 
             case 'tele':
                 if (data) {
-                    // Re-initialize the graphics engine pointing at the new sector
                     let drive = this.currentPath.split(':')[0] || 'ram';
                     await this.init(`${drive}:/w/${data}`);
                     
-                    // Persist the location
                     await this.persistState(`${drive}:/a/gfxSector`, data);
-                    if (this.gfxCommandLog) window.parent.print(`[.3]Teleported to sector: ${data}[.]\n`);
+                    if (this.gfxCommandLog && window.parent.print) window.parent.print(`[.3]Teleported to sector: ${data}[.]\n`);
                 }
                 break;
                 
@@ -238,19 +267,18 @@ window.CylonGFX = {
                     let name = parts.slice(1).join(' ');
                     
                     if (code && code.length >= 2 && name && name.length >= 3) {
-                        code = code.substring(0, 2); // strictly exact 2 characters
-                        let zHex = this.cursorZ.toString(16).padStart(2, '0').toLowerCase();
+                        code = code.substring(0, 2); 
+                        let zHex = window.playerZ.toString(16).padStart(2, '0').toLowerCase();
                         let filename = code + zHex + name;
                         
                         let pathPrefix = this.currentPath.endsWith('/') ? this.currentPath : this.currentPath + '/';
                         let filePath = `${pathPrefix}${filename}`;
                         
-                        // Generates an empty script file representing the icon using literal \n
                         await this.persistState(filePath, "\\n");
-                        if (this.gfxCommandLog) window.parent.print(`[.4]GFX Engine: Created icon '${name}' at Z:${this.cursorZ}[.]\n`);
+                        if (this.gfxCommandLog && window.parent.print) window.parent.print(`[.4]GFX Engine: Created icon '${name}' at Z:${window.playerZ}[.]\n`);
                         this.renderScreen();
                     } else {
-                        if (this.gfxCommandLog) window.parent.print(`[.4]GFX Error: 'gfx icon [2-char code] [>=3-char name]' required.[.]\n`);
+                        if (this.gfxCommandLog && window.parent.print) window.parent.print(`[.4]GFX Error: 'gfx icon [2-char code] [>=3-char name]' required.[.]\n`);
                     }
                 }
                 break;
@@ -262,15 +290,14 @@ window.CylonGFX = {
                     let commands = data.substring(name.length).trim();
                     
                     if (name && name.length >= 3 && commands) {
-                        let zHex = this.cursorZ.toString(16).padStart(2, '0').toLowerCase();
-                        let dos = window.parent.CylonDOS;
+                        let zHex = window.playerZ.toString(16).padStart(2, '0').toLowerCase();
+                        let dos = window.parent && window.parent.CylonDOS ? window.parent.CylonDOS : window.CylonDOS;
                         let files = [];
                         try { files = await dos.dir(this.currentPath); } catch (e) {}
                         
                         let targetFile = null;
                         for (let file of files) {
                             let fname = file.name.substring(file.name.lastIndexOf('/') + 1);
-                            // Avoid maps ('m') and tilemaps ('t')
                             if (fname.length >= 4 && file.type === 'file' && fname !== 'm' && fname !== 't') {
                                 let fZHex = fname.substring(2, 4).toLowerCase();
                                 let fName = fname.substring(4);
@@ -285,12 +312,12 @@ window.CylonGFX = {
                             let pathPrefix = this.currentPath.endsWith('/') ? this.currentPath : this.currentPath + '/';
                             let filePath = `${pathPrefix}${targetFile}`;
                             await this.persistState(filePath, commands);
-                            if (this.gfxCommandLog) window.parent.print(`[.4]GFX Engine: Saved run script for icon '${name}'.[.]\n`);
+                            if (this.gfxCommandLog && window.parent.print) window.parent.print(`[.4]GFX Engine: Saved run script for icon '${name}'.[.]\n`);
                         } else {
-                            if (this.gfxCommandLog) window.parent.print(`[.4]GFX Error: Icon '${name}' not found at cursor Z:${this.cursorZ}.[.]\n`);
+                            if (this.gfxCommandLog && window.parent.print) window.parent.print(`[.4]GFX Error: Icon '${name}' not found at cursor Z:${window.playerZ}.[.]\n`);
                         }
                     } else {
-                        if (this.gfxCommandLog) window.parent.print(`[.4]GFX Error: 'gfx run [icon name] [commands]' required.[.]\n`);
+                        if (this.gfxCommandLog && window.parent.print) window.parent.print(`[.4]GFX Error: 'gfx run [icon name] [commands]' required.[.]\n`);
                     }
                 }
                 break;                
@@ -298,12 +325,11 @@ window.CylonGFX = {
     },
 
     renderScreen: async function() {
-        let dos = window.parent.CylonDOS;
+        let dos = window.parent && window.parent.CylonDOS ? window.parent.CylonDOS : window.CylonDOS;
         const iconsLayer = document.getElementById('icons-layer');
         const tilesLayer = document.getElementById('tiles-layer');
-        if (!iconsLayer) return;
+        if (!iconsLayer) return; // Allows OS headless physics tracking without crashing!
 
-        // --- Apply Sysop Grid Visualization ---
         if (this.gfxGrid) {
             iconsLayer.style.backgroundImage = `
                 linear-gradient(to right, rgba(255, 255, 255, 0.15) 1px, transparent 1px),
@@ -319,18 +345,14 @@ window.CylonGFX = {
             iconsLayer.style.borderBottom = 'none';
         }
         
-        // Clean out icons, but keep the cursor if it exists to preserve animation
         Array.from(iconsLayer.children).forEach(child => {
             if (child.id !== 'gfx-sys-cursor') child.remove();
         });
 
-        // --- RENDER BACKGROUND TILES ---
         if (tilesLayer) tilesLayer.innerHTML = '';
         
         let tData = "";
-        try {
-            tData = await dos.load(`${this.currentPath}/t`);
-        } catch (e) { /* File doesn't exist yet */ }
+        try { tData = await dos.load(`${this.currentPath}/t`); } catch (e) { }
 
         if (tData) {
             let expectedLen = this.gridWide * this.gridTall * 2;
@@ -342,7 +364,6 @@ window.CylonGFX = {
                 for (let z = 0; z < this.gridWide * this.gridTall; z++) {
                     let code = tData.substring(z * 2, z * 2 + 2);
                     
-                    // 'Za' denotes a transparent tile, let the bg-canvas shine through natively
                     if (code && code !== 'Za') {
                         let x = z % this.gridWide;
                         let y = Math.floor(z / this.gridWide);
@@ -365,19 +386,13 @@ window.CylonGFX = {
         }
 
         let files = [];
-        try {
-            files = await dos.dir(this.currentPath);
-        } catch (e) {
-            console.warn("GFX: Sector empty or missing:", e.message);
-            return;
-        }
+        try { files = await dos.dir(this.currentPath); } catch (e) { return; }
 
         let drive = this.currentPath.split(':')[0] || 'ram';
 
         for (let file of files) {
             let filename = file.name.substring(file.name.lastIndexOf('/') + 1);
 
-            // Skip 'm' map properties, 't' tile maps, and directories
             if (filename === 'm' || filename === 't' || file.type !== 'file') continue;
 
             if (filename.length >= 4) {
@@ -394,18 +409,17 @@ window.CylonGFX = {
             }
         }
         
-        // Ensure cursor is drawn on top
         this.renderCursor();
     },
 
     buildSprite: function(iconId, x, y, z, labelText, fullPath) {
         const iconsLayer = document.getElementById('icons-layer');
+        if (!iconsLayer) return;
         const self = this;
         
         let wrap = document.createElement('div');
         wrap.className = 'icon-wrap';
         
-        // Attach data attributes so the menu generator can find it
         wrap.setAttribute('data-z', z);
         wrap.setAttribute('data-path', fullPath);
         wrap.setAttribute('data-label', labelText);
@@ -445,22 +459,25 @@ window.CylonGFX = {
 
         let cursorEl = document.getElementById('gfx-sys-cursor');
         if (!cursorEl) {
-            cursorEl = document.createElement('div');
+            cursorEl = document.createElement('img');
             cursorEl.id = 'gfx-sys-cursor';
             cursorEl.style.position = 'absolute';
-            cursorEl.style.boxSizing = 'border-box';
-            cursorEl.style.border = '2px solid var(--sel-fg, #0f0)';
-            cursorEl.style.boxShadow = '0 0 10px var(--sel-bg, #000) inset, 0 0 10px var(--sel-fg, #0f0)';
-            cursorEl.style.borderRadius = '6px';
             cursorEl.style.pointerEvents = 'none'; // Essential: Allows clicking icons beneath it
             cursorEl.style.zIndex = '1000';
+            cursorEl.style.imageRendering = 'pixelated';
+            // Simple drop-shadow for visual depth without glowing CSS boxes
+            cursorEl.style.filter = 'drop-shadow(2px 2px 2px rgba(0,0,0,0.8))';
             iconsLayer.appendChild(cursorEl);
         }
         
+        // Render Player/Cursor Sprite (Pulls directly from global playerItem variable)
+        cursorEl.src = this.gfxIconDir + window.playerItem + '.png';
+        cursorEl.onerror = function() { this.src = 'q/file.png'; }; 
+
         cursorEl.style.transition = `top ${transTime}s linear, left ${transTime}s linear`;
 
-        let x = this.cursorZ % this.gridWide;
-        let y = Math.floor(this.cursorZ / this.gridWide);
+        let x = window.playerZ % this.gridWide;
+        let y = Math.floor(window.playerZ / this.gridWide);
 
         cursorEl.style.left = ((x / this.gridWide) * 100) + '%';
         cursorEl.style.top = ((y / this.gridTall) * 100) + '%';
@@ -469,13 +486,11 @@ window.CylonGFX = {
     },
 
     setCursorZ: function(newZ) {
-        this.cursorZ = newZ;
-        this.renderCursor();
+        window.playerZ = newZ;
+        this.renderCursor(); // Fails gracefully if headless
         
         let drive = this.currentPath.split(':')[0] || 'ram';
-        let zStr = this.cursorZ.toString().padStart(2, '0');
-        
-        this.persistState(`${drive}:/a/gfxCursorZ`, zStr);
+        this.persistState(`${drive}:/a/playerZ`, window.playerZ.toString());
     },
 
     calculateTargetSector: function(currentSector, dirChar, maxMapBounds, roundWorld) {
@@ -497,23 +512,20 @@ window.CylonGFX = {
 
         let wrapped = false;
 
-        // Wrap X-Axis
         if (xCode < minX) { xCode = maxX; wrapped = true; }
         else if (xCode > maxX) { xCode = minX; wrapped = true; }
 
-        // Wrap Y-Axis
         if (yCode < minY) { yCode = maxY; wrapped = true; }
         else if (yCode > maxY) { yCode = minY; wrapped = true; }
 
-        // Block if hitting an edge on a flat world
         if (wrapped && !roundWorld) return null; 
 
         return String.fromCharCode(yCode) + String.fromCharCode(xCode);
     },
 
     moveCursor: function(dx, dy) {
-        let x = this.cursorZ % this.gridWide;
-        let y = Math.floor(this.cursorZ / this.gridWide);
+        let x = window.playerZ % this.gridWide;
+        let y = Math.floor(window.playerZ / this.gridWide);
         
         let nx = x + dx;
         let ny = y + dy;
@@ -522,8 +534,6 @@ window.CylonGFX = {
         let triggersScroll = false;
         let moveBlocked = false;
 
-        // Evaluate scrolling logic based on AirLock boundaries 
-        // Identical algorithm trace to UNIVAC processing GFX_COLS - 1
         if (this.gfxAirLock) {
             if (dx > 0) {
                 if (x === this.gridWide - 1) moveBlocked = true;
@@ -540,16 +550,22 @@ window.CylonGFX = {
                 else if (ny === 0) { dirChar = 'N'; triggersScroll = true; }
             }
         } else {
-            // Trigger when stepping PAST the edge tile naturally
             if (nx >= this.gridWide) { dirChar = 'E'; triggersScroll = true; }
             else if (nx < 0) { dirChar = 'W'; triggersScroll = true; }
             if (ny >= this.gridTall) { dirChar = 'S'; triggersScroll = true; }
             else if (ny < 0) { dirChar = 'N'; triggersScroll = true; }
         }
 
-        // 1. Hard block if they walk off the edge of an AirLock or Flat Earth boundary
+        // 1. Hook for Game Logic to Override Terrain Collisions
+        let tentativeZ = ny * this.gridWide + nx;
+        if (typeof window.gfxCollisionHook === 'function') {
+            if (!window.gfxCollisionHook(tentativeZ, window.playerItem)) {
+                moveBlocked = true;
+            }
+        }
+
         if (moveBlocked) {
-            this.targetCursorZ = -1; // Snap stop pathfinding
+            window.playerWalk = -1; // Snap stop pathfinding
             return;
         }
 
@@ -565,13 +581,11 @@ window.CylonGFX = {
                 let targetZ;
 
                 if (this.gfxAirLock) {
-                    // Placed securely on the exact opposite edge of the new map (index 0 or max-1)
                     if (dirChar === 'E') targetZ = (ny * this.gridWide) + 0;
                     if (dirChar === 'W') targetZ = (ny * this.gridWide) + (this.gridWide - 1);
                     if (dirChar === 'S') targetZ = (0 * this.gridWide) + nx;
                     if (dirChar === 'N') targetZ = ((this.gridTall - 1) * this.gridWide) + nx;
                 } else {
-                    // Standard visual wrapping logic
                     if (nx >= this.gridWide) nx = 0;
                     if (nx < 0) nx = this.gridWide - 1;
                     if (ny >= this.gridTall) ny = 0;
@@ -579,19 +593,18 @@ window.CylonGFX = {
                     targetZ = (ny * this.gridWide) + nx;
                 }
 
-                this.targetCursorZ = -1; // End active pathfinding trace since we are swapping maps natively
+                window.playerWalk = -1; 
                 this.currentPath = driveBase + '/' + nextSector;
+                window.map = nextSector;
                 this.setCursorZ(targetZ);
 
-                // Persist the new location to the state
                 let drive = driveBase.split(':')[0] || 'ram';
                 this.persistState(`${drive}:/a/gfxSector`, nextSector);
 
                 this.renderScreen();
                 return;
             } else {
-                // Flat earth edge: block movement cleanly
-                this.targetCursorZ = -1;
+                window.playerWalk = -1;
                 return; 
             }
         }
@@ -602,7 +615,19 @@ window.CylonGFX = {
         if (ny < 0) ny = 0;
         if (ny >= this.gridTall) ny = this.gridTall - 1;
         
-        this.setCursorZ(ny * this.gridWide + nx);
+        let targetZ = ny * this.gridWide + nx;
+
+        // --- RENAME PHYSICAL VFS FILE ---
+        // If the cursor is an actual file tracked on the sector, it slides alongside you
+        let oldFile = `${this.currentPath}/${window.playerItem}${window.playerZ.toString(16).padStart(2, '0').toLowerCase()}`;
+        let newFile = `${this.currentPath}/${window.playerItem}${targetZ.toString(16).padStart(2, '0').toLowerCase()}`;
+        
+        if (window.parent && window.parent.CylonDOS && window.playerItem.charAt(0) === 'S') {
+            // Fails gracefully if the user is just a visual cursor without a physical file created
+            window.parent.CylonDOS.rename(oldFile, newFile).catch(()=> {});
+        }
+
+        this.setCursorZ(targetZ);
 
         if (this.fillTileCode && typeof this.setTileAtCursor === 'function') {
             this.setTileAtCursor(this.fillTileCode);
@@ -610,45 +635,40 @@ window.CylonGFX = {
     },
 
     walkToZ: function(newZ, action = null) {
-        this.targetCursorZ = newZ;
-        this.pendingCursorAction = action;
+        window.playerWalk = newZ;
+        window.playerDo = action;
         
-        // If we're already there, act immediately without waiting for the next physical tick
-        if (this.cursorZ === this.targetCursorZ) {
-            this.targetCursorZ = -1;
-            if (this.pendingCursorAction) {
-                this.pendingCursorAction();
-                this.pendingCursorAction = null;
+        if (window.playerZ === window.playerWalk) {
+            window.playerWalk = -1;
+            if (window.playerDo) {
+                if (typeof window.playerDo === 'function') window.playerDo();
+                window.playerDo = null;
             }
         }
     },
 
     startCursorTick: function() {
         if (this.cursorInterval) clearInterval(this.cursorInterval);
-        
-        // Hard-block browsers from seizing on dangerously low ticks
         let safeCycle = Math.max(50, this.gfxCycle); 
         this.cursorInterval = setInterval(() => this.cursorTick(), safeCycle);
     },
 
     cursorTick: function() {
-        if (this.targetCursorZ === -1) return;
+        if (window.playerWalk === -1) return;
 
-        // Final check and commit execution block
-        if (this.cursorZ === this.targetCursorZ) {
-            this.targetCursorZ = -1;
-            if (this.pendingCursorAction) {
-                this.pendingCursorAction();
-                this.pendingCursorAction = null;
+        if (window.playerZ === window.playerWalk) {
+            window.playerWalk = -1;
+            if (window.playerDo) {
+                if (typeof window.playerDo === 'function') window.playerDo();
+                window.playerDo = null;
             }
             return;
         }
 
-        // Apply a greedy pathfinding formula step
-        let cx = this.cursorZ % this.gridWide;
-        let cy = Math.floor(this.cursorZ / this.gridWide);
-        let tx = this.targetCursorZ % this.gridWide;
-        let ty = Math.floor(this.targetCursorZ / this.gridWide);
+        let cx = window.playerZ % this.gridWide;
+        let cy = Math.floor(window.playerZ / this.gridWide);
+        let tx = window.playerWalk % this.gridWide;
+        let ty = Math.floor(window.playerWalk / this.gridWide);
 
         let dx = tx - cx;
         let dy = ty - cy;
@@ -656,7 +676,6 @@ window.CylonGFX = {
         let stepX = 0;
         let stepY = 0;
 
-        // Heavily weight the longest remaining distance, resolving diagonal biases automatically
         if (Math.abs(dx) > Math.abs(dy)) {
             stepX = dx > 0 ? 1 : -1;
         } else if (Math.abs(dy) > Math.abs(dx)) {
@@ -665,17 +684,13 @@ window.CylonGFX = {
             stepX = dx > 0 ? 1 : -1;
         }
 
-        // Route through default cursor mechanics (Triggers brush code intrinsically!)
         this.moveCursor(stepX, stepY);
     },
 
     executeCursor: function() {
-        // Trigger tile menu exactly where the cursor arrived (usually fired by keyboard interaction)
-        this.showTileMenu(this.cursorZ);
+        this.showTileMenu(window.playerZ);
     },
 
-    // ----------------------------
-    
     showTileMenu: function(z) {
         if (!window.parent || !window.parent.CylonPopManager || typeof window.parent.CylonPopManager.showContextMenu !== 'function') {
             console.warn("GFX Warning: Context menu manager unavailable.");
@@ -684,7 +699,6 @@ window.CylonGFX = {
 
         let items = [];
         
-        // 1. Find all graphical objects sharing this exact spatial tile
         let iconWraps = document.querySelectorAll(`.icon-wrap[data-z="${z}"]`);
         iconWraps.forEach(wrap => {
             let labelText = wrap.getAttribute('data-label');
@@ -701,7 +715,6 @@ window.CylonGFX = {
             }
         });
 
-        // 2. Perform bounding calculations to check for valid edge-scrolling exits
         let x = z % this.gridWide;
         let y = Math.floor(z / this.gridWide);
         let parts = this.currentPath.split('/');
@@ -722,7 +735,6 @@ window.CylonGFX = {
         if (x === this.gridWide - 1) addScroll('E', 'Scroll East', 1, 0);
         if (x === 0) addScroll('W', 'Scroll West', -1, 0);
 
-        // 3. Informational empty state if no icons and no scrolling
         if (items.length === 0) {
             items.push({
                 label: 'To add icon input: gfx icon [code] [name]',
@@ -730,7 +742,6 @@ window.CylonGFX = {
             });
         }
 
-        // 4. Calculate absolute tile center relative to viewport to cleanly mount context menu over top
         const wrapper = document.getElementById('desktop-wrapper');
         let rect = wrapper.getBoundingClientRect();
         let w = rect.width / this.gridWide;
@@ -757,10 +768,7 @@ window.CylonGFX = {
     removeScript: async function(filePath) {
         if (window.parent && window.parent.CylonDOS) {
             try {
-                // Delete the physical script file representing the icon
                 await window.parent.CylonDOS.delete(filePath);
-                
-                // Immediately refresh the desktop to make the icon vanish
                 this.renderScreen();
             } catch(err) {
                 console.error("GFX Error: Could not remove icon file.", err);
@@ -769,7 +777,7 @@ window.CylonGFX = {
     },
 
     setTileAtCursor: async function(code) {
-        let dos = window.parent.CylonDOS;
+        let dos = window.parent && window.parent.CylonDOS ? window.parent.CylonDOS : window.CylonDOS;
         if (!dos) return;
         
         let tPath = `${this.currentPath}/t`;
@@ -784,24 +792,19 @@ window.CylonGFX = {
         }
 
         if (!code) {
-            let currentCode = tData.substring(this.cursorZ * 2, this.cursorZ * 2 + 2) || 'Za';
-            // Print straight to the native command prompt
-            if (this.gfxCommandLog) window.print(`\n[.3]GFX Tile Engine: Tile at Cursor (${this.cursorZ}) is [${currentCode}][.]\n`);
+            let currentCode = tData.substring(window.playerZ * 2, window.playerZ * 2 + 2) || 'Za';
+            if (this.gfxCommandLog && window.parent.print) window.parent.print(`\n[.3]GFX Tile Engine: Tile at Cursor (${window.playerZ}) is [${currentCode}][.]\n`);
             return;
         }
 
-        // Protect file map structure sizes
         code = String(code).padEnd(2, 'a').substring(0, 2);
         
-        let prefix = tData.substring(0, this.cursorZ * 2);
-        let suffix = tData.substring(this.cursorZ * 2 + 2);
+        let prefix = tData.substring(0, window.playerZ * 2);
+        let suffix = tData.substring(window.playerZ * 2 + 2);
         tData = prefix + code + suffix;
 
-        // Save natively to sector structure
         await this.persistState(tPath, tData);
-
-        // Update DOM instantly rather than performing a full re-render
-        this.updateTileDOM(this.cursorZ, code);
+        this.updateTileDOM(window.playerZ, code);
     },
 
     updateTileDOM: function(z, code) {
@@ -817,7 +820,7 @@ window.CylonGFX = {
         
         if (existing) {
             existing.src = `${this.gfxTileDir}${code}.png`;
-            existing.style.display = ''; // Reset display in case it failed over previously
+            existing.style.display = ''; 
         } else {
             let x = z % this.gridWide;
             let y = Math.floor(z / this.gridWide);

@@ -82,8 +82,8 @@
     '  pwd                            Show the current drive and directory',
     '  format <partition> [-y]        Erase a partition and start clean\n',
     'Files (paths may start with a drive, e.g. live:/bin/tool)',
-    '  dir [path]                     Detailed directory listing',
-    '  ls [path]                      List names in a directory',
+    '  dir [path|pattern]             Detailed directory listing (e.g. dir *.txt)',
+    '  ls [path|pattern]              List names in a directory',
     '  cd [path]                      Change directory (cd live:/ also switches drive)',
     '  mkdir <path>                   Create a directory',
     '  rmdir <path>                   Remove an empty directory',
@@ -92,14 +92,16 @@
     '  type <file>                    Dump raw text of a file to terminal',
     '  copy <src> <dst>               Copy a file or directory (across drives too)',
     '  rename <old> <new>             Rename or move within a drive',
-    '  delete <file>                  Delete a file',
+    '  delete <file|pattern> [-y]     Delete a file or files (use -y to skip confirm)',
     '  exists <path>                  Test whether a path exists',
+    '  alpha [path]                   List variables and their contents',
     '  export [drive] [filename]      Export a drive as JSON',
     '  import <file> [type] [drive]   Import JSON (creates/mounts drive if type given)',
     '  install [desktop file] [-y]    Install Cylon OS with selected desktop',
     '  uninstall [-y]                 Delete Cylon DOS from indexDB',
     '  update <file|*> [-y]           Update file on indexDB with newer version',
     '  echo [text]                    Print text to the console',
+    '  pop <pos> <html>               Show popup at pos (center, click, cursor, hex)',
     '  cls                            Clear the terminal screen',
     '  reboot [-y]                    Reboot Cylon DOS', 
     '  help [command]                 Show help (e.g. "help mount" or "help fdisk")\n'
@@ -186,15 +188,17 @@
       case 'delete':
       case 'del':
       case 'rm':
-        if (!args[0]) return usage('fdisk delete <name> [-y]');
-        part = await dos.getPartition(args[0]);
-        if (part.count > 0 && !flags.yes) {
-          return 'Partition "' + part.name + '" holds ' + part.count + ' entries (' + dos.formatSize(part.used) +
-            '). This cannot be undone.\nRe-run to confirm: fdisk delete ' + part.name + ' -y';
-        }
-        await dos.deletePartition(part.name);
-        return 'Deleted ' + part.device + ' "' + part.name + '".';
-
+          if (!args[0]) return { handled: true, output: usage('delete <file|pattern> [-y]') };
+          var targetPath = args.join(' ');
+          
+          // Safety Catch: Prevent accidental wildcard annihilation without the -y flag
+          if (/[*?]/.test(targetPath) && !flags.yes) {
+            return { handled: true, output: 'Warning: You are using a wildcard to delete multiple files.\nRe-run to confirm: ' + command + ' ' + targetPath + ' -y' };
+          }
+          
+          var result = await dos.delete(targetPath);
+          return { handled: true, output: (typeof result === 'number' ? result + ' file(s) deleted.' : 'File deleted.') };
+          
       case 'boot':
         if (!args[0]) return usage('fdisk boot <name|none>');
         var booted = await dos.setBootPartition(args[0]);
@@ -590,6 +594,18 @@ async function handleCylonCommand(line) {
                       data: gfxData
                   }, '*');
                   return { handled: true, output: 'GFX Engine: ' + gfxCmd + (gfxData ? ' ' + gfxData : '') };
+                  
+        case 'pop':
+                  var popMatch = line.match(/^\s*pop\s+(\S+)\s+(.*)$/i);
+                  if (popMatch) {
+                      var posStr = popMatch[1].toLowerCase();
+                      var htmlStr = popMatch[2];
+                      if (global.CylonPopManager) {
+                          global.CylonPopManager.callPopHtm(htmlStr, posStr);
+                      }
+                      return { handled: true, output: '' };
+                  }
+                  return { handled: true, output: usage('pop <center|click|cursor|Z-Hex> <html>') };
           
         case 'pwd':
           return { handled: true, output: dos.pwd() };
@@ -626,6 +642,39 @@ async function handleCylonCommand(line) {
 
         case 'echo':
           return { handled: true, output: args.join(' ') };
+
+        case 'alpha':
+          var targetDir = args[0] || '';
+          var dirResult = await dos.dir(targetDir);
+          
+          var drivePrefix = '';
+          var colonIdx = targetDir.indexOf(':');
+          
+          if (colonIdx !== -1) {
+              drivePrefix = targetDir.substring(0, colonIdx + 1) + '/';
+          } else {
+              var pwdStr = dos.pwd();
+              if (pwdStr !== '(no drive)') {
+                  drivePrefix = pwdStr.substring(0, pwdStr.indexOf(':') + 1) + '/';
+              }
+          }
+
+          var alphaOut = [];
+          for (var i = 0; i < dirResult.length; i++) {
+              var e = dirResult[i];
+              // Ensure we are only reading files and skipping internal SYS files
+              if (e.type === 'file' && e.name.indexOf('_dir.sys!') === -1) {
+                  var fname = e.name.substring(e.name.lastIndexOf('/') + 1);
+                  var fullPath = drivePrefix + e.name;
+                  var val = await dos.load(fullPath);
+                  
+                  // Trim off trailing returns and condense multi-line values gracefully to stay terminal-friendly
+                  val = String(val == null ? '' : val).trim().replace(/\r?\n/g, '\\n');
+                  alphaOut.push(fname + ' = ' + val);
+              }
+          }
+          if (!alphaOut.length) return { handled: true, output: '(no variables found)' };
+          return { handled: true, output: alphaOut.join('\n') };
 
         case 'save':
         case 'write':
@@ -667,7 +716,7 @@ async function handleCylonCommand(line) {
           else if (lowerPath.endsWith('.png') || lowerPath.endsWith('.jpg') || lowerPath.endsWith('.gif')) {
               var imgSrc = result.startsWith('data:image') ? result : filePath;
               if (global.CylonPopManager && typeof global.CylonPopManager.callPopHtm === 'function') {
-                  global.CylonPopManager.callPopHtm('<div style="display:flex;width:100%;height:100%;align-items:center;justify-content:center;background:var(--bg-color,#000);" onclick="hpop()"><img style="max-width:90%;max-height:90%;image-rendering:pixelated;border:2px solid var(--fg-color,#0f0);cursor:pointer;" src="' + imgSrc + '"></div>');
+                  global.CylonPopManager.callPopHtm('<div style="display:flex;width:100%;height:100%;align-items:center;justify-content:center;background:var(--bg-color,#000);" onclick="hpop()"><img style="max-width:90%;max-height:90%;image-rendering:pixelated;border:2px solid var(--fg-color,#0f0);cursor:pointer;" src="' + imgSrc + '"></div>', 'center');
               }
               return { handled: true, output: 'Displayed image ' + filePath };
           }
@@ -948,7 +997,7 @@ global.showTerminal = function () {
 
 
 // ============================================================================
-// cylon-command.js - Pop Function Compatibility Layer for Cylon OS
+//   Pop Function Compatibility Layer for Cylon OS
 // ============================================================================
 
 (function() {
@@ -979,7 +1028,7 @@ global.showTerminal = function () {
             const { type } = e.data;
 
             if (type === 'CYLON_POP_HTM') {
-                this.callPopHtm(e.data.html);
+                this.callPopHtm(e.data.html, e.data.position);
             } else if (type === 'CYLON_POP_HIDE') {
                 this.callHpop();
             } else if (type === 'CYLON_POP_WEB') {
@@ -991,12 +1040,12 @@ global.showTerminal = function () {
             }
         },
 
-        callPopHtm: function(html) {
+        callPopHtm: function(html, pos) {
             if (!html) return;
             if (window.parent && window.parent !== window && typeof window.parent.popHtm === 'function' && window.parent.popHtm !== window.popHtm) {
-                window.parent.popHtm(html);
+                window.parent.popHtm(html, pos);
             } else {
-                this.createSimplePop(html);
+                this.createSimplePop(html, pos);
             }
         },
 
@@ -1007,6 +1056,11 @@ global.showTerminal = function () {
                 const popWrapper = document.getElementById('cylon-pop-wrapper');
                 if (popWrapper) popWrapper.style.visibility = 'hidden';
             }
+        },
+
+        // Legacy stub mapped directly to unified close
+        hideContextMenu: function() {
+            this.callHpop();
         },
 
         showContextMenu: function(e, items) {
@@ -1027,29 +1081,11 @@ global.showTerminal = function () {
                 }
             }
 
-            let wrapper = document.getElementById('cylon-context-wrapper');
-            if (!wrapper) {
-                wrapper = document.createElement('div');
-                wrapper.id = 'cylon-context-wrapper';
-                wrapper.style.cssText = `
-                    position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
-                    z-index: 100000; cursor: default;
-                `;
-                wrapper.addEventListener('pointerdown', (ev) => {
-                    if (ev.target === wrapper) wrapper.style.display = 'none';
-                });
-                document.body.appendChild(wrapper);
-            }
-            wrapper.style.display = 'block';
-            wrapper.innerHTML = '';
-
-            let menu = document.createElement('div');
-            menu.style.cssText = `
-                position: absolute; background: #c0c0c0;
-                border-top: 2px solid #fff; border-left: 2px solid #fff;
-                border-bottom: 2px solid #555; border-right: 2px solid #555;
-                box-shadow: 4px 4px 0px rgba(0,0,0,0.5);
-                font-family: sans-serif; font-size: 14px; color: #000;
+            // Build menu DOM as a fragment rather than an isolated wrapper
+            let menuFrag = document.createDocumentFragment();
+            let menuContainer = document.createElement('div');
+            menuContainer.style.cssText = `
+                font-family: var(--font-face, monospace); font-size: 14px;
                 min-width: 160px; display: flex; flex-direction: column;
             `;
 
@@ -1057,34 +1093,204 @@ global.showTerminal = function () {
                 let btn = document.createElement('div');
                 btn.textContent = item.label;
                 btn.style.cssText = `
-                    padding: 8px 12px; cursor: pointer; user-select: none;
+                    padding: 8px 12px; cursor: pointer; user-select: none; border-radius: 2px;
                 `;
-                if (index < items.length - 1) btn.style.borderBottom = '1px solid #a0a0a0';
                 
-                btn.onpointerdown = (ev) => {
+                btn.addEventListener('pointerdown', (ev) => {
+                    ev.preventDefault();
                     ev.stopPropagation();
-                    wrapper.style.display = 'none';
-                    if (item.action) item.action();
-                };
-                
-                btn.onmouseenter = () => { btn.style.background = '#000080'; btn.style.color = '#fff'; };
-                btn.onmouseleave = () => { btn.style.background = 'transparent'; btn.style.color = '#000'; };
+                });
 
-                menu.appendChild(btn);
+                btn.addEventListener('pointerup', (ev) => {
+                    ev.stopPropagation();
+                    window.hpop(); 
+                    if (item.action) item.action();
+                });
+                
+                btn.onmouseenter = () => { 
+                    btn.style.background = 'var(--sel-bg, #333)'; 
+                    btn.style.color = 'var(--sel-fg, #0f0)'; 
+                };
+                btn.onmouseleave = () => { 
+                    btn.style.background = 'transparent'; 
+                    btn.style.color = 'var(--menu-fg, #aaa)'; 
+                };
+                menuContainer.appendChild(btn);
             });
 
-            wrapper.appendChild(menu);
+            menuFrag.appendChild(menuContainer);
 
-            menu.style.left = Math.max(0, absX - 12) + 'px';
-            menu.style.top = Math.max(0, absY - 8) + 'px';
-            
-            setTimeout(() => {
-               let r = menu.getBoundingClientRect();
-               if (r.right > window.innerWidth) menu.style.left = (window.innerWidth - r.width - 5) + 'px';
-               if (r.bottom > window.innerHeight) menu.style.top = (window.innerHeight - r.height - 5) + 'px';
-            }, 0);
+            // Funnel into the newly unified rendering engine using precise X/Y
+            this.createSimplePop(menuFrag, { x: absX, y: absY });
         },
 
+        getOrCreatePopWrapper: function() {
+            let popWrapper = document.getElementById('cylon-pop-wrapper');
+            if (!popWrapper) {
+                popWrapper = document.createElement('div');
+                popWrapper.id = 'cylon-pop-wrapper';
+                popWrapper.style.cssText = `
+                    position: fixed;
+                    top: 0; left: 0; width: 100vw; height: 100vh;
+                    background: transparent;
+                    z-index: 100000;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                `;
+                                
+                // Stop pass-through clicks from immediately triggering elements below
+                popWrapper.addEventListener('pointerdown', (ev) => {
+                    if (ev.target === popWrapper) {
+                        ev.preventDefault();
+                        ev.stopPropagation();
+                    }
+                });
+
+                popWrapper.addEventListener('pointerup', (ev) => {
+                    if (ev.target === popWrapper) {
+                        window.hpop();
+                        ev.preventDefault();
+                        ev.stopPropagation();
+                    }
+                });
+
+                popWrapper.addEventListener('click', function(e) {
+                    let link = e.target.closest('a');
+                    if (link) {
+                        let href = link.getAttribute('href');
+                        if (href && href.startsWith('gfx:')) {
+                            e.preventDefault();
+                            let cmd = href.substring(4);
+                            let activeFrame = document.querySelector('.page-frame.active');
+                            if (activeFrame && activeFrame.contentWindow) {
+                                activeFrame.contentWindow.postMessage({ type: 'gfx', cmd: cmd }, '*');
+                            } else {
+                                window.postMessage({ type: 'gfx', cmd: cmd }, '*');
+                            }
+                            window.hpop(); // Unification: ensure links auto-close the pop
+                            return; 
+                        }
+                    }
+                });
+
+                let popEl = document.createElement('div');
+                popEl.id = 'cylon-pop';
+                
+                // UNIFICATION: Core Theme colors established at the root
+                popEl.style.cssText = `
+                    background: var(--menu-bg, #111);
+                    color: var(--menu-fg, #aaa);
+                    opacity: 0.90;
+                    padding: 6px;
+                    border: 1px solid var(--sel-bg, #333);
+                    border-radius: 4px;
+                    max-width: 90vw;
+                    max-height: 90vh;
+                    overflow: auto;
+                    box-shadow: 0 4px 15px rgba(0,0,0,0.8);
+                `;
+                
+                // UNIFICATION: Universal mouseLeave removal
+                popEl.addEventListener('mouseleave', () => {
+                    window.hpop();
+                });
+
+                popWrapper.appendChild(popEl);
+                document.body.appendChild(popWrapper);
+            }
+            return document.getElementById('cylon-pop-wrapper');
+        },
+
+        createSimplePop: function(html, pos) {
+            let popWrapper = this.getOrCreatePopWrapper();
+            const popEl = document.getElementById('cylon-pop');
+
+            // Intelligently accept HTML Strings or constructed DOM Nodes (Fragments)
+            popEl.innerHTML = '';
+            if (typeof html === 'string') {
+                popEl.innerHTML = html;
+            } else if (html instanceof Node) {
+                popEl.appendChild(html);
+            }
+            
+            popWrapper.style.visibility = 'visible';
+            
+            // Layout Reset
+            popEl.style.position = 'relative';
+            popEl.style.left = 'auto';
+            popEl.style.top = 'auto';
+            popEl.style.transform = 'none';
+            popEl.style.margin = '0 auto';
+
+            pos = pos || window.PopAlign || 'center';
+            let targetZ = -1;
+
+            if (pos === 'click' && window.lastClickZ !== undefined) {
+                targetZ = window.lastClickZ;
+            } else if (pos === 'cursor' && window.playerZ !== undefined) {
+                targetZ = window.playerZ;
+            } else if (typeof pos === 'string' && /^[0-9a-fA-F]+$/.test(pos)) {
+                targetZ = parseInt(pos, 16);
+            }
+
+            // Direct pixel override utilized by `showContextMenu`
+            if (typeof pos === 'object' && pos.x !== undefined && pos.y !== undefined) {
+                popEl.style.position = 'absolute';
+                popEl.style.margin = '0';
+                popEl.style.left = Math.max(0, pos.x - 12) + 'px';
+                popEl.style.top = Math.max(0, pos.y - 8) + 'px';
+                
+                setTimeout(() => {
+                   let r = popEl.getBoundingClientRect();
+                   if (r.right > window.innerWidth) popEl.style.left = (window.innerWidth - r.width - 5) + 'px';
+                   if (r.bottom > window.innerHeight) popEl.style.top = (window.innerHeight - r.height - 5) + 'px';
+                }, 0);
+                
+            } else if (targetZ >= 0 && window.CylonGFX) {
+                let cols = window.CylonGFX.gridWide || 8;
+                let rows = window.CylonGFX.gridTall || 4;
+                
+                targetZ = Math.max(0, Math.min(targetZ, (cols * rows) - 1));
+                
+                let x = targetZ % cols;
+                let y = Math.floor(targetZ / cols);
+
+                let screenWrap = document.getElementById('screen-wrapper');
+                if (screenWrap) {
+                    popEl.style.position = 'absolute';
+                    popEl.style.margin = '0';
+                    let rect = screenWrap.getBoundingClientRect();
+                    
+                    let tileW = rect.width / cols;
+                    let tileH = rect.height / rows;
+
+                    let pxLeft = rect.left + (x * tileW) + (tileW / 2);
+                    let pxTop = rect.top + (y * tileH) + (tileH / 2);
+
+                    popEl.style.left = pxLeft + 'px';
+                    popEl.style.top = pxTop + 'px';
+                    popEl.style.transform = 'translate(-50%, -50%)';
+                    
+                    setTimeout(() => {
+                        let pRect = popEl.getBoundingClientRect();
+                        let shiftX = 0; let shiftY = 0;
+                        
+                        if (pRect.left < 0) shiftX = -pRect.left + 5;
+                        else if (pRect.right > window.innerWidth) shiftX = window.innerWidth - pRect.right - 5;
+                        
+                        if (pRect.top < 0) shiftY = -pRect.top + 5;
+                        else if (pRect.bottom > window.innerHeight) shiftY = window.innerHeight - pRect.bottom - 5;
+                        
+                        if (shiftX !== 0 || shiftY !== 0) {
+                            popEl.style.transform = `translate(calc(-50% + ${shiftX}px), calc(-50% + ${shiftY}px))`;
+                        }
+                    }, 0);
+                }
+            }
+        },
+
+        // Web Iframe Popups function natively and intentionally on their own overlay logic 
         callPopWeb: function(url) {
             if (!url) return;
             if (window.parent && window.parent !== window && typeof window.parent.popWeb === 'function' && window.parent.popWeb !== window.popWeb) {
@@ -1109,65 +1315,6 @@ global.showTerminal = function () {
             } else {
                 window.PopAlign = align;
             }
-        },
-
-        createSimplePop: function(html) {
-            let popWrapper = document.getElementById('cylon-pop-wrapper');
-            if (!popWrapper) {
-                popWrapper = document.createElement('div');
-                popWrapper.id = 'cylon-pop-wrapper';
-                popWrapper.style.cssText = `
-                    position: fixed;
-                    top: 0; left: 0; width: 100vw; height: 100vh;
-                    background: rgba(0,0,0,0.6);
-                    z-index: 9999;
-                    display: flex;
-                    align-items: center;
-                    justify-content: center;
-                `;
-                
-                popWrapper.addEventListener('click', function(e) {
-                    let link = e.target.closest('a');
-                    if (link) {
-                        let href = link.getAttribute('href');
-                        if (href && href.startsWith('gfx:')) {
-                            e.preventDefault();
-                            let cmd = href.substring(4);
-                            let activeFrame = document.querySelector('.page-frame.active');
-                            if (activeFrame && activeFrame.contentWindow) {
-                                activeFrame.contentWindow.postMessage({ type: 'gfx', cmd: cmd }, '*');
-                            } else {
-                                window.postMessage({ type: 'gfx', cmd: cmd }, '*');
-                            }
-                            return; 
-                        }
-                    }
-
-                    if (e.target === popWrapper) {
-                        window.hpop();
-                    }
-                });
-
-                let popEl = document.createElement('div');
-                popEl.id = 'cylon-pop';
-                popEl.style.cssText = `
-                    background: #eee;
-                    color: #000;
-                    border: 2px solid #333;
-                    border-radius: 4px;
-                    padding: 16px;
-                    max-width: 90vw;
-                    max-height: 90vh;
-                    overflow: auto;
-                    box-shadow: 0 4px 12px rgba(0,0,0,0.5);
-                `;
-                popWrapper.appendChild(popEl);
-                document.body.appendChild(popWrapper);
-            }
-            
-            const popEl = document.getElementById('cylon-pop');
-            popEl.innerHTML = html;
-            popWrapper.style.visibility = 'visible';
         },
 
         createSimplePopWeb: function(url) {
@@ -1214,7 +1361,7 @@ global.showTerminal = function () {
 
         exposePopFunctions: function() {
             const self = this;
-            window.popHtm = function(html) { self.callPopHtm(html); };
+            window.popHtm = function(html, pos) { self.callPopHtm(html, pos); };
             window.hpop = function() { self.callHpop(); };
             window.popWeb = function(url) { self.callPopWeb(url); };
             window.hpopWeb = function() { self.callHpopWeb(); };

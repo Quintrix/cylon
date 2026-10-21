@@ -71,6 +71,23 @@
   /* Small helpers                                                       */
   /* ------------------------------------------------------------------ */
 
+  // Extracts the directory path and converts a DOS wildcard to a RegExp
+  function extractWildcard(inputPath) {
+    inputPath = String(inputPath == null ? '' : inputPath).trim();
+    if (!/[*?]/.test(inputPath)) return { path: inputPath, regex: null };
+
+    var slash = inputPath.lastIndexOf('/');
+    var colon = inputPath.lastIndexOf(':');
+    var splitAt = Math.max(slash, colon);
+
+    var dirPath = splitAt >= 0 ? inputPath.substring(0, splitAt + 1) : '';
+    var pattern = splitAt >= 0 ? inputPath.substring(splitAt + 1) : inputPath;
+
+    // Escape regex chars but turn * into .* and ? into .
+    var esc = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.');
+    return { path: dirPath, regex: new RegExp('^' + esc + '$', 'i') };
+  }
+  
   function utf8Length(value) {
     value = String(value == null ? '' : value);
     if (global.TextEncoder) return new TextEncoder().encode(value).length;
@@ -829,17 +846,43 @@
   }
 
   async function remove(path) {
-    var r = ref(path), m = r.mount;
-    path = pathCheck(r.path, false);
-    writable(m);
-    var entry = await m.backend.get(path);
-    if (!entry) fail('file not found');
-    if (entry.type === 'directory') fail('path is a directory (use rmdir)');
-    if (entry.readOnly) fail('file is write-protected');
-    await m.backend.commit({ remove: [path] });
-    return true;
-  }
+    var wc = extractWildcard(path);
 
+    if (!wc.regex) {
+      // Standard single-file deletion
+      var r = ref(path), m = r.mount;
+      var p = pathCheck(r.path, false);
+      writable(m);
+      var entry = await m.backend.get(p);
+      if (!entry) fail('file not found');
+      if (entry.type === 'directory') fail('path is a directory (use rmdir)');
+      if (entry.readOnly) fail('file is write-protected');
+      await m.backend.commit({ remove: [p] });
+      return 1;
+    }
+
+    // Wildcard bulk-deletion
+    var r = ref(wc.path), m = r.mount;
+    writable(m);
+    var dirP = pathCheck(r.path, true);
+    if (dirP) {
+      var dirE = await m.backend.get(dirP);
+      if (!dirE || dirE.type !== 'directory') fail('directory not found');
+    }
+
+    var entries = await m.backend.list(dirP);
+    var toRemove = [];
+    entries.forEach(function (e) {
+      if (e.type === 'file' && !e.readOnly && wc.regex.test(baseName(e.path))) {
+        toRemove.push(e.path);
+      }
+    });
+
+    if (toRemove.length === 0) fail('no matching writable files found');
+    await m.backend.commit({ remove: toRemove });
+    return toRemove.length; // Return the count of deleted files
+  }
+  
   async function rename(source, destination) {
     var s = ref(source), m = s.mount;
     var d = ref(destination, m);
@@ -958,7 +1001,13 @@
   }
 
   async function list(path) {
-    var entries = await dirEntries(path);
+    var wc = extractWildcard(path);
+    var entries = await dirEntries(wc.path);
+    
+    if (wc.regex) {
+      entries = entries.filter(function (e) { return wc.regex.test(baseName(e.path)); });
+    }
+    
     return entries.filter(function (e) {
       return e.path !== MANIFEST_KEY && !baseName(e.path).startsWith('_');
     }).map(function (e) { return e.type === 'directory' ? baseName(e.path) + '/' : baseName(e.path); })
@@ -966,14 +1015,20 @@
   }
 
   async function dir(path) {
-    var entries = await dirEntries(path);
+    var wc = extractWildcard(path);
+    var entries = await dirEntries(wc.path);
+    
+    if (wc.regex) {
+      entries = entries.filter(function (e) { return wc.regex.test(baseName(e.path)); });
+    }
+    
     return entries.map(function (e) {
       return {
         name: e.type === 'directory' ? '<' + e.path + '>' : e.path, type: e.type, size: e.size,
         timestamp: e.timestamp, owner: e.owner, session: e.session, readOnly: !!e.readOnly
       };
     }).sort(function (a, b) { return a.name.localeCompare(b.name); });
-  }
+  }  
 
   function manifestText(entries) {
     var lines = entries.filter(function (e) { return e.path !== MANIFEST_KEY; }).map(function (e) {

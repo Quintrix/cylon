@@ -63,19 +63,19 @@
             --kb-pan: 0px; /* how far the app layer is panned up to keep a focused field clear of the keyboard */
         }
 
-        /* --- MAIN SCREEN LAYER --- */
+        /* --- MAIN SCREEN LAYER (DYNAMIC MONITOR) --- */
         #screen-wrapper {
             position: absolute;
-            top: 0; left: 0; right: 0;
-            height: calc(100vh - var(--bar-height)); /* Fills screen minus taskbar */
+            top: 0; left: 0; right: 0; margin: 0 auto;
+            width: 100vw; /* Default, overridden by GFX Engine sizing */
+            height: calc(100vh - var(--bar-height)); 
             background-color: #000; /* BLENDED WITH INPUT BAR */
-            /* Changed transition to target height instead of transform */
             transition: height 0.4s cubic-bezier(0.22, 1, 0.36, 1), filter 0.4s ease;
             overflow: hidden;
             box-sizing: border-box;
         }
 
-        /* When KB opens, resize the screen to dock perfectly above the keyboard */
+        /* When KB opens, JS recalculates sizing, but CSS acts as fallback */
         body.kb-open #screen-wrapper {
             height: calc(100vh - var(--bar-height) - var(--kb-height));
         }
@@ -424,4 +424,4 @@ body.app-mode #input-bar {
 /* Hide app tabs while typing to give the input bar full width 
 body.app-mode.kb-open #app-taskbar {
     display: none !important;
-} */
+} 

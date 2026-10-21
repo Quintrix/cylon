@@ -1,0 +1,84 @@
+{
+  "format": "qandy-ramdrive",
+  "version": 2,
+  "drive": "desktop",
+  "created": "2026-10-16T23:42:58.118Z",
+  "entries": [
+    {
+      "name": "a",
+      "type": "directory",
+      "size": 0,
+      "timestamp": "20261016194026",
+      "owner": "",
+      "session": "",
+      "readOnly": false
+    },
+    {
+      "name": "a/mapx",
+      "type": "file",
+      "content": "8",
+      "size": 1,
+      "timestamp": "20261016194155",
+      "owner": "",
+      "session": "",
+      "readOnly": false
+    },
+    {
+      "name": "a/mapy",
+      "type": "file",
+      "content": "4",
+      "size": 1,
+      "timestamp": "20261016194158",
+      "owner": "",
+      "session": "",
+      "readOnly": false
+    },
+    {
+      "name": "p",
+      "type": "directory",
+      "size": 0,
+      "timestamp": "20261011140253",
+      "owner": "",
+      "session": "",
+      "readOnly": false
+    },
+    {
+      "name": "w",
+      "type": "directory",
+      "size": 0,
+      "timestamp": "20261011133202",
+      "owner": "",
+      "session": "",
+      "readOnly": false
+    },
+    {
+      "name": "w/Aa",
+      "type": "directory",
+      "size": 0,
+      "timestamp": "20261011140408",
+      "owner": "",
+      "session": "",
+      "readOnly": false
+    },
+    {
+      "name": "w/Aa/Aa00Command",
+      "type": "file",
+      "content": "exit",
+      "size": 4,
+      "timestamp": "20261016194240",
+      "owner": "",
+      "session": "",
+      "readOnly": false
+    },
+    {
+      "name": "w/Aa/Ab01Files",
+      "type": "file",
+      "content": "cylon-files.htm",
+      "size": 15,
+      "timestamp": "20261016194247",
+      "owner": "",
+      "session": "",
+      "readOnly": false
+    }
+  ]
+}

@@ -24,6 +24,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <script src='cylon-sound.js'></script>
     <script src='cylon-keyboard.js'></script>
+    <script src="cylon-gfx.js"></script> <!-- Core OS Physics Engine -->
     <script src="cylon-dos.js"></script>
     <script src="cylon-command.js"></script>
 </head>
@@ -35,6 +36,8 @@
         <div class="term-spacer"></div>
     </div>
     <div id="browser-layer-container"></div>
+    <!-- NEW: Shield to intercept clicks to the OS surface when a popup is open -->
+    <div id="qandy-popup-shield" style="display:none; position:absolute; top:0; left:0; width:100%; height:100%; background:transparent; touch-action:none;"></div>
 </div>
 
 
@@ -78,6 +81,22 @@ let cwd = "/";
 let osMode = 'terminal';
 let activeAppTitle = "";
 let proxyInputId = null;
+let popupActive = false; // Tracks if a Cylon Popup is visible to protect the desktop layer
+
+document.body.addEventListener('pointerdown', function(e) {
+    // Intercept clicks on the OS background elements to close popups and prevent underlying actions
+    if (popupActive) {
+        if (e.target.closest('#input-bar') || e.target.closest('#screen-wrapper')) {
+            e.preventDefault(); 
+            e.stopPropagation();
+            if (typeof window.hpop === 'function') window.hpop();
+            
+            let shield = document.getElementById('qandy-popup-shield');
+            if (shield) shield.style.display = 'none';
+            popupActive = false;
+        }
+    }
+}, { capture: true });
 
 // DOS Boot State Variables
 let dosInitialized = false;
@@ -87,13 +106,12 @@ window.proxyInputMaxLen = null; // NEW
 const PAGES = Object.freeze(new Set([
     'cylon.htm',
     'cylon.cfg',
-    'cylon-command.cfg',
     'cylon-command.htm',
     'cylon-files.htm',
-    'cylon-files.cfg',
     'cylon-desktop.htm',
-    'cylon-desktop.cfg',
     'cylon-desktop.gfx',
+    'cylon-desktop-pc.gfx',
+    'cylon-desktop-tv.gfx',
     'cylon-theme.htm',
     'gfx.js',
     'gfx-tileset.htm',
@@ -356,6 +374,14 @@ window.addEventListener('message', function(e) {
         if (e.data.rect) window.panToRect(e.data.rect);
     } else if (e.data.type === 'CYLON_PRINT') {
         if (typeof print === 'function') print(e.data.text);
+    } else if (e.data.type === 'CYLON_POP_HTM') {
+        popupActive = true;
+        let shield = document.getElementById('qandy-popup-shield');
+        if (shield) shield.style.display = 'block';
+    } else if (e.data.type === 'CYLON_POP_HIDE') {
+        popupActive = false;
+        let shield = document.getElementById('qandy-popup-shield');
+        if (shield) shield.style.display = 'none';
     } else if (e.data.type === 'QANDY_INPUT_RECT') {
         window.panToRect(e.data.rect);
     } else if (e.data.type === 'QANDY_SET_MODE') {
@@ -413,6 +439,44 @@ async function bootMount() {
 // Applies CSS variables globally and alerts all open iframes
 window.CylonColors = {};
 
+// Screen Wrapper dynamically scales the OS Coordinate Grid (Gfx Engine)
+window.fitScreenToGrid = function() {
+    if (!window.CylonGFX) return;
+    const wrapper = document.getElementById('screen-wrapper');
+    if (!wrapper) return;
+
+    const screenW = window.innerWidth;
+    const barH = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--bar-height')) || 60;
+    let screenH = window.innerHeight - barH;
+
+    // Compensate dynamically for Virtual Keyboard if deployed
+    if (document.body.classList.contains('kb-open')) {
+        screenH -= (window.innerHeight * 0.55); // --kb-height is typically 55vh
+    }
+
+    const cols = window.CylonGFX.gridWide || 8;
+    const rows = window.CylonGFX.gridTall || 4;
+
+    let w = screenW, h = screenH;
+    if (window.CylonGFX.gfxGridStretch) {
+        const aspect = cols / rows;
+        h = screenW / aspect;
+        if (h > screenH) {
+            h = screenH;
+            w = screenH * aspect;
+        }
+        w = Math.floor(w * 0.98);
+        h = Math.floor(h * 0.98);
+    } else {
+        w = cols * window.CylonGFX.gfxTileSize;
+        h = rows * window.CylonGFX.gfxTileSize;
+    }
+
+    wrapper.style.width = w + 'px';
+    wrapper.style.height = h + 'px';
+};
+
+
 // Hot-reloads the global CSS variables by reading directly from /a/ theme variables
 window.applyThemeFromAlpha = async function() {
     let dos = window.CylonDOS;
@@ -421,10 +485,10 @@ window.applyThemeFromAlpha = async function() {
         "themeMenuBG": "#111", "themeMenuFG": "#aaa", "themeSelectBG": "#333", "themeSelectFG": "#0f0",
         "themeInputFG": "#0f0", "themeInputBG": "#000", "themeCaseBG": "#080808", "themeCaseFG": "#0a0",
         "themeKeyUpBG": "#222", "themeKeyUpFG": "#fff", "themeKeyDownBG": "#666", "themeKeyDownFG": "#fff",
-        // NEW: Terminal ANSI Color Palette
         "themeTextFg1": "#000000", "themeTextFg2": "#ffff00", "themeTextFg3": "#ff0000", "themeTextFg4": "#00ff00",
-        "themeTextBg6": "#ffffff", "themeTextBg7": "#ffff00", "themeTextBg8": "#800080", "themeTextBg9": "#008000"    };
-
+        "themeTextBg6": "#ffffff", "themeTextBg7": "#ffff00", "themeTextBg8": "#800080", "themeTextBg9": "#008000",
+        "htmlLink": "#0066cc", "htmlVisited": "#800080", "htmlHover": "#00aaff", "htmlActive": "#ff0000"
+    }
     try {
         if (await dos.exists('/a')) {
             for (let v of Object.keys(vars)) {
@@ -462,6 +526,11 @@ window.applyThemeFromAlpha = async function() {
     root.style.setProperty('--key-hl-bg', vars.themeKeyDownBG);
     root.style.setProperty('--key-hl-fg', vars.themeKeyDownFG);
 
+    root.style.setProperty('--html-link', vars.htmlLink);
+    root.style.setProperty('--html-visited', vars.htmlVisited);
+    root.style.setProperty('--html-hover', vars.htmlHover);
+    root.style.setProperty('--html-active', vars.htmlActive);
+
     // NEW: Inject Text Palette CSS Variables
     for(let i=1; i<=4; i++) root.style.setProperty(`--text-fg${i}`, vars[`themeTextFg${i}`]);
     for(let i=6; i<=9; i++) root.style.setProperty(`--text-bg${i}`, vars[`themeTextBg${i}`]);
@@ -479,11 +548,30 @@ window.desktopInit = async function() {
     // 1. Load system colors from /a/ retro-objects BEFORE autoexec loads apps
     await window.applyThemeFromAlpha();
 
-    // 2. Check for cylon.cfg (our autoexec file)
+    // 2. Initialize Headless GFX Physics Engine for the OS Terminal
+    if (window.CylonGFX) {
+        let mnt = await dos.mounts();
+        let bootDrive = mnt.find(m => m.current) || {name: 'ram'};
+        
+        let startSector = 'Aa';
+        try {
+            let loaded = await dos.load(bootDrive.name + ':/a/gfxSector');
+            if (loaded && loaded.trim().length === 2) startSector = loaded.trim();
+        } catch(e) {}
+        
+        // This runs safely in the background tracing coordinates even in pure terminal mode
+        await window.CylonGFX.init(bootDrive.name + ':/w/' + startSector);
+        
+        // Connect the OS Terminal wrapper to the dynamic screen sizing
+        window.fitScreenToGrid();
+        window.addEventListener('resize', window.fitScreenToGrid);
+    }
+
+    // 3. Check for cylon.cfg (our autoexec file)
     let cfgText = "";
     if (await dos.exists('cylon.cfg')) { cfgText = await dos.load('cylon.cfg'); }
     
-    // 3. Process the autoexec file line-by-line
+    // 4. Process the autoexec file line-by-line
     let lines = cfgText.split('\n');
     for (let line of lines) {
         line = line.trim();
@@ -672,6 +760,26 @@ function powerOn() {
 
 window.onload = function() {
     powerOn();
+
+    // Monkey-patch local popHtm/hpop in case they are called natively to toggle the shield and state
+    let _origPopHtm = window.popHtm;
+    if (_origPopHtm) {
+        window.popHtm = function() {
+            popupActive = true;
+            let shield = document.getElementById('qandy-popup-shield');
+            if (shield) shield.style.display = 'block';
+            return _origPopHtm.apply(this, arguments);
+        };
+    }
+    let _origHpop = window.hpop;
+    if (_origHpop) {
+        window.hpop = function() {
+            popupActive = false;
+            let shield = document.getElementById('qandy-popup-shield');
+            if (shield) shield.style.display = 'none';
+            return _origHpop.apply(this, arguments);
+        };
+    }
 };
 
 function loadNext() {
@@ -691,9 +799,9 @@ function loadNext() {
         printDOS("Error: [.4]" + (err.message || String(err))+"[.]");
     });
 
-    printDOS("\n[.3]2029 Qandy Pocket Computer v.2c - Quintrix and Crew Software[.]\n");
+    printDOS("\n[.1]2029 Qandy Pocket Computer v.2c - Quintrix and Crew Software[.]\n");
     printDOS("[.2]Alpha Testing Prototype Release - Free Public Domain Software[.]\n");
-    printDOS("[.1]DISCLAIMER: Written with the assistance of Artificial Intelligence[.]\n\n");
+    printDOS("[.3]DISCLAIMER: Written with the assistance of Artificial Intelligence[.]\n\n");
 
     document.getElementById('video-layer').addEventListener('click', function() {
         if (typeof hideFullKeyboard === 'function') hideFullKeyboard();

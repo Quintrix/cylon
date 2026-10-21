@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Cylon Theme Control Panel</title>
+    <title>Cylon Theme</title>
     <script src="cylon-sdk.js"></script>
     <style>
         :root {
@@ -15,6 +15,10 @@
             --menu-fg: #030;
             --sel-bg: #00c;
             --sel-fg: #ccc;
+            --html-link: #0066cc;
+            --html-visited: #800080;
+            --html-hover: #00aaff;
+            --html-active: #ff0000;
         }
 
         html, body {
@@ -63,6 +67,21 @@
         .btn-action:active { transform: scale(0.95); }
 
         #error-msg { color: #f00; margin-bottom: 20px; display: none; }
+        
+        /* Live Preview Links */
+        a.preview-link, a.preview-visited {
+            text-decoration: underline;
+            cursor: pointer;
+            font-family: var(--font-face);
+            font-weight: bold;
+        }
+        a.preview-link { color: var(--html-link); }
+        a.preview-link:hover { color: var(--html-hover); }
+        a.preview-link:active { color: var(--html-active); }
+
+        a.preview-visited { color: var(--html-visited); }
+        a.preview-visited:hover { color: var(--html-hover); }
+        a.preview-visited:active { color: var(--html-active); }
     </style>
 </head>
 <body>
@@ -175,7 +194,7 @@
         <div class="spacer"></div>
         <div class="spacer"></div>
 
-<!-- Terminal Palette Divider -->
+        <!-- Terminal Palette Divider -->
         <div class="spacer" style="border-bottom: 2px solid var(--menu-bg); margin: 15px 0 5px 0;"></div>
         <div style="grid-column: 1 / -1; text-align: center; color: var(--menu-bg);">Terminal Palette (Foreground / Background)</div>
         <div class="spacer"></div>
@@ -227,11 +246,47 @@
             <input type="text" id="themeTextBg9" value="#008000">
             <div class="swatch" id="swatch-themeTextBg9" onclick="showPicker(event, 'themeTextBg9')"></div>
         </div>
+
+        <!-- HTML Link Palette Divider -->
+        <div class="spacer" style="border-bottom: 2px solid var(--menu-bg); margin: 15px 0 5px 0;"></div>
+        <div style="grid-column: 1 / -1; text-align: center; color: var(--menu-bg);">HTML Link Colors</div>
+        <div class="spacer"></div>
+
+        <!-- HTML Links Row 1 -->
+        <div class="label">htmlLink:</div>
+        <div class="input-wrap">
+            <input type="text" id="htmlLink" value="#0066cc">
+            <div class="swatch" id="swatch-htmlLink" onclick="showPicker(event, 'htmlLink')"></div>
+        </div>
+        <div class="label">htmlVisited:</div>
+        <div class="input-wrap">
+            <input type="text" id="htmlVisited" value="#800080">
+            <div class="swatch" id="swatch-htmlVisited" onclick="showPicker(event, 'htmlVisited')"></div>
+        </div>
+
+        <!-- HTML Links Row 2 -->
+        <div class="label">htmlHover:</div>
+        <div class="input-wrap">
+            <input type="text" id="htmlHover" value="#00aaff">
+            <div class="swatch" id="swatch-htmlHover" onclick="showPicker(event, 'htmlHover')"></div>
+        </div>
+        <div class="label">htmlActive:</div>
+        <div class="input-wrap">
+            <input type="text" id="htmlActive" value="#ff0000">
+            <div class="swatch" id="swatch-htmlActive" onclick="showPicker(event, 'htmlActive')"></div>
+        </div>
+
+        <div style="grid-column: 1 / -1; text-align: center; margin-top: 10px;">
+            Preview: <a href="javascript:void(0)" class="preview-link">Normal Link</a> &nbsp;|&nbsp; 
+            <a href="javascript:void(0)" class="preview-visited">Visited Link</a>
+        </div>
         
-        <div class="action-row">
+        <div class="action-row" style="margin-top: 25px;">
             <div class="label">System Application:</div>
             <div id="apply-btn" class="btn-action" onclick="applyTheme()">APPLY CHANGES</div>
         </div>
+        
+        <div class="spacer"></div>
     </div>
 
     <script>
@@ -243,7 +298,8 @@
             "themeInputFG": "#0f0", "themeInputBG": "#000", "themeCaseBG": "#080808", "themeCaseFG": "#0a0",
             "themeKeyUpBG": "#222", "themeKeyUpFG": "#fff", "themeKeyDownBG": "#666", "themeKeyDownFG": "#fff",
             "themeTextFg0": "#ffffff", "themeTextFg1": "#000000", "themeTextFg2": "#ffff00", "themeTextFg3": "#ff0000", "themeTextFg4": "#00ff00",
-            "themeTextBg5": "#000000", "themeTextBg6": "#ffffff", "themeTextBg7": "#ffff00", "themeTextBg8": "#800080", "themeTextBg9": "#008000"
+            "themeTextBg5": "#000000", "themeTextBg6": "#ffffff", "themeTextBg7": "#ffff00", "themeTextBg8": "#800080", "themeTextBg9": "#008000",
+            "htmlLink": "#0066cc", "htmlVisited": "#800080", "htmlHover": "#00aaff", "htmlActive": "#ff0000"
         };
                 
         const PALETTE_COLORS = [
@@ -344,7 +400,7 @@
             let selFg = document.getElementById('themeSelectFG').value || '#0f0';
 
             let html = `
-                <div style="background-color: ${bg}; color: ${fg}; font-family: ${font}, monospace; padding: 20px; border: 2px solid ${fg}; box-shadow: 0px 4px 15px rgba(0,0,0,0.8); text-align: center; min-width: 250px;">
+                <div style="background-color: ${bg}; color: ${fg}; font-family: ${font}, monospace; padding: 20px; border: 2px solid ${fg}; box-shadow: 0px 4px 15px rgba(0,0,0,0.8); text-align: center; min-width: 250px;" onmouseleave="if(window.hpop) window.hpop();">
                     <h2 style="margin-top: 0; margin-bottom: 15px; border-bottom: 2px solid ${fg}; padding-bottom: 10px; font-size: 24px;">Cylon Themes</h2>
                     <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 25px;">
                         <div style="background-color: ${menuBg}; color: ${menuFg}; padding: 12px; border: 1px solid ${menuFg}; font-weight: bold;">Menu Option Preview</div>
@@ -373,6 +429,12 @@
             root.style.setProperty('--menu-fg', document.getElementById('themeMenuFG').value);
             root.style.setProperty('--sel-bg', document.getElementById('themeSelectBG').value);
             root.style.setProperty('--sel-fg', document.getElementById('themeSelectFG').value);
+            
+            // Apply new HTML link variables
+            root.style.setProperty('--html-link', document.getElementById('htmlLink').value);
+            root.style.setProperty('--html-visited', document.getElementById('htmlVisited').value);
+            root.style.setProperty('--html-hover', document.getElementById('htmlHover').value);
+            root.style.setProperty('--html-active', document.getElementById('htmlActive').value);
             
             Object.keys(THEME_VARS).forEach(id => {
                 let input = document.getElementById(id);
@@ -416,7 +478,7 @@
             let mainFg = document.getElementById('themeForeground').value || '#080';
 
             let html = `
-                <div style="background-color: ${menuBg}; color: ${menuFg}; padding: 15px; border: 2px solid ${mainFg}; box-shadow: 4px 4px 15px rgba(0,0,0,0.8); font-family: Courier, monospace; min-width: 240px;">
+                <div style="background-color: ${menuBg}; color: ${menuFg}; padding: 15px; border: 2px solid ${mainFg}; box-shadow: 4px 4px 15px rgba(0,0,0,0.8); font-family: Courier, monospace; min-width: 240px;" onmouseleave="if(window.hpop) window.hpop();">
                     <h3 style="margin-top:0; border-bottom: 2px solid ${menuFg}; padding-bottom: 5px; text-align: center;">Load Profile</h3>
                     <div style="display: flex; flex-direction: column; gap: 4px; max-height: 250px; overflow-y: auto;">
             `;
@@ -454,6 +516,11 @@
             let dos = window.parent.CylonDOS;
             let themeFile = `${THEME_DIR}/${tName}.cfg`;
             if (await dos.exists(themeFile)) {
+                // Clear fields to ensure old themes without link colors fallback to default
+                Object.keys(THEME_VARS).forEach(k => {
+                    let el = document.getElementById(k);
+                    if (el) el.value = THEME_VARS[k];
+                });
                 applyTextToInputs(await dos.load(themeFile));
                 document.getElementById('themeName').value = tName;
                 updateLivePreview();
@@ -489,9 +556,9 @@
         async function initThemes(dos) {
             if (!(await dos.exists(THEME_DIR))) {
                 await dos.mkdir(THEME_DIR);
-                await dos.save(`${THEME_DIR}/darkgreen.cfg`, "themeName=darkgreen\nthemeFont=Courier\nthemeBackground=#002200\nthemeForeground=#00ff00\nthemeMenuBG=#cccccc\nthemeMenuFG=#003300\nthemeSelectBG=#0000cc\nthemeSelectFG=#cccccc\nthemeInputFG=#00ff00\nthemeInputBG=#000000\nthemeCaseBG=#080808\nthemeCaseFG=#00aa00\nthemeKeyUpBG=#222222\nthemeKeyUpFG=#ffffff\nthemeKeyDownBG=#666666\nthemeKeyDownFG=#ffffff");
-                await dos.save(`${THEME_DIR}/darkpurple.cfg`, "themeName=darkpurple\nthemeFont=Courier\nthemeBackground=#150015\nthemeForeground=#dd00dd\nthemeMenuBG=#330033\nthemeMenuFG=#ff00ff\nthemeSelectBG=#660066\nthemeSelectFG=#ffffff\nthemeInputFG=#ff00ff\nthemeInputBG=#100010\nthemeCaseBG=#150015\nthemeCaseFG=#dd00dd\nthemeKeyUpBG=#300030\nthemeKeyUpFG=#ffffff\nthemeKeyDownBG=#800080\nthemeKeyDownFG=#ffffff");
-                await dos.save(`${THEME_DIR}/retrowin.cfg`, "themeName=retrowin\nthemeFont=sans-serif\nthemeBackground=#008080\nthemeForeground=#ffffff\nthemeMenuBG=#c0c0c0\nthemeMenuFG=#000000\nthemeSelectBG=#000080\nthemeSelectFG=#ffffff\nthemeInputFG=#000000\nthemeInputBG=#ffffff\nthemeCaseBG=#c0c0c0\nthemeCaseFG=#000000\nthemeKeyUpBG=#c0c0c0\nthemeKeyUpFG=#000000\nthemeKeyDownBG=#ffffff\nthemeKeyDownFG=#000000");
+                await dos.save(`${THEME_DIR}/darkgreen.cfg`, "themeName=darkgreen\nthemeFont=Courier\nthemeBackground=#002200\nthemeForeground=#00ff00\nthemeMenuBG=#cccccc\nthemeMenuFG=#003300\nthemeSelectBG=#0000cc\nthemeSelectFG=#cccccc\nthemeInputFG=#00ff00\nthemeInputBG=#000000\nthemeCaseBG=#080808\nthemeCaseFG=#00aa00\nthemeKeyUpBG=#222222\nthemeKeyUpFG=#ffffff\nthemeKeyDownBG=#666666\nthemeKeyDownFG=#ffffff\nhtmlLink=#00ffcc\nhtmlVisited=#00ccff\nhtmlHover=#ffffff\nhtmlActive=#ff0000");
+                await dos.save(`${THEME_DIR}/darkpurple.cfg`, "themeName=darkpurple\nthemeFont=Courier\nthemeBackground=#150015\nthemeForeground=#dd00dd\nthemeMenuBG=#330033\nthemeMenuFG=#ff00ff\nthemeSelectBG=#660066\nthemeSelectFG=#ffffff\nthemeInputFG=#ff00ff\nthemeInputBG=#100010\nthemeCaseBG=#150015\nthemeCaseFG=#dd00dd\nthemeKeyUpBG=#300030\nthemeKeyUpFG=#ffffff\nthemeKeyDownBG=#800080\nthemeKeyDownFG=#ffffff\nhtmlLink=#ff66ff\nhtmlVisited=#cc00cc\nhtmlHover=#ffffff\nhtmlActive=#ff0000");
+                await dos.save(`${THEME_DIR}/retrowin.cfg`, "themeName=retrowin\nthemeFont=sans-serif\nthemeBackground=#008080\nthemeForeground=#ffffff\nthemeMenuBG=#c0c0c0\nthemeMenuFG=#000000\nthemeSelectBG=#000080\nthemeSelectFG=#ffffff\nthemeInputFG=#000000\nthemeInputBG=#ffffff\nthemeCaseBG=#c0c0c0\nthemeCaseFG=#000000\nthemeKeyUpBG=#c0c0c0\nthemeKeyUpFG=#000000\nthemeKeyDownBG=#ffffff\nthemeKeyDownFG=#000000\nhtmlLink=#0000ff\nhtmlVisited=#800080\nhtmlHover=#00aaff\nhtmlActive=#ff0000");
             }
         }
 
@@ -508,7 +575,9 @@
             
             for (let v of Object.keys(THEME_VARS)) {
                 if (await dos.exists('/a/' + v)) {
-                    document.getElementById(v).value = await dos.load('/a/' + v);
+                    let rawVal = await dos.load('/a/' + v);
+                    // .trim() prevents newline breaks in CSS color assignments from Qandy dos.save operations
+                    document.getElementById(v).value = rawVal ? rawVal.trim() : THEME_VARS[v];
                 } else {
                     document.getElementById(v).value = THEME_VARS[v]; // Default fallback
                 }
