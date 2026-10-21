@@ -2,7 +2,7 @@
   "format": "qandy-ramdrive",
   "version": 2,
   "drive": "desktop",
-  "created": "2026-10-20T00:01:09.125Z",
+  "created": "2026-10-21T16:39:01.323Z",
   "entries": [
     {
       "name": "a",
@@ -46,9 +46,9 @@
     {
       "name": "a/gfxCursorZ",
       "type": "file",
-      "content": "00",
+      "content": "02",
       "size": 2,
-      "timestamp": "20261019200036",
+      "timestamp": "20261020201456",
       "owner": "",
       "session": "",
       "readOnly": false
@@ -68,7 +68,7 @@
       "type": "file",
       "content": "true",
       "size": 4,
-      "timestamp": "20261019130309",
+      "timestamp": "20261020220224",
       "owner": "",
       "session": "",
       "readOnly": false
@@ -148,7 +148,7 @@
       "type": "file",
       "content": "Aa",
       "size": 2,
-      "timestamp": "20261019150919",
+      "timestamp": "20261021123331",
       "owner": "",
       "session": "",
       "readOnly": false
@@ -159,6 +159,16 @@
       "content": "/t/",
       "size": 3,
       "timestamp": "20261018200340",
+      "owner": "",
+      "session": "",
+      "readOnly": false
+    },
+    {
+      "name": "a/playerZ",
+      "type": "file",
+      "content": "0",
+      "size": 1,
+      "timestamp": "20261021123822",
       "owner": "",
       "session": "",
       "readOnly": false
@@ -243,9 +253,9 @@
     {
       "name": "w/Aa/Az1fTrash",
       "type": "file",
-      "content": "echo Trash goes here",
-      "size": 20,
-      "timestamp": "20261019140847",
+      "content": "pop click Trash goes here",
+      "size": 25,
+      "timestamp": "20261021002345",
       "owner": "",
       "session": "",
       "readOnly": false

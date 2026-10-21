@@ -392,6 +392,44 @@ window.addEventListener('message', function(e) {
     }
 });
 
+window.addEventListener('copy', function(e) {
+    // If the user highlighted standard text in the history terminal, let the browser copy it natively!
+    if (window.getSelection().toString() !== "") return;
+    
+    // Otherwise, copy the selected text from our virtual DOS input buffer
+    if (selAnchor !== null && selAnchor !== cursorPos) {
+        let start = Math.min(selAnchor, cursorPos);
+        let end = Math.max(selAnchor, cursorPos);
+        let selected = inputBuffer.slice(start, end);
+        if (selected) {
+            e.clipboardData.setData('text/plain', selected);
+            e.preventDefault(); // Tell browser we handled it
+        }
+    }
+});
+
+window.addEventListener('cut', function(e) {
+    // Let native history selections copy freely
+    if (window.getSelection().toString() !== "") return;
+
+    if (selAnchor !== null && selAnchor !== cursorPos) {
+        let start = Math.min(selAnchor, cursorPos);
+        let end = Math.max(selAnchor, cursorPos);
+        let selected = inputBuffer.slice(start, end);
+        if (selected) {
+            // 1. Write to OS Clipboard
+            e.clipboardData.setData('text/plain', selected);
+            e.preventDefault();
+            
+            // 2. Erase from virtual input buffer
+            inputBuffer = inputBuffer.slice(0, start) + inputBuffer.slice(end);
+            cursorPos = start;
+            selAnchor = null;
+            if (window.renderInputLine) window.renderInputLine();
+        }
+    }
+});
+
 window.addEventListener('paste', function(e) {
     let text = (e.clipboardData || window.clipboardData).getData('text');
     if (text && window.pasteText) {
@@ -448,11 +486,6 @@ window.fitScreenToGrid = function() {
     const screenW = window.innerWidth;
     const barH = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--bar-height')) || 60;
     let screenH = window.innerHeight - barH;
-
-    // Compensate dynamically for Virtual Keyboard if deployed
-    if (document.body.classList.contains('kb-open')) {
-        screenH -= (window.innerHeight * 0.55); // --kb-height is typically 55vh
-    }
 
     const cols = window.CylonGFX.gridWide || 8;
     const rows = window.CylonGFX.gridTall || 4;
@@ -845,10 +878,20 @@ function loadNext() {
         else if (e.key === 'Delete') { window.press({id: 'del', shift: e.shiftKey}); e.preventDefault(); }
         else if (e.key === '`' || e.key === '~') {
             e.preventDefault();
-            window.toggleFullKeyboard();
+            //window.toggleFullKeyboard();
+            if (window.cycleActivePage) window.cycleActivePage(); 
         } else if (e.key === 'Escape') {
             if (window.isVirtualKeyboardOpen()) { window.press({id: 'esc'}); }
-        } else if (e.key.length === 1) { window.press({char: e.key}); e.preventDefault(); }
+        } else if (e.key.length === 1) { 
+            // Bypass preventDefault for native OS clipboard shortcuts (Ctrl/Cmd + C, X, V, A)
+            if (e.ctrlKey || e.metaKey) {
+                let k = e.key.toLowerCase();
+                if (['c', 'x', 'v', 'a'].includes(k)) return; 
+            }
+            window.press({char: e.key}); 
+            e.preventDefault(); 
+        }
+        
     });
 
     document.addEventListener('keyup', function(e) {

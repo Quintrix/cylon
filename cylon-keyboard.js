@@ -494,7 +494,16 @@ function keyboard() {
         } else if (e.id === 'del') {
             if (osMode === 'app') { window.sendVirtualKey('Delete'); return; }
             if (hasSelection()) {
-                if (shiftHeld) { var r = selRange(); clipboard = inputBuffer.slice(r[0], r[1]); }
+                let r = selRange();
+                let selected = inputBuffer.slice(r[0], r[1]);
+                clipboard = selected; // Maintain internal fallback memory
+                
+                if (shiftHeld) {
+                    // Virtual Cut: Write to OS Clipboard
+                    if (navigator.clipboard && navigator.clipboard.writeText) {
+                        navigator.clipboard.writeText(selected).catch(err => console.warn("Clipboard write blocked:", err));
+                    }
+                }
                 deleteSelection();
             } else if (cursorPos < inputBuffer.length) {
                 inputBuffer = inputBuffer.slice(0, cursorPos) + inputBuffer.slice(cursorPos + 1);
@@ -502,10 +511,16 @@ function keyboard() {
         } else if (e.id === 'ins') {
             if (osMode === 'app') { window.sendVirtualKey('Insert'); return; }
             if (shiftHeld) {
-                if (hasSelection()) deleteSelection();
-                if (clipboard) {
-                    inputBuffer = inputBuffer.slice(0, cursorPos) + clipboard + inputBuffer.slice(cursorPos);
-                    cursorPos += clipboard.length;
+                // Virtual Paste: Read from OS Clipboard asynchronously
+                if (navigator.clipboard && navigator.clipboard.readText) {
+                    navigator.clipboard.readText().then(text => {
+                        if (text && window.pasteText) window.pasteText(text);
+                    }).catch(err => {
+                        // If browser denies OS clipboard permission, fallback to internal clipboard
+                        if (clipboard && window.pasteText) window.pasteText(clipboard);
+                    });
+                } else if (clipboard && window.pasteText) {
+                    window.pasteText(clipboard);
                 }
             } else { insertMode = !insertMode; }
         } else if (e.id === 'left') {

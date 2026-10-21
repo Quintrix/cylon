@@ -448,7 +448,7 @@ window.CylonSDK.renderListGrid = function(containerId, items) {
 // 3. GLOBAL LISTENERS
 // ========================================================================
 
-global.showTerminal = function () {
+window.showTerminal = function () {
     var video = document.getElementById('video-layer');
     var container = pageContainer();
 
@@ -464,10 +464,10 @@ global.showTerminal = function () {
     activePage = null;
 
     updateTaskbar();
-    if (typeof global.setOSMode === 'function') global.setOSMode('terminal');
+    if (typeof window.setOSMode === 'function') window.setOSMode('terminal');
   };
 
-  global.showPage = function (filename) {
+  window.showPage = function (filename) {
     var video = document.getElementById('video-layer');
     var container = pageContainer();
     var frame = openPages[filename];
@@ -490,12 +490,12 @@ global.showTerminal = function () {
       }
     });
     
-    if (typeof global.hideFullKeyboard === 'function') {
-      global.hideFullKeyboard();
+    if (typeof window.hideFullKeyboard === 'function') {
+      window.hideFullKeyboard();
     }
 
     updateTaskbar();
-    if (typeof global.setOSMode === 'function') global.setOSMode('app');
+    if (typeof window.setOSMode === 'function') window.setOSMode('app');
   };
 
 })();

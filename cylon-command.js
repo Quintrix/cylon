@@ -90,7 +90,7 @@
     '  save <file> <text>             Save text to a file',
     '  load <file>                    Smart launch/execute a file based on extension',
     '  type <file>                    Dump raw text of a file to terminal',
-    '  copy <src> <dst>               Copy a file or directory (across drives too)',
+    '  copy <src> <dest>              Copy a file or directory (across drives too), copy a file, dir, or <c> for clipboard',
     '  rename <old> <new>             Rename or move within a drive',
     '  delete <file|pattern> [-y]     Delete a file or files (use -y to skip confirm)',
     '  exists <path>                  Test whether a path exists',
@@ -188,18 +188,14 @@
       case 'delete':
       case 'del':
       case 'rm':
-          if (!args[0]) return { handled: true, output: usage('delete <file|pattern> [-y]') };
-          var targetPath = args.join(' ');
+        if (!args[0]) return usage('fdisk delete <name> [-y]');
+        if (!flags.yes) {
+          return 'This will destroy partition "' + args[0] + '" and all data on it.\nRe-run to confirm: fdisk delete ' + args[0] + ' -y';
+        }
+        await dos.deletePartition(args[0]);
+        return 'Deleted partition: ' + args[0];
           
-          // Safety Catch: Prevent accidental wildcard annihilation without the -y flag
-          if (/[*?]/.test(targetPath) && !flags.yes) {
-            return { handled: true, output: 'Warning: You are using a wildcard to delete multiple files.\nRe-run to confirm: ' + command + ' ' + targetPath + ' -y' };
-          }
-          
-          var result = await dos.delete(targetPath);
-          return { handled: true, output: (typeof result === 'number' ? result + ' file(s) deleted.' : 'File deleted.') };
-          
-      case 'boot':
+      case 'boot': 
         if (!args[0]) return usage('fdisk boot <name|none>');
         var booted = await dos.setBootPartition(args[0]);
         return booted ? 'Boot partition: ' + booted : 'Boot flag cleared.';
@@ -538,15 +534,32 @@ async function handleCylonCommand(line) {
               installcmds.push('fdisk boot cylon');
               installcmds.push('import ' + sourceGfx + ' idb desktop');
               installcmds.push('cylon:');
-              installcmds.push('echo Installation sequence complete!');
-              installcmds.push('echo Please restart the system to boot from IndexedDB.');
-              installcmds.push('echo Run: reboot -y');
+              installcmds.push('reboot');
 
               if (!cylonPart && !dtPart && !flags.yes) {
+                var payloadStr = "~500 KB";
+                try {
+                  var getSz = async function(f) {
+                    if (await dos.exists(f)) {
+                      var d = await dos.dir(f);
+                      return d && d.length ? d[0].size : 0;
+                    } else {
+                      var res = await fetch(f, { method: 'HEAD' });
+                      return res.ok ? parseInt(res.headers.get('Content-Length') || '0', 10) : 0;
+                    }
+                  };
+                  var s1 = await getSz('cylon.json');
+                  var s2 = await getSz(sourceGfx);
+                  if (s1 + s2 > 0) payloadStr = dos.formatSize(s1 + s2);
+                } catch (e) {}
+
                 var inLines = [
                   '',
                   'This installs Cylon OS to your browser\'s IndexedDB.',
                   'Desktop profile selected: ' + (args[0] || 'default (' + sourceGfx + ')'),
+                  'Estimated download size:  ' + payloadStr,
+                  'Partition quota required: ' + dos.formatSize(dos.constants.DEFAULT_QUOTA * 2) + ' (2 partitions)',
+                  '',
                   'To proceed, run: install ' + profileStr + '-y',
                   ''
                 ];
@@ -727,6 +740,32 @@ async function handleCylonCommand(line) {
         case 'copy':
         case 'cp':
           if (args.length < 2) return { handled: true, output: usage('copy <src> <dst> [-k]') };
+          
+          // Case A: Copy FROM Clipboard TO File
+          if (args[0] === '<c>') {
+              if (!navigator.clipboard) return { handled: true, output: 'Error: [.4]Clipboard API not supported in this environment.[.]' };
+              try {
+                  var clipText = await navigator.clipboard.readText();
+                  await dos.save(args[1], clipText);
+                  return { handled: true, output: 'Copied clipboard to ' + args[1] };
+              } catch (e) {
+                  return { handled: true, output: 'Error reading clipboard: [.4]' + e.message + '[.]' };
+              }
+          } 
+          // Case B: Copy FROM File TO Clipboard
+          else if (args[1] === '<c>') {
+              if (!navigator.clipboard) return { handled: true, output: 'Error: [.4]Clipboard API not supported in this environment.[.]' };
+              try {
+                  var fileText = await dos.load(args[0]);
+                  if (fileText === null) return { handled: true, output: 'File not found.' };
+                  await navigator.clipboard.writeText(fileText);
+                  return { handled: true, output: 'Copied ' + args[0] + ' to clipboard.' };
+              } catch (e) {
+                  return { handled: true, output: 'Error writing to clipboard: [.4]' + e.message + '[.]' };
+              }
+          }
+          
+          // Default: Standard File-to-File DOS Copy
           result = await dos.copy(args[0], args[1], { keepFlags: !!flags.keep });
           return { handled: true, output: 'Copied to ' + result };
 
@@ -995,6 +1034,24 @@ global.showTerminal = function () {
 
 })(typeof window !== 'undefined' ? window : globalThis);
 
+window.cycleActivePage = function() {
+      var pages = Object.keys(openPages);
+      if (pages.length === 0) return; // Nothing to cycle
+
+      if (activePage === null) {
+          // We are on the terminal, go to the first open app
+          global.showPage(pages[0]);
+      } else {
+          var idx = pages.indexOf(activePage);
+          if (idx === pages.length - 1) {
+              // We are at the end of the app list, return to terminal
+              global.showTerminal();
+          } else {
+              // Go to the next app in the list
+              global.showPage(pages[idx + 1]);
+          }
+      }
+  };
 
 // ============================================================================
 //   Pop Function Compatibility Layer for Cylon OS
