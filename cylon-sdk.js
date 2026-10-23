@@ -170,6 +170,11 @@ function handleInputTap(e) {
 
             trackElement(el);
         }
+    } else if (e.type === 'pointerdown') {
+        // If the user clicks any non-input visual surface of an app, alert the parent OS
+        if (window.parent && window.parent !== window) {
+            window.parent.postMessage({ type: 'QANDY_APP_CLICKED' }, '*');
+        }
     }
 }
 
@@ -178,6 +183,12 @@ document.addEventListener('mousedown', handleInputTap, { capture: true, passive:
 document.addEventListener('touchstart', handleInputTap, { capture: true, passive: false });
 
 window.addEventListener('message', (e) => {
+    // NEW: Catch virtual keystrokes forwarded from the parent OS
+    if (e.data.type === 'QANDY_VKEY') {
+        if (typeof window.keydown === 'function') {
+            window.keydown(e.data.key, null); // Pass null for event as it's virtual
+        }
+    } 
     if (e.data.type === 'QANDY_UPDATE_INPUT' || e.data.type === 'QANDY_COMMIT_INPUT') {
         const el = document.getElementById(e.data.id);
         if (el) {
@@ -444,58 +455,5 @@ window.CylonSDK.renderListGrid = function(containerId, items) {
     });
 };
 
-// ========================================================================
-// 3. GLOBAL LISTENERS
-// ========================================================================
-
-window.showTerminal = function () {
-    var video = document.getElementById('video-layer');
-    var container = pageContainer();
-
-    if (video) video.style.display = 'flex';
-    if (container) container.style.display = 'none';
-
-    document.body.classList.remove('app-mode');
-
-    Object.keys(openPages).forEach(function (filename) {
-      openPages[filename].classList.remove('active');
-    });
-
-    activePage = null;
-
-    updateTaskbar();
-    if (typeof window.setOSMode === 'function') window.setOSMode('terminal');
-  };
-
-  window.showPage = function (filename) {
-    var video = document.getElementById('video-layer');
-    var container = pageContainer();
-    var frame = openPages[filename];
-
-    if (!frame) return;
-
-    if (video) video.style.display = 'none';
-    if (container) container.style.display = 'block';
-
-    document.body.classList.add('app-mode');
-
-    activePage = filename;
-
-    Object.keys(openPages).forEach(function (name) {
-      var isActive = (name === filename);
-      openPages[name].classList.toggle('active', isActive);
-      
-      if (isActive && openPages[name].contentWindow) {
-          openPages[name].contentWindow.postMessage({ type: 'QANDY_PAGE_ACTIVATED' }, '*');
-      }
-    });
-    
-    if (typeof window.hideFullKeyboard === 'function') {
-      window.hideFullKeyboard();
-    }
-
-    updateTaskbar();
-    if (typeof window.setOSMode === 'function') window.setOSMode('app');
-  };
 
 })();

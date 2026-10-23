@@ -970,7 +970,14 @@ global.showTerminal = function () {
     }
 
     updateTaskbar();
-    if (typeof global.setOSMode === 'function') global.setOSMode('app');
+    
+    if (typeof global.setOSMode === 'function') {
+        if (document.activeElement === frame) {
+            global.setOSMode('app');
+        } else {
+            global.setOSMode('app-cli');
+        }
+    }
   };
 
   global.PageOpen = async function (filename, title) {
@@ -998,6 +1005,7 @@ global.showTerminal = function () {
     var frame = document.createElement('iframe');
 
     frame.className = 'page-frame';
+    frame.tabIndex = 0; // NEW: Ensure the frame is naturally Tab-focusable
     frame.dataset.title = pageTitle(filename, title);
     frame.srcdoc = html;
 

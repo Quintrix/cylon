@@ -113,6 +113,7 @@ const PAGES = Object.freeze(new Set([
     'cylon-desktop-pc.gfx',
     'cylon-desktop-tv.gfx',
     'cylon-theme.htm',
+    'cylon-calc.htm',
     'gfx.js',
     'gfx-tileset.htm',
     'gfx-create.htm',
@@ -293,9 +294,8 @@ function updatePrompt() {
         
         var promptEl = document.getElementById('kb-prompt');
         
-        // BUGFIX: ONLY overwrite the prompt with the DOS path if we are in the terminal!
-        // If an app is asking for input, leave its custom label alone.
-        if (promptEl && osMode === 'terminal') {
+        // BUGFIX: Allow app-cli mode to use the DOS prompt overlay
+        if (promptEl && (osMode === 'terminal' || osMode === 'app-cli')) {
             promptEl.textContent = sysPrompt;
         }
         
@@ -318,7 +318,7 @@ window.setOSMode = function(mode, promptText) {
     var promptEl = document.getElementById('kb-prompt');
     if (!promptEl) return;
 
-    if (mode === 'terminal') {
+    if (mode === 'terminal' || mode === 'app-cli') {
         if (window.updatePrompt) window.updatePrompt();
     } else if (mode === 'app') {
         var activeFrame = document.querySelector('.page-frame.active');
@@ -330,6 +330,23 @@ window.setOSMode = function(mode, promptText) {
 
     if (window.renderInputLine) window.renderInputLine();
 };
+
+// Sync OS Mode dynamically based on what the user's browser is focused on
+function syncAppMode() {
+    if (osMode !== 'app' && osMode !== 'app-cli') return;
+    var activeFrame = document.querySelector('.page-frame.active');
+    
+    // If the active element is the app iframe, switch to APP mode. Otherwise, CLI mode.
+    if (activeFrame && document.activeElement === activeFrame) {
+        if (osMode !== 'app') window.setOSMode('app');
+    } else {
+        if (osMode !== 'app-cli') window.setOSMode('app-cli');
+    }
+}
+
+// Attach capturing listeners for global focus shifts (e.g. physical Tab key)
+window.addEventListener('focus', syncAppMode, true);
+window.addEventListener('blur', () => setTimeout(syncAppMode, 10), true);
 
 window.sendVirtualKey = function(keyName) {
     var activeFrame = document.querySelector('.page-frame.active');
@@ -389,6 +406,12 @@ window.addEventListener('message', function(e) {
         if (osMode === 'terminal') { window.showFullKeyboard(); }
     } else if (e.data.type === 'QANDY_PASTE') {
         if (window.pasteText) window.pasteText(e.data.text);
+    } else if (e.data.type === 'QANDY_APP_CLICKED') {
+        // If the user clicks the app's visual layer, abort the hybrid CLI mode
+        if (osMode === 'app-cli') {
+            window.setOSMode('app');
+            if (typeof window.hideFullKeyboard === 'function') window.hideFullKeyboard();
+        }
     }
 });
 
@@ -520,7 +543,8 @@ window.applyThemeFromAlpha = async function() {
         "themeKeyUpBG": "#222", "themeKeyUpFG": "#fff", "themeKeyDownBG": "#666", "themeKeyDownFG": "#fff",
         "themeTextFg1": "#000000", "themeTextFg2": "#ffff00", "themeTextFg3": "#ff0000", "themeTextFg4": "#00ff00",
         "themeTextBg6": "#ffffff", "themeTextBg7": "#ffff00", "themeTextBg8": "#800080", "themeTextBg9": "#008000",
-        "htmlLink": "#0066cc", "htmlVisited": "#800080", "htmlHover": "#00aaff", "htmlActive": "#ff0000"
+        "htmlLink": "#0066cc", "htmlVisited": "#800080", "htmlHover": "#00aaff", "htmlActive": "#ff0000",
+        "keysVirtual": "true" // NEW: Virtual Keyboard Toggle Default
     }
     try {
         if (await dos.exists('/a')) {
@@ -531,7 +555,8 @@ window.applyThemeFromAlpha = async function() {
             }
         }
     } catch(e) { console.warn("Could not load /a/ theme vars", e); }
-    
+    window.CylonVirtualKeyboardEnabled = (vars.keysVirtual.toLowerCase() !== 'false');
+
     window.CylonColors = {
         BackgroundColor: vars.themeBackground, ForegroundColor: vars.themeForeground,
         Font: vars.themeFont, MenuBgColor: vars.themeMenuBG, MenuFgColor: vars.themeMenuFG,
@@ -881,7 +906,8 @@ function loadNext() {
             //window.toggleFullKeyboard();
             if (window.cycleActivePage) window.cycleActivePage(); 
         } else if (e.key === 'Escape') {
-            if (window.isVirtualKeyboardOpen()) { window.press({id: 'esc'}); }
+            e.preventDefault();
+            if (window.press) window.press({id: 'esc'});
         } else if (e.key.length === 1) { 
             // Bypass preventDefault for native OS clipboard shortcuts (Ctrl/Cmd + C, X, V, A)
             if (e.ctrlKey || e.metaKey) {

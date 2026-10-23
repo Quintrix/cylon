@@ -356,7 +356,10 @@ function keyboard() {
         if (on) el.classList.add(cls); else el.classList.remove(cls);
     };
 
-    window.showFullKeyboard = function() {
+    window.showFullKeyboard = function(force) {
+        // Abort auto-popup if user disabled virtual keys (unless explicitly forced)
+        if (window.CylonVirtualKeyboardEnabled === false && force !== true) return;
+        
         if (window.updatePrompt) window.updatePrompt(); // Use the global function
         document.getElementById('kb-overlay').classList.add('is-open');
         document.body.classList.add('kb-open');
@@ -432,15 +435,22 @@ function keyboard() {
     };
 
     window.toggleFullKeyboard = function() {
-        if (window.isVirtualKeyboardOpen()) { window.hideFullKeyboard(); }
-        else { window.showFullKeyboard(); }
+        if (window.isVirtualKeyboardOpen()) { 
+            window.hideFullKeyboard(); 
+        } else { 
+            window.showFullKeyboard(true); // Force keyboard open manually
+        }
     };
-
-    // Prompt toggles the keyboard when tapped
+    
+    // Prompt toggles the keyboard when tapped and engages hybrid cli input
     document.getElementById('input-bar').addEventListener('click', function() {
+        if (osMode === 'app') {
+            window.setOSMode('app-cli');
+        }
         if (!document.body.classList.contains('kb-open')) {
             window.showFullKeyboard();
         }
+        window.focus(); // NEW: Explicitly pull hardware keyboard focus back to the parent OS
     });
     
     function clampCursor(pos) { return Math.max(0, Math.min(inputBuffer.length, pos)); }
@@ -516,7 +526,6 @@ function keyboard() {
                     navigator.clipboard.readText().then(text => {
                         if (text && window.pasteText) window.pasteText(text);
                     }).catch(err => {
-                        // If browser denies OS clipboard permission, fallback to internal clipboard
                         if (clipboard && window.pasteText) window.pasteText(clipboard);
                     });
                 } else if (clipboard && window.pasteText) {
@@ -582,11 +591,50 @@ function keyboard() {
                 cursorPos = 0;
                 selAnchor = null;
                 if (window.updatePrompt) window.updatePrompt();
+                
+                // Bounce back to standard app control immediately after submitting DOS command
+                if (osMode === 'app-cli') window.setOSMode('app'); 
+                
                 hideFullKeyboard();
             }
         } else if (e.id === 'esc') {
+            // Priority 1: Close Popup / Shield if active
+            let shield = document.getElementById('qandy-popup-shield');
+            if (shield && shield.style.display !== 'none') {
+                if (typeof window.hpop === 'function') window.hpop();
+                return; // Stop here (Staggered behavior)
+            }
+
+            // Priority 2: Hide Virtual Keyboard if open
+            if (window.isVirtualKeyboardOpen && window.isVirtualKeyboardOpen()) {
+                window.hideFullKeyboard();
+                return; // Stop here
+            }
+
+            // Priority 3: Clear the Input Buffer if it has text
+            if (inputBuffer.length > 0) {
+                inputBuffer = "";
+                cursorPos = 0;
+                selAnchor = null;
+                renderInputLine();
+                
+                // If we are actively typing into an app field, clear it on the app side too
+                if (osMode === 'app-edit' || osMode === 'app-textarea') {
+                    var activeFrame = document.querySelector('.page-frame.active');
+                    if (activeFrame) {
+                        activeFrame.contentWindow.postMessage({
+                            type: 'QANDY_UPDATE_INPUT',
+                            id: proxyInputId,
+                            value: inputBuffer
+                        }, '*');
+                    }
+                }
+                return; // Stop here
+            }
+
+            // Priority 4: If nothing else to do, pass ESC to the active App
             if (osMode === 'app') { window.sendVirtualKey('Escape'); return; }
-            hideFullKeyboard();
+            
         } else if (e.char) {
             if (osMode === 'app') { window.sendVirtualKey(e.char); return; }
             if (hasSelection()) deleteSelection();

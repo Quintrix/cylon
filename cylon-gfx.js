@@ -155,6 +155,15 @@ window.CylonGFX = {
             window.addEventListener('message', async (e) => {
                 if (e.data.type === 'QANDY_GFX_CMD') {
                     await this.handleGfxCommand(e.data.cmd, e.data.data);
+                } else if (e.data.type === 'gfx') {
+                    // Map generic string payloads dispatched via the OS Popup Link Parser
+                    let fullCmd = String(e.data.cmd).trim();
+                    let spaceIdx = fullCmd.indexOf(' ');
+                    if (spaceIdx > -1) {
+                        await this.handleGfxCommand(fullCmd.substring(0, spaceIdx), fullCmd.substring(spaceIdx + 1));
+                    } else {
+                        await this.handleGfxCommand(fullCmd, "");
+                    }
                 }
             });
             this._listenersAdded = true;
@@ -257,6 +266,44 @@ window.CylonGFX = {
                     
                     await this.persistState(`${drive}:/a/gfxSector`, data);
                     if (this.gfxCommandLog && window.parent.print) window.parent.print(`[.3]Teleported to sector: ${data}[.]\n`);
+                }
+                break;
+
+            case 'pickicon':
+                if (data) {
+                    let parts = data.split(' ');
+                    let code = parts[0];
+                    let z = parts[1];
+                    this.showIconNamer(code, z);
+                }
+                break;
+
+            case 'saveicon':
+                if (data) {
+                    let parts = data.split(' ');
+                    let code = parts[0];
+                    let z = parseInt(parts[1], 10);
+                    let name = parts[2];
+                    
+                    if (code && code.length === 2 && /^[A-Z]/.test(code[0]) && name && name.length >= 1) {
+                        let zHex = z.toString(16).padStart(2, '0').toLowerCase();
+                        let filename = code + zHex + name;
+                        
+                        let pathPrefix = this.currentPath.endsWith('/') ? this.currentPath : this.currentPath + '/';
+                        let filePath = `${pathPrefix}${filename}`;
+                        
+                        // Strict requirement to supply \n as empty representation
+                        await this.persistState(filePath, "\\n");
+                        
+                        if (this.gfxCommandLog && window.parent.print) {
+                            window.parent.print(`[.4]GFX Engine: Created icon '${name}' at Z:${z}[.]\n`);
+                        }
+                        this.renderScreen();
+                    } else {
+                        if (this.gfxCommandLog && window.parent.print) {
+                            window.parent.print(`[.4]GFX Error: Invalid icon code or name.[.]\n`);
+                        }
+                    }
                 }
                 break;
                 
@@ -691,6 +738,68 @@ window.CylonGFX = {
         this.showTileMenu(window.playerZ);
     },
 
+    showIconPicker: function(z) {
+        let html = '<div style="text-align:center; padding:15px; user-select:none;">';
+        html += '<div style="margin-bottom:15px; color:var(--fg-color,#0f0); font-family:var(--font-face,monospace); font-size:16px; font-weight:bold;">Select Icon</div>';
+        
+        let rows = ['A', 'B', 'C'];
+        rows.forEach(prefix => {
+            html += '<div style="display:flex; justify-content:center; gap:6px; margin-bottom:6px;">';
+            for(let c = 'q'.charCodeAt(0); c <= 'z'.charCodeAt(0); c++) {
+                let code = prefix + String.fromCharCode(c);
+                html += `<a href="gfx:pickicon ${code} ${z}" style="display:flex; align-items:center; justify-content:center; width:36px; height:36px; line-height:0; border:1px solid transparent; border-radius:3px; transition:border 0.1s;" onmouseover="this.style.border='1px solid var(--sel-fg, #0f0)'" onmouseout="this.style.border='1px solid transparent'"><img src="${this.gfxIconDir}${code}.png" style="width:32px; height:32px; image-rendering:pixelated; cursor:pointer;" onerror="this.src='q/file.png'" title="${code}" /></a>`;
+            }
+            html += '</div>';
+        });
+        html += '</div>';
+
+        if (window.parent && window.parent.popHtm) {
+            window.parent.popHtm(html, 'center');
+        }
+    },
+
+    showIconNamer: function(code, z) {
+        let html = `<div style="text-align:center; padding:15px;">
+            <div style="margin-bottom:15px; color:var(--fg-color,#0f0); font-family:var(--font-face,monospace); font-weight:bold;">Name New Icon</div>
+            <img src="${this.gfxIconDir}${code}.png" style="width:64px; height:64px; image-rendering:pixelated; margin-bottom:15px; filter:drop-shadow(2px 2px 2px rgba(0,0,0,0.8));" onerror="this.src='q/file.png'"/>
+            <div style="margin-bottom:15px;">
+                <input type="text" id="gfx-new-icon-name" placeholder="Alpha-numeric name" style="width:100%; box-sizing:border-box; padding:8px; background:var(--input-bg,#000); color:var(--input-fg,#0f0); border:1px solid var(--sel-bg,#333); font-family:var(--font-face,monospace); font-size:16px; outline:none;" maxlength="20" autocomplete="off" spellcheck="false" />
+            </div>
+            <a href="#" id="gfx-new-icon-submit" onclick="
+                var inputEl = document.getElementById('gfx-new-icon-name');
+                if(!inputEl) return false;
+                var val = inputEl.value.replace(/[^a-zA-Z0-9]/g, '');
+                if(!val) { inputEl.focus(); return false; }
+                let activeFrame = document.querySelector('.page-frame.active');
+                if(activeFrame && activeFrame.contentWindow) {
+                    activeFrame.contentWindow.postMessage({ type: 'gfx', cmd: 'saveicon ${code} ${z} ' + val }, '*');
+                } else {
+                    window.postMessage({ type: 'gfx', cmd: 'saveicon ${code} ${z} ' + val }, '*');
+                }
+                if(typeof hpop === 'function') hpop();
+                return false;
+            " style="display:inline-block; padding:8px 16px; background:var(--sel-bg,#333); color:var(--sel-fg,#0f0); text-decoration:none; cursor:pointer; border-radius:3px; font-weight:bold; font-family:var(--font-face,monospace);">Submit</a>
+        </div>`;
+
+        if (window.parent && window.parent.popHtm) {
+            window.parent.popHtm(html, 'center');
+            // Auto-focus input shortly after render
+            setTimeout(() => {
+                let input = window.parent.document.getElementById('gfx-new-icon-name');
+                if (input) {
+                    input.focus();
+                    input.onkeydown = function(e) {
+                        if(e.key === 'Enter') {
+                            e.preventDefault();
+                            let submitBtn = window.parent.document.getElementById('gfx-new-icon-submit');
+                            if(submitBtn) submitBtn.click();
+                        }
+                    };
+                }
+            }, 100);
+        }
+    },
+
     showTileMenu: function(z) {
         if (!window.parent || !window.parent.CylonPopManager || typeof window.parent.CylonPopManager.showContextMenu !== 'function') {
             console.warn("GFX Warning: Context menu manager unavailable.");
@@ -730,17 +839,16 @@ window.CylonGFX = {
             }
         };
 
+        // Always allow creating a new icon
+        items.push({
+            label: 'Add Icon',
+            action: () => this.showIconPicker(z)
+        });
+
         if (y === 0) addScroll('N', 'Scroll North', 0, -1);
         if (y === this.gridTall - 1) addScroll('S', 'Scroll South', 0, 1);
         if (x === this.gridWide - 1) addScroll('E', 'Scroll East', 1, 0);
         if (x === 0) addScroll('W', 'Scroll West', -1, 0);
-
-        if (items.length === 0) {
-            items.push({
-                label: 'To add icon input: gfx icon [code] [name]',
-                action: null
-            });
-        }
 
         const wrapper = document.getElementById('desktop-wrapper');
         let rect = wrapper.getBoundingClientRect();
