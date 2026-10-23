@@ -841,8 +841,8 @@ window.CylonGFX = {
 
         // Always allow creating a new icon
         items.push({
-            label: 'Add Icon',
-            action: () => this.showIconPicker(z)
+            //label: 'Add Icon',
+            //action: () => this.showIconPicker(z)
         });
 
         if (y === 0) addScroll('N', 'Scroll North', 0, -1);
