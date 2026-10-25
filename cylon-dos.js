@@ -705,6 +705,16 @@
     }
     if (!kind) fail('mount type required: idb, ls, ram or rom (' + source + ')');
 
+    // --- BACKEND SECURITY ENFORCEMENT ---
+    var restLower = rest.toLowerCase();
+    if (kind === 'idb' && restLower.endsWith('.gfx')) {
+        fail('Error: Security Violation: .gfx files cannot be mounted to IndexedDB.');
+    }
+    if (kind === 'ls' && restLower.endsWith('.json')) {
+        fail('Error: Security Violation: .json files cannot be mounted to localStorage.');
+    }
+    // ----------------------------------------
+
     var m;
     if (kind === 'idb') {
       var rec = await findPartitionRecord(rest);

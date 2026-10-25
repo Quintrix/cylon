@@ -1,4 +1,3 @@
-
 window.normalKeys = {
     '`':'`', '1':'1', '2':'2', '3':'3', '4':'4', '5':'5', '6':'6', '7':'7', '8':'8', '9':'9', '0':'0',
     '-':'-', '=':'=', '[':'[', ']':']', '\\':'\\', ';':';', "'":"'", ',':',', '.':'.', '/':'/',
@@ -485,7 +484,7 @@ function keyboard() {
                     type: 'QANDY_UPDATE_INPUT',
                     id: proxyInputId,
                     value: inputBuffer
-                }, '*');
+                }, (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
             }
         }
     };
@@ -567,7 +566,7 @@ function keyboard() {
                         type: 'QANDY_COMMIT_INPUT',
                         id: proxyInputId,
                         value: inputBuffer
-                    }, '*');
+                    }, (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
                 }
                 window.setOSMode('app');
                 window.hideFullKeyboard();
@@ -583,7 +582,7 @@ function keyboard() {
                         type: 'QANDY_UPDATE_INPUT',
                         id: proxyInputId,
                         value: inputBuffer
-                    }, '*');
+                    }, (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
                 }
             } else {
                 command(inputBuffer);
@@ -626,7 +625,7 @@ function keyboard() {
                             type: 'QANDY_UPDATE_INPUT',
                             id: proxyInputId,
                             value: inputBuffer
-                        }, '*');
+                        }, (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
                     }
                 }
                 return; // Stop here
@@ -658,7 +657,7 @@ function keyboard() {
                         type: 'QANDY_UPDATE_INPUT',
                         id: proxyInputId,
                         value: inputBuffer
-                    }, '*');
+                    }, (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
                 }
             }
         }

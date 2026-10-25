@@ -361,6 +361,17 @@
 
     var source = args[0];
     var where = args[1] ? MOUNT_WHERE[String(args[1]).toLowerCase()] : null;
+
+    var sLower = String(source).toLowerCase();
+    var inferredType = where || (sLower.indexOf(':') !== -1 ? MOUNT_WHERE[sLower.split(':')[0]] : null);
+    
+    if (inferredType === 'idb' && sLower.endsWith('.gfx')) {
+        return 'Error: [.4]Security Violation: .gfx files cannot be mounted to IndexedDB[.]';
+    }
+    if (inferredType === 'ls' && sLower.endsWith('.json')) {
+        return 'Error: [.4]Security Violation: .json files cannot be mounted to localStorage[.]';
+    }
+    
     var driveName;
     if (where) {
       options.type = where;
@@ -605,7 +616,7 @@ async function handleCylonCommand(line) {
                       type: 'QANDY_GFX_CMD',
                       cmd: gfxCmd,
                       data: gfxData
-                  }, '*');
+                  }, (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
                   return { handled: true, output: 'GFX Engine: ' + gfxCmd + (gfxData ? ' ' + gfxData : '') };
                   
         case 'pop':
@@ -815,12 +826,23 @@ async function handleCylonCommand(line) {
           return { handled: true, output: result };
 
         case 'import':
+          // 
+          // TO DO: Prevent import from overwriting idb without explicit permission. 
+          //        If import targets an idb drive, force it to require a -y flag
+          // 
           if (!args[0]) return { handled: true, output: usage('import <file> [type] [drive]') };
           var fileArg = args[0];
           var typeArg = args[1];
           var driveArg = args[2];
           
           var rawText = line.replace(/^\s*\S+\s*/, '').trim();
+
+          if (fileArg.endsWith('.gfx') && typeArg === 'idb') {
+              return { handled: true, output: 'Error: [.4]Security Violation: .gfx files cannot be flashed to IndexedDB.[.]' };
+          }
+          if (fileArg.endsWith('.json') && typeArg === 'ls') {
+              return { handled: true, output: 'Error: [.4]Security Violation: .json files cannot be flashed to localStorage.[.]' };
+          }
           
           if (fileArg.charAt(0) !== '{') {
             var isFile = false;
@@ -961,7 +983,7 @@ global.showTerminal = function () {
       openPages[name].classList.toggle('active', isActive);
       
       if (isActive && openPages[name].contentWindow) {
-          openPages[name].contentWindow.postMessage({ type: 'QANDY_PAGE_ACTIVATED' }, '*');
+          openPages[name].contentWindow.postMessage({ type: 'QANDY_PAGE_ACTIVATED' }, (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
       }
     });
     
@@ -1089,6 +1111,10 @@ window.cycleActivePage = function() {
 
         handlePopMessage: function(e) {
             if (!e.data || typeof e.data !== 'object') return;
+            // --- Security Upgrade: Origin and Source Validation ---
+            if (window.location.origin !== "null" && e.origin !== window.location.origin) return;
+            if (e.source !== window && e.source !== window.parent) return;
+            // ------------------------------------------------------
 
             const { type } = e.data;
 
@@ -1229,9 +1255,9 @@ window.cycleActivePage = function() {
                             let cmd = href.substring(4);
                             let activeFrame = document.querySelector('.page-frame.active');
                             if (activeFrame && activeFrame.contentWindow) {
-                                activeFrame.contentWindow.postMessage({ type: 'gfx', cmd: cmd }, '*');
+                                activeFrame.contentWindow.postMessage({ type: 'gfx', cmd: cmd }, (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
                             } else {
-                                window.postMessage({ type: 'gfx', cmd: cmd }, '*');
+                                window.postMessage({ type: 'gfx', cmd: cmd }, (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
                             }
                             window.hpop(); // Unification: ensure links auto-close the pop
                             return; 

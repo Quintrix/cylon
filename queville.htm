@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Queville Multiplayer Client</title>
+    <script src="cylon-sdk.js"></script>
+    <script src="cylon-gfx.js"></script>
+    <style>
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; overflow: hidden; user-select: none; }
+        #desktop-wrapper { position: relative; background-color: #000; overflow: hidden; margin: 0 auto; }
+        #bg-canvas, #tiles-layer, #icons-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+        .icon-wrap { position: absolute; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        .icon-img { max-width: 60%; max-height: 55%; image-rendering: pixelated; filter: drop-shadow(2px 2px 2px rgba(0,0,0,0.8)); }
+        .icon-label { font-size: 10px; color: #fff; text-shadow: 1px 1px 1px #000; text-align: center; }
+    </style>
+</head>
+<body>
+
+<div id="desktop-wrapper">
+    <div id="tiles-layer"></div>
+    <div id="icons-layer"></div>
+</div>
+
+<script>
+// --- Configuration ---
+const SERVER_URL = 'http://localhost:8080/qandyland.js';
+const WORLD_DRIVE = 'queville.gfx';
+let sessionToken = localStorage.getItem('queville_session') || '';
+let networkLoop = null;
+
+// The queue of punch codes waiting to be sent to the server
+let plugQueue = ""; 
+
+window.onload = async function() {
+    if (!window.CylonCommand) return document.body.innerHTML = "<h3 style='color:red;'>Requires Cylon OS</h3>";
+
+    // 1. Mount the local graphical assets (tiles/icons) from the .gfx file
+    await window.CylonCommand(`mount ${WORLD_DRIVE} idb`);
+    await window.CylonCommand(`iferror mount ram: ram queville`);
+    await window.CylonCommand(`cylon:`);
+
+    // 2. Initialize the Graphics Engine safely
+    if (window.CylonGFX) {
+        // Hijack the local physics/movement engine. We are a dumb terminal now.
+        window.CylonGFX.moveCursor = function() { /* Disabled: Server controls movement */ };
+        window.CylonGFX.showTargetMenu = handleLocalClick; 
+        
+        await window.CylonGFX.init('queville:/w/A1'); // Start at A1, server will override
+        fitDesktopToScreen();
+        window.addEventListener('resize', fitDesktopToScreen);
+    }
+
+    // 3. Connect to the Server
+    sendServer("ST"); // Request Session Token
+    networkLoop = setInterval(() => sendServer("RF"), 1500); // 1.5s refresh heartbeat
+};
+
+// --- Input Interception ---
+window.keydown = function(key, e) {
+    let handled = false;
+    if (key === 'ArrowUp')    { plugQueue += "Vn"; handled = true; }
+    if (key === 'ArrowDown')  { plugQueue += "Vs"; handled = true; }
+    if (key === 'ArrowLeft')  { plugQueue += "Vw"; handled = true; }
+    if (key === 'ArrowRight') { plugQueue += "Ve"; handled = true; }
+    
+    if (handled) {
+        if (e) e.preventDefault();
+        sendServer(""); // Immediately flush the queue to the server
+    }
+};
+
+function handleLocalClick(z, clientX, clientY) {
+    // Translate the click into a UNIVAC Punch Code
+    // Are we clicking an item (ID) or an object (OD)?
+    let iconWraps = document.querySelectorAll(`.icon-wrap[data-z="${z}"]`);
+    let zStr = z.toString().padStart(2, '0');
+    
+    if (iconWraps.length > 0) {
+        // For simplicity, grab the first item clicked
+        let fullPath = iconWraps[0].getAttribute('data-path');
+        let filename = fullPath.split('/').pop();
+        let itemId = filename.substring(0, 2);
+        
+        // If it's a dynamic item (length 4) or player (length 8+)
+        if (filename.length === 4 || filename.length >= 8) {
+            plugQueue += `ID${itemId}${zStr}`;
+        } else { // Static object (length 6)
+            plugQueue += `OD${itemId}${zStr}`;
+        }
+    } else {
+        // Clicked empty space - perhaps a 'Walk Here' command?
+        // plugQueue += `Vz${zStr}`; 
+    }
+    sendServer(""); // Flush
+}
+
+// --- Networking & Protocol Parsing ---
+async function sendServer(command) {
+    let payload = plugQueue + command;
+    plugQueue = ""; // Clear queue
+
+    try {
+        let res = await fetch(SERVER_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: `c=${encodeURIComponent(payload)}&d=${WORLD_DRIVE}&s=${sessionToken}`
+        });
+
+        let text = await res.text();
+        let newSession = res.headers.get('X-Session-Token');
+        if (newSession && newSession !== sessionToken) {
+            sessionToken = newSession;
+            localStorage.setItem('queville_session', sessionToken);
+        }
+
+        parseServerResponse(text);
+    } catch (e) {
+        console.warn("Server offline or unreachable.");
+    }
+}
+
+async function parseServerResponse(data) {
+    if (!data) return;
+
+    let dos = window.parent.CylonDOS;
+    let mapChanged = false;
+    let redrawNeeded = false;
+
+    // 1. Extract Server Plugs (S^...^S)
+    let sPlugRegex = /S\^(.*?)\^S/g;
+    let sMatch;
+    while ((sMatch = sPlugRegex.exec(data)) !== null) {
+        handleServerPlug(sMatch[1]);
+    }
+    data = data.replace(sPlugRegex, ''); // Remove them from main parsing
+
+    // 2. Parse Player Info (PI$$##@@@@)
+    let piMatch = data.match(/PI([A-Za-z0-9]{2})(\d{2})([A-Za-z0-9]{4})/);
+    if (piMatch) {
+        window.playerItem = piMatch[1];
+        window.playerZ = parseInt(piMatch[2], 10);
+        window.playerId = piMatch[3];
+        redrawNeeded = true;
+    }
+
+    // 3. Parse Refresh Data (RF[sector][z][items~])
+    let rfMatch = data.match(/RF([A-Za-z0-9]{2})(\d{2})(.*)/);
+    if (rfMatch) {
+        let newSector = rfMatch[1];
+        let itemsStr = rfMatch[3];
+
+        if (window.CylonGFX.currentPath !== `queville:/w/${newSector}`) {
+            window.CylonGFX.currentPath = `queville:/w/${newSector}`;
+            window.map = newSector;
+            mapChanged = true;
+        }
+
+        // VFS Bridge: Update local CylonDOS RAM drive so CylonGFX can render it!
+        if (mapChanged || redrawNeeded) {
+            let items = itemsStr.split('~').filter(Boolean);
+            
+            // Delete old dynamic entities in the current RAM sector
+            let existing = await dos.dir(window.CylonGFX.currentPath);
+            for (let file of existing) {
+                let fname = file.name.split('/').pop();
+                // Keep system files (m, t, e) and static objects (length 6)
+                if (fname.length !== 1 && fname.length !== 6) {
+                    await dos.delete(`queville:/w/${newSector}/${fname}`);
+                }
+            }
+
+            // Write the new items received from the server
+            for (let item of items) {
+                await dos.save(`queville:/w/${newSector}/${item}`, ""); 
+            }
+            
+            // Tell the dumb terminal to render what we just wrote to the VFS
+            window.CylonGFX.renderScreen();
+        }
+    }
+}
+
+function handleServerPlug(plug) {
+    if (plug.startsWith("Vi")) {
+        let inventory = plug.substring(2).replace('--', '');
+        console.log("Inventory Update:", inventory);
+        // TODO: Update local UI HUD with inventory contents
+    }
+    if (plug.startsWith("Va")) {
+        // Server is requesting avatar selection
+        if (window.parent.popHtm) window.parent.popHtm("<h2>Select Avatar</h2>...", "center");
+    }
+}
+
+function fitDesktopToScreen() {
+    if (!window.CylonGFX) return;
+    const wrapper = document.getElementById('desktop-wrapper');
+    const cols = window.CylonGFX.gridWide || 14; // Default to Queville dimensions
+    const rows = window.CylonGFX.gridTall || 10;
+    const aspect = cols / rows;
+    
+    let w = window.innerWidth, h = window.innerWidth / aspect;
+    if (h > window.innerHeight) {
+        h = window.innerHeight;
+        w = window.innerHeight * aspect;
+    }
+    wrapper.style.width = Math.floor(w * 0.98) + 'px';
+    wrapper.style.height = Math.floor(h * 0.98) + 'px';
+}
+</script>
+</body>
+</html>

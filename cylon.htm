@@ -351,7 +351,7 @@ window.addEventListener('blur', () => setTimeout(syncAppMode, 10), true);
 window.sendVirtualKey = function(keyName) {
     var activeFrame = document.querySelector('.page-frame.active');
     if (activeFrame && activeFrame.contentWindow) {
-        activeFrame.contentWindow.postMessage({ type: 'QANDY_VKEY', key: keyName }, '*');
+        activeFrame.contentWindow.postMessage({ type: 'QANDY_VKEY', key: keyName }, (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
     }
 };
 
@@ -374,6 +374,12 @@ window.injectAndExecute = async function(cmdStr, opts) {
 };
 
 window.addEventListener('message', function(e) {
+    // --- Security Upgrade: Origin and Source Validation ---
+    if (window.location.origin !== "null" && e.origin !== window.location.origin) return;
+    let isKnownFrame = Array.from(document.querySelectorAll('iframe')).some(f => f.contentWindow === e.source);
+    if (e.source !== window && e.source !== window.parent && !isKnownFrame) return;
+    // ------------------------------------------------------
+    
     if (e.data.type === 'QANDY_REQ_INPUT') {
         window.setOSMode(
             e.data.isMultiline ? 'app-textarea' : 'app-edit',
@@ -595,7 +601,7 @@ window.applyThemeFromAlpha = async function() {
 
     document.querySelectorAll('iframe.page-frame').forEach(frame => {
         if (frame.contentWindow) {
-            frame.contentWindow.postMessage({type: 'QANDY_UPDATE_COLORS', colors: window.CylonColors}, '*');
+            frame.contentWindow.postMessage({type: 'QANDY_UPDATE_COLORS', colors: window.CylonColors}, (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
         }
     });
 };
@@ -783,7 +789,7 @@ function powerOn() {
         // Send the OS menu command down to the currently active app iframe
         const activeFrame = document.querySelector('.page-frame.active');
         if (activeFrame) {
-            activeFrame.contentWindow.postMessage({ type: 'QANDY_OS_MENU' }, '*');
+            activeFrame.contentWindow.postMessage({ type: 'QANDY_OS_MENU' }, (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
         }
     };
 

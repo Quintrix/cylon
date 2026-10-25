@@ -6,7 +6,7 @@
 // Route native print calls to the Cylon Desktop terminal instead of browser print dialog
 window.print = function(text) {
     if (window.parent && window.parent !== window) {
-        window.parent.postMessage({ type: 'CYLON_PRINT', text: String(text) }, '*');
+        window.parent.postMessage({ type: 'CYLON_PRINT', text: String(text) }, (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
     } else {
         console.log(text);
     }
@@ -20,23 +20,24 @@ window.print = function(text) {
 // 1. Popup Management (Routes to CylonPopManager in command.js)
 window.pop = window.popHtm = function(html) {
     if (window.parent !== window) {
-        window.parent.postMessage({ type: 'CYLON_POP_HTM', html: html }, '*');
+        window.parent.postMessage({ type: 'CYLON_POP_HTM', html: html }, (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
     }
 };
 
 window.hpop = function() {
     if (window.parent !== window) {
-        window.parent.postMessage({ type: 'CYLON_POP_HIDE' }, '*');
+        window.parent.postMessage({ type: 'CYLON_POP_HIDE' }, (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
     }
 };
 
+// disable by security 
 // 2. File System (Routes to CylonDOS)
-window.qdosLoad = async function(filename) {
-    if (window.parent && window.parent.CylonDOS) {
-        return await window.parent.CylonDOS.load(filename);
-    }
-    throw new Error("CylonDOS not available");
-};
+// window.qdosLoad = async function(filename) {
+//     if (window.parent && window.parent.CylonDOS) {
+//         return await window.parent.CylonDOS.load(filename);
+//     }
+//     throw new Error("CylonDOS not available");
+// };
 
 // 3. Hardware / System Utilities
 window.dosExit = function() {
@@ -89,10 +90,11 @@ window.CylonScript = async function(scriptText) {
     return true;
 };
 
+// disabled by security
 // Backwards compatibility alias for older applications
-window.qdosScript = async function(scriptText) { 
-    return await window.CylonScript(scriptText);
-};
+// window.qdosScript = async function(scriptText) { 
+//     return await window.CylonScript(scriptText);
+// };
 
 // ========================================================================
 // 1. INPUT INTERCEPTION (Keyboard & Textarea handling)
@@ -112,7 +114,7 @@ function reportRect(el) {
         type: 'QANDY_INPUT_RECT',
         id: el.id,
         rect: rectOf(el)
-    }, '*');
+    }, (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
 }
 
 function trackElement(el) {
@@ -166,14 +168,14 @@ function handleInputTap(e) {
                 label: getFieldLabel(el),
                 rect: rectOf(el),
                 maxLength: maxLen // Pass to Qandy OS
-            }, '*');
+            }, (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
 
             trackElement(el);
         }
     } else if (e.type === 'pointerdown') {
         // If the user clicks any non-input visual surface of an app, alert the parent OS
         if (window.parent && window.parent !== window) {
-            window.parent.postMessage({ type: 'QANDY_APP_CLICKED' }, '*');
+            window.parent.postMessage({ type: 'QANDY_APP_CLICKED' }, (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
         }
     }
 }
@@ -183,6 +185,11 @@ document.addEventListener('mousedown', handleInputTap, { capture: true, passive:
 document.addEventListener('touchstart', handleInputTap, { capture: true, passive: false });
 
 window.addEventListener('message', (e) => {
+    // --- Security Upgrade: Origin and Source Validation ---
+    if (window.location.origin !== "null" && e.origin !== window.location.origin) return;
+    if (e.source !== window && e.source !== window.parent) return;
+    // ------------------------------------------------------
+
     // NEW: Catch virtual keystrokes forwarded from the parent OS
     if (e.data.type === 'QANDY_VKEY') {
         if (typeof window.keydown === 'function') {
@@ -454,6 +461,5 @@ window.CylonSDK.renderListGrid = function(containerId, items) {
         container.appendChild(row);
     });
 };
-
 
 })();
