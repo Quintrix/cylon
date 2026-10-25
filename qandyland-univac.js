@@ -1532,4 +1532,10 @@ function flipAvatarDirection(avatarStr, cmd) {
 // ── Exports ───────────────────────────────────────────────────────────────────
 
 UNIVAC.inject = inject;
-module.exports = UNIVAC;
+
+// Browser-safe global export
+if (typeof window !== 'undefined') { window.UNIVAC = UNIVAC; }
+if (typeof globalThis !== 'undefined') { globalThis.UNIVAC = UNIVAC; }
+
+// Preserve Node/CommonJS compatibility
+if (typeof module !== 'undefined' && module.exports) { module.exports = UNIVAC; }

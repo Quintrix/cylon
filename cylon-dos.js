@@ -680,9 +680,10 @@
   function sourceName(spec) {
     spec = String(spec || '').trim();
     if (!spec || spec.charAt(0) === '{') return '';
-    return baseName(spec.split(/[?#]/)[0]);
+    var name = baseName(spec.split(/[?#]/)[0]);
+    return name.replace(/\.(json|gfx)$/i, ''); // Strip extensions for clean drive names
   }
-
+  
   async function mount(source, name, options) {
     if (name && typeof name === 'object') { options = name; name = null; }
     options = options || {};
@@ -707,11 +708,13 @@
 
     // --- BACKEND SECURITY ENFORCEMENT ---
     var restLower = rest.toLowerCase();
-    if (kind === 'idb' && restLower.endsWith('.gfx')) {
-        fail('Error: Security Violation: .gfx files cannot be mounted to IndexedDB.');
+    var intendedName = (name || restLower).toLowerCase();
+    
+    if (kind === 'idb' && (restLower.endsWith('.gfx') || intendedName === 'desktop')) {
+        fail('Security Violation: .gfx files (and the desktop data drive) cannot be mounted to IndexedDB.[.]');
     }
-    if (kind === 'ls' && restLower.endsWith('.json')) {
-        fail('Error: Security Violation: .json files cannot be mounted to localStorage.');
+    if (kind === 'ls' && (restLower.endsWith('.json') || intendedName === 'cylon')) {
+        fail('Security Violation: .json files (and the cylon OS drive) cannot be mounted to localStorage.[.]');
     }
     // ----------------------------------------
 
@@ -749,14 +752,34 @@
         
         entries.forEach(function (e) { store.set(e.path, e); });
       }
-      
       m = { name: name || sourceName(rest) || 'ram', type: 'ram', source: rest ? 'ram:' + rest : 'ram:', readOnly: !!options.readOnly,
             backend: kvBackend('ram', store, { quota: quota }) };
+      
     } else if (kind === 'ls') {
       if (!global.localStorage) fail('localStorage is not available');
-      if (!DRIVE_RE.test(rest)) fail('invalid localStorage drive name: ' + rest);
-      m = { name: name || rest, type: 'ls', source: 'ls:' + rest, readOnly: !!options.readOnly,
-            backend: kvBackend('ls', lsStore(rest), { quota: options.quota || RAM_DEFAULT_QUOTA }) };
+      
+      // Smart detection: is this a drive name to connect to, or a file to fetch?
+      var isFile = rest.indexOf('/') !== -1 || rest.toLowerCase().endsWith('.gfx') || rest.toLowerCase().endsWith('.json') || rest.toLowerCase().startsWith('http');
+      var actualDriveName = name || (isFile ? sourceName(rest) : rest);
+      
+      if (!DRIVE_RE.test(actualDriveName)) fail('invalid localStorage drive name: ' + actualDriveName);
+      
+      var store = lsStore(actualDriveName);
+      
+      // If a file was specified, fetch and populate localStorage automatically
+      if (isFile) {
+        var archive = decodeArchive(await loadArchiveText(rest, options));
+        var entries = normalizeEntries(archive.entries);
+        var quota = options.quota || RAM_DEFAULT_QUOTA;
+        
+        var total = entries.reduce(function (n, e) { return n + e.size; }, 0);
+        if (total > quota) fail('ls image too large (' + formatSize(total) + ') for quota (' + formatSize(quota) + ')');
+        
+        entries.forEach(function (e) { store.set(e.path, e); });
+      }
+      
+      m = { name: actualDriveName, type: 'ls', source: 'ls:' + rest, readOnly: !!options.readOnly,
+            backend: kvBackend('ls', store, { quota: options.quota || RAM_DEFAULT_QUOTA }) };
     } else {
       fail('host folder devices are not implemented yet');
     }
