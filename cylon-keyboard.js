@@ -592,10 +592,17 @@ function keyboard() {
                 if (window.updatePrompt) window.updatePrompt();
                 
                 // Bounce back to standard app control immediately after submitting DOS command
-                if (osMode === 'app-cli') window.setOSMode('app'); 
+                if (osMode === 'app-cli') {
+                    window.setOSMode('app'); 
+                    var activeFrame = document.querySelector('.page-frame.active');
+                    if (activeFrame) activeFrame.focus();
+                }
+ 
                 
                 hideFullKeyboard();
             }
+        } else if (e.id === 'tab') {
+            if (typeof window.toggleAppFocus === 'function') window.toggleAppFocus();
         } else if (e.id === 'esc') {
             // Priority 1: Close Popup / Shield if active
             let shield = document.getElementById('qandy-popup-shield');
@@ -662,4 +669,4 @@ function keyboard() {
             }
         }
     };
-}
+ }

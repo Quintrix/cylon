@@ -595,22 +595,25 @@ async function handleCylonCommand(line) {
           return { handled: true, output: 'Rebooting system...' };
 
         case 'gfx':
-                  if (!args[0]) return { handled: true, output: usage('gfx <tile|fill|tele|icon|run> [data]') };
-                  var gfxCmd = args[0].toLowerCase();
-                  
-                  // Extract raw trailing string natively to preserve all spaces/quotes
-                  var matchGfx = line.match(/^\s*gfx\s+\S+\s+(.*)$/i);
-                  var gfxData = matchGfx ? matchGfx[1] : '';
+            // Send empty argument down as a request to refresh/reload the engine state
+            var gfxCmd = args[0] ? args[0].toLowerCase() : 'refresh';
+            var gfxData = '';
+            
+            if (args[0]) {
+                var matchGfx = line.match(/^\s*gfx\s+\S+\s+(.*)$/i);
+                gfxData = matchGfx ? matchGfx[1] : '';
+            }
 
-                  var activeFrame = document.querySelector('.page-frame.active');
-                  var targetWindow = activeFrame ? activeFrame.contentWindow : window;
+            var activeFrame = document.querySelector('.page-frame.active');
+            var targetWindow = activeFrame ? activeFrame.contentWindow : window;
 
-                  targetWindow.postMessage({
-                      type: 'QANDY_GFX_CMD',
-                      cmd: gfxCmd,
-                      data: gfxData
-                  }, (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
-                  return { handled: true, output: 'GFX Engine: ' + gfxCmd + (gfxData ? ' ' + gfxData : '') };
+            targetWindow.postMessage({
+                type: 'QANDY_GFX_CMD',
+                cmd: gfxCmd,
+                data: gfxData
+            }, (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
+            
+            return { handled: true, output: 'GFX Engine: ' + gfxCmd + (gfxData ? ' ' + gfxData : '') };
                   
         case 'pop':
                   var popMatch = line.match(/^\s*pop\s+(\S+)\s+(.*)$/i);

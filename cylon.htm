@@ -24,7 +24,8 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <script src='cylon-sound.js'></script>
     <script src='cylon-keyboard.js'></script>
-    <script src="cylon-gfx.js"></script> <!-- Core OS Physics Engine -->
+    <script src="cylon-gfx-itemid.js"></script>
+    <script src="cylon-gfx.js"></script>
     <script src="cylon-dos.js"></script>
     <script src="cylon-command.js"></script>
 </head>
@@ -114,6 +115,8 @@ const PAGES = Object.freeze(new Set([
     'cylon-desktop-tv.gfx',
     'cylon-theme.htm',
     'cylon-calc.htm',
+    'cylon-gfx.js',
+    'cylon-gfx-itemid.js',
     'gfx.js',
     'gfx-tileset.htm',
     'gfx-create.htm',
@@ -329,6 +332,20 @@ window.setOSMode = function(mode, promptText) {
     }
 
     if (window.renderInputLine) window.renderInputLine();
+};
+
+window.toggleAppFocus = function() {
+    if (osMode !== 'app' && osMode !== 'app-cli') return;
+    var activeFrame = document.querySelector('.page-frame.active');
+    
+    if (osMode === 'app') {
+        window.setOSMode('app-cli');
+        if (activeFrame) activeFrame.blur();
+        window.focus(); // Pull focus back to OS terminal
+    } else {
+        window.setOSMode('app');
+        if (activeFrame) activeFrame.focus(); // Push focus to iframe
+    }
 };
 
 // Sync OS Mode dynamically based on what the user's browser is focused on
@@ -907,6 +924,10 @@ function loadNext() {
         else if (e.key === 'End') { window.press({id: 'end', shift: e.shiftKey}); e.preventDefault(); }
         else if (e.key === 'Insert') { window.press({id: 'ins', shift: e.shiftKey}); e.preventDefault(); }
         else if (e.key === 'Delete') { window.press({id: 'del', shift: e.shiftKey}); e.preventDefault(); }
+        else if (e.key === 'Tab') {
+            e.preventDefault();
+            if (window.toggleAppFocus) window.toggleAppFocus();
+        }
         else if (e.key === '`' || e.key === '~') {
             e.preventDefault();
             //window.toggleFullKeyboard();

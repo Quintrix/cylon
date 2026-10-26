@@ -251,8 +251,17 @@ window.CylonGFX = {
 
     handleGfxCommand: async function(cmd, data) {
         switch(cmd) {
+            case 'refresh':
+                // Reprocess all /a/ variables and refresh desktop
+                await this.init(this.currentPath);
+                if (this.gfxCommandLog && window.parent.print) window.parent.print(`[.3]GFX Engine: Desktop Refreshed.[.]\n`);
+                break;
+
             case 'tile':
-                if (typeof this.setTileAtCursor === 'function') await this.setTileAtCursor(data);
+                if (typeof this.setTileAtCursor === 'function') {
+                    await this.setTileAtCursor(data);
+                    this.renderScreen(); // Force refresh to visually confirm
+                }
                 break;
 
             case 'fill':
@@ -275,104 +284,62 @@ window.CylonGFX = {
                 }
                 break;
 
-            case 'pickicon':
+            case 'obj':
                 if (data) {
-                    let parts = data.split(' ');
-                    let code = parts[0];
-                    let z = parts[1];
-                    this.showIconNamer(code, z);
-                }
-                break;
-
-            case 'saveicon':
-                if (data) {
-                    let parts = data.split(' ');
-                    let code = parts[0];
-                    let z = parseInt(parts[1], 10);
-                    let name = parts[2];
+                    let parts = data.trim().split(/\s+/);
+                    let id = parts[0];
+                    let dataField = parts[1];
                     
-                    if (code && code.length === 2 && /^[A-Z]/.test(code[0]) && name && name.length >= 1) {
-                        let zHex = z.toString(16).padStart(2, '0').toLowerCase();
-                        let filename = code + zHex + name;
+                    // Allows user to type `gfx obj AqAa` directly as one argument
+                    if (id && id.length > 2 && !dataField) {
+                        dataField = id.substring(2);
+                        id = id.substring(0, 2);
+                    } else if (!dataField) {
+                        dataField = 'Za'; // Default Data Field
+                    }
+                    
+                    if (id && id.length === 2) {
+                        let zHex = window.playerZ.toString(16).padStart(2, '0').toLowerCase();
+                        dataField = dataField.substring(0, 2).padEnd(2, 'a');
                         
+                        let filename = id + zHex + dataField;
                         let pathPrefix = this.currentPath.endsWith('/') ? this.currentPath : this.currentPath + '/';
                         let filePath = `${pathPrefix}${filename}`;
                         
                         await this.persistState(filePath, "\\n");
-                        
-                        if (this.gfxCommandLog && window.parent.print) {
-                            window.parent.print(`[.4]GFX Engine: Created icon '${name}' at Z:${z}[.]\n`);
-                        }
+                        if (this.gfxCommandLog && window.parent.print) window.parent.print(`[.4]GFX Engine: Created object '${filename}' at Z:${window.playerZ}[.]\n`);
                         this.renderScreen();
                     } else {
-                        if (this.gfxCommandLog && window.parent.print) {
-                            window.parent.print(`[.4]GFX Error: Invalid icon code or name.[.]\n`);
-                        }
+                        if (this.gfxCommandLog && window.parent.print) window.parent.print(`[.4]GFX Error: 'gfx obj [2-char id] [optional 2-char data]' required.[.]\n`);
                     }
+                } else {
+                    if (this.gfxCommandLog && window.parent.print) window.parent.print(`[.4]GFX Error: 'gfx obj [2-char id] [optional 2-char data]' required.[.]\n`);
                 }
                 break;
-                
-            case 'icon':
+
+            case 'item':
                 if (data) {
                     let parts = data.trim().split(/\s+/);
-                    let code = parts[0];
-                    let name = parts.slice(1).join(' ');
+                    let id = parts[0];
                     
-                    if (code && code.length >= 2 && name && name.length >= 3) {
-                        code = code.substring(0, 2); 
+                    if (id && id.length >= 2) {
+                        id = id.substring(0, 2);
                         let zHex = window.playerZ.toString(16).padStart(2, '0').toLowerCase();
-                        let filename = code + zHex + name;
                         
+                        let filename = id + zHex;
                         let pathPrefix = this.currentPath.endsWith('/') ? this.currentPath : this.currentPath + '/';
                         let filePath = `${pathPrefix}${filename}`;
                         
                         await this.persistState(filePath, "\\n");
-                        if (this.gfxCommandLog && window.parent.print) window.parent.print(`[.4]GFX Engine: Created icon '${name}' at Z:${window.playerZ}[.]\n`);
+                        if (this.gfxCommandLog && window.parent.print) window.parent.print(`[.4]GFX Engine: Created item '${filename}' at Z:${window.playerZ}[.]\n`);
                         this.renderScreen();
                     } else {
-                        if (this.gfxCommandLog && window.parent.print) window.parent.print(`[.4]GFX Error: 'gfx icon [2-char code] [>=3-char name]' required.[.]\n`);
+                        if (this.gfxCommandLog && window.parent.print) window.parent.print(`[.4]GFX Error: 'gfx item [2-char id]' required.[.]\n`);
                     }
+                } else {
+                    if (this.gfxCommandLog && window.parent.print) window.parent.print(`[.4]GFX Error: 'gfx item [2-char id]' required.[.]\n`);
                 }
                 break;
-
-            case 'run':
-                if (data) {
-                    let parts = data.trim().split(/\s+/);
-                    let name = parts[0];
-                    let commands = data.substring(name.length).trim();
-                    
-                    if (name && name.length >= 3 && commands) {
-                        let zHex = window.playerZ.toString(16).padStart(2, '0').toLowerCase();
-                        let dos = window.parent && window.parent.CylonDOS ? window.parent.CylonDOS : window.CylonDOS;
-                        let files = [];
-                        try { files = await dos.dir(this.currentPath); } catch (e) {}
-                        
-                        let targetFile = null;
-                        for (let file of files) {
-                            let fname = file.name.substring(file.name.lastIndexOf('/') + 1);
-                            if (fname.length >= 4 && file.type === 'file' && fname !== 'm' && fname !== 't') {
-                                let fZHex = fname.substring(2, 4).toLowerCase();
-                                let fName = fname.substring(4);
-                                if (fZHex === zHex && fName === name) {
-                                    targetFile = fname;
-                                    break;
-                                }
-                            }
-                        }
-                        
-                        if (targetFile) {
-                            let pathPrefix = this.currentPath.endsWith('/') ? this.currentPath : this.currentPath + '/';
-                            let filePath = `${pathPrefix}${targetFile}`;
-                            await this.persistState(filePath, commands);
-                            if (this.gfxCommandLog && window.parent.print) window.parent.print(`[.4]GFX Engine: Saved run script for icon '${name}'.[.]\n`);
-                        } else {
-                            if (this.gfxCommandLog && window.parent.print) window.parent.print(`[.4]GFX Error: Icon '${name}' not found at cursor Z:${window.playerZ}.[.]\n`);
-                        }
-                    } else {
-                        if (this.gfxCommandLog && window.parent.print) window.parent.print(`[.4]GFX Error: 'gfx run [icon name] [commands]' required.[.]\n`);
-                    }
-                }
-                break;                
         }
     },
 
@@ -447,12 +414,17 @@ window.CylonGFX = {
 
             if (filename === 'm' || filename === 't' || file.type !== 'file') continue;
 
+            // Ensures 4-char items (Aq00) and 6-char objects (Aq00Za) render natively
             if (filename.length >= 4) {
                 let iconId = filename.substring(0, 2);
                 let zHex = filename.substring(2, 4);
-                let labelText = filename.substring(4); 
+                
+                // Automatically fetch Item ID from the Cylon Item Library
+                let labelText = typeof window.gfxItemID === 'function' ? window.gfxItemID(iconId) : iconId;
                 
                 let z = parseInt(zHex, 16);
+                if (isNaN(z)) continue; // Failsafe against poorly named files
+
                 let x = z % this.gridWide;
                 let y = Math.floor(z / this.gridWide);
 
@@ -933,9 +905,24 @@ window.CylonGFX = {
             if (needed > 0) tData += 'Za'.repeat(Math.ceil(needed));
         }
 
+        // IMPROVEMENT: Display tile info when no code is passed
         if (!code) {
             let currentCode = tData.substring(window.playerZ * 2, window.playerZ * 2 + 2) || 'Za';
-            if (this.gfxCommandLog && window.parent.print) window.parent.print(`\n[.3]GFX Tile Engine: Tile at Cursor (${window.playerZ}) is [${currentCode}][.]\n`);
+            
+            // 1. Keep the optional terminal printout
+            if (this.gfxCommandLog && window.parent.print) {
+                window.parent.print(`\n[.3]GFX Tile Engine: Tile at Cursor (${window.playerZ}) is [${currentCode}][.]\n`);
+            }
+
+            // 2. Trigger the OS visual popup
+            let html = `<div> ${currentCode} </div>`;
+
+            if (window.parent && typeof window.parent.popHtm === 'function') {
+                window.parent.popHtm(html, 'center');
+            } else if (typeof window.pop === 'function') {
+                window.pop(html, 'cursor');
+            }
+
             return;
         }
 

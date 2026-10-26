@@ -58,11 +58,17 @@ window.beep = function(freq, dur, vol) {
 
 // 4. Input Routing
 document.addEventListener('keydown', function(e) {
+    if (e.key === 'Tab') {
+        e.preventDefault();
+        if (window.parent && window.parent !== window && typeof window.parent.toggleAppFocus === 'function') {
+            window.parent.toggleAppFocus();
+        }
+        return;
+    }
     if (typeof window.keydown === 'function') {
         window.keydown(e.key, e);
     }
 });
-
 // 5. Terminal Command Execution
 window.CylonCommand = async function(cmdStr) {
     if (window.parent && typeof window.parent.injectAndExecute === 'function') {

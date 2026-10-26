@@ -6,6 +6,33 @@ Quintrix and Crew Software
 
 
 
+Qandy Punch Code is a 2-character language of 'nouns' and 'verbs', the first character
+is always an upper-case letter and the second character is either a lower-case letter,
+a numeral, or a symbol. This gives the Qandy 1,352 unique ID codes. 
+
+The /t/ directory has the .png images of the 2d background tiles.
+
+The /i/ directory has the .png images of the 'items' (and objects), the cylon-gfx-itemid.js
+file is the master list of the name of every item code in the game. 
+
+
+
+The terminal command 'gfx' is the bridge to the Qandy's gfx co-processor that renders the
+world maps:
+
+           gfx refresh - refresh the current displayed sector
+
+              gfx tile - pop() the tile code the cursor is currently on
+
+       gfx tile [code] - change the tile code the cursor is currently on
+
+       gfx item [code] - add 'item' to the tile the cursor is currently on
+
+ gfx obj [code] [data] - add 'object' to the tile the cursor is currently on, if no data
+                         is passed then defaults to 'Za' (Nothing)   
+
+
+
 Cylon OS was designed to mount and unmount .json files a disk drives, the Cylon OS itself
 is all stored in the cylon.json file as a 'Live CD' .json file that can be installed to indexDB.
 
