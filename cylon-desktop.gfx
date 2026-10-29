@@ -2,7 +2,7 @@
   "format": "qandy-ramdrive",
   "version": 2,
   "drive": "desktop",
-  "created": "2026-10-23T04:27:19.381Z",
+  "created": "2026-10-29T07:29:13.153Z",
   "entries": [
     {
       "name": "a",
@@ -26,9 +26,9 @@
     {
       "name": "a/gfxCharDir",
       "type": "file",
-      "content": "https://quintrix.github.io/cylon/c/",
-      "size": 35,
-      "timestamp": "20261021185700",
+      "content": "/c/",
+      "size": 3,
+      "timestamp": "20261018200437",
       "owner": "",
       "session": "",
       "readOnly": false
@@ -46,9 +46,9 @@
     {
       "name": "a/gfxCursorZ",
       "type": "file",
-      "content": "02",
+      "content": "00",
       "size": 2,
-      "timestamp": "20261020201456",
+      "timestamp": "20261019200036",
       "owner": "",
       "session": "",
       "readOnly": false
@@ -68,7 +68,7 @@
       "type": "file",
       "content": "true",
       "size": 4,
-      "timestamp": "20261020220224",
+      "timestamp": "20261019130309",
       "owner": "",
       "session": "",
       "readOnly": false
@@ -96,9 +96,9 @@
     {
       "name": "a/gfxIconDir",
       "type": "file",
-      "content": "https://quintrix.github.io/cylon/i/",
-      "size": 35,
-      "timestamp": "20261021185628",
+      "content": "/i/",
+      "size": 3,
+      "timestamp": "20261019114131",
       "owner": "",
       "session": "",
       "readOnly": false
@@ -126,9 +126,9 @@
     {
       "name": "a/gfxMapsDir",
       "type": "file",
-      "content": "https://quintrix.github.io/cylon/m/",
-      "size": 35,
-      "timestamp": "20261021185709",
+      "content": "/m/",
+      "size": 3,
+      "timestamp": "20261018200347",
       "owner": "",
       "session": "",
       "readOnly": false
@@ -148,7 +148,17 @@
       "type": "file",
       "content": "Aa",
       "size": 2,
-      "timestamp": "20261022233306",
+      "timestamp": "20261029032634",
+      "owner": "",
+      "session": "",
+      "readOnly": false
+    },
+    {
+      "name": "a/gfxTickRate",
+      "type": "file",
+      "content": "0",
+      "size": 1,
+      "timestamp": "20261029032630",
       "owner": "",
       "session": "",
       "readOnly": false
@@ -156,9 +166,9 @@
     {
       "name": "a/gfxTileDir",
       "type": "file",
-      "content": "https://quintrix.github.io/cylon/t/",
-      "size": 35,
-      "timestamp": "20261021185649",
+      "content": "/t/",
+      "size": 3,
+      "timestamp": "20261018200340",
       "owner": "",
       "session": "",
       "readOnly": false
@@ -168,7 +178,7 @@
       "type": "file",
       "content": "12",
       "size": 2,
-      "timestamp": "20261023002658",
+      "timestamp": "20261029032849",
       "owner": "",
       "session": "",
       "readOnly": false
@@ -215,7 +225,7 @@
       "type": "file",
       "content": "cylon-files.htm",
       "size": 15,
-      "timestamp": "20261019114352",
+      "timestamp": "20261029032814",
       "owner": "",
       "session": "",
       "readOnly": false
@@ -251,41 +261,41 @@
       "readOnly": false
     },
     {
-      "name": "w/Aa/Ax03Calc",
+      "name": "w/Aa/Az31Trash",
       "type": "file",
-      "content": "cylon-calc.htm",
-      "size": 14,
-      "timestamp": "20261023001930",
+      "content": "echo Trash goes here",
+      "size": 20,
+      "timestamp": "20261029032808",
       "owner": "",
       "session": "",
       "readOnly": false
     },
     {
-      "name": "w/Aa/Az1fTrash",
-      "type": "file",
-      "content": "pop click Trash goes here",
-      "size": 25,
-      "timestamp": "20261021002345",
-      "owner": "",
-      "session": "",
-      "readOnly": false
-    },
-    {
-      "name": "w/Aa/Bq0aTileset",
+      "name": "w/Aa/Bq16Tileset",
       "type": "file",
       "content": "gfx-tileset.htm",
       "size": 15,
-      "timestamp": "20261019135530",
+      "timestamp": "20261029032757",
       "owner": "",
       "session": "",
       "readOnly": false
     },
     {
-      "name": "w/Aa/Br0bMods",
+      "name": "w/Aa/Br17Mods",
       "type": "file",
       "content": "load gfx-mods.htm",
       "size": 17,
-      "timestamp": "20261019140552",
+      "timestamp": "20261029032800",
+      "owner": "",
+      "session": "",
+      "readOnly": false
+    },
+    {
+      "name": "w/Aa/m",
+      "type": "file",
+      "content": "ArArArArArArArArArArArArArArArArArArArArArArArArArArArArArArArAr",
+      "size": 64,
+      "timestamp": "20261029032739",
       "owner": "",
       "session": "",
       "readOnly": false
@@ -295,7 +305,7 @@
       "type": "file",
       "content": "ArArArArArArArArArArArArArArArArArArArArArArArArArArArArArArArAr",
       "size": 64,
-      "timestamp": "20261023001334",
+      "timestamp": "20261019125804",
       "owner": "",
       "session": "",
       "readOnly": false
@@ -314,7 +324,7 @@
       "type": "file",
       "content": "AsAsAsAsAsAsAsAsAsAsAsAsAsAsAsAsAsAsAsAsAsAsAsAsAsAsAsAsAsAsAsAs",
       "size": 64,
-      "timestamp": "20261022233140",
+      "timestamp": "20261019111027",
       "owner": "",
       "session": "",
       "readOnly": false

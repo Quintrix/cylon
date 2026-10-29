@@ -4,18 +4,23 @@
 // ============================================================================
 
 // --- Unification with multiplayer gfx.js state variables ---
-window.playerItem = "Si";   // Desktop defaults to Cursor 1 ('Si')
-window.playerZ = -1;        // z-location of player/cursor
-window.lastClickZ = -1;     // Tracks the last physical mapped screen coordinate clicked
-window.playerAvatar = "";   // player's avatar modifiers (if any)
-window.playerInven = "";    // inventory 
-window.playerId = "";       // unique 4 character player id
-window.playerWalk = -1;     // z-location player clicks to walk to, -1 = standing still
-window.playerDo = null;     // callback/command to execute when destination is reached
-window.map = "A1";          // map player-item is currently on
+window.playerItem = "Si";   
+window.playerZ = -1;        
+window.lastClickZ = -1;     
+window.playerAvatar = "";   
+window.playerInven = "";    
+window.playerId = "";       
+window.playerWalk = -1;     
+window.playerDo = null;     
+window.map = "A1";          
 
-// Somewhere in cylon-gfx.js init() or setup:
-if (typeof UNIVAC !== 'undefined') {
+// --- Multiplayer Networking Context ---
+window.remoteQandylandUrl = null;
+window.desktopDrive = null;
+window.cylonGfxSession = null;
+window.gfxDo = "RF";
+
+if (typeof UNIVAC !== 'undefined' && window.GfxSyncFS) {
     UNIVAC.inject(window.GfxSyncFS);
 }
 
@@ -23,7 +28,7 @@ window.CylonGFX = {
     // --- GFX Configuration Defaults ---
     gfxTileSize: 64,
     gfxTileDir: 't/',
-    gfxIconDir: 'q/',   // Default system icons (Desktop uses q/ for icons/cursors)
+    gfxIconDir: 'q/',   
     gfxCharDir: 'c/',
     gfxMapsDir: 'm/',
     gridWide: 8, 
@@ -31,17 +36,17 @@ window.CylonGFX = {
     gfxGridStretch: true,
 
     // --- Spatial Navigation Defaults ---
-    gfxRoundWorld: false, // Map wrapping (Az <-> Aa)
-    gfxLowerBound: 'Hh',  // Bottom-Right map grid sector limit
-    gfxAirLock: false,    // True: Scroll triggers ON edge tile. False: Scroll triggers PAST edge tile.
-
-    gfxCommandLog: false, // If true, saves are echoed natively in the command terminal
-
-    fillTileCode: null, // Holds the active brush code (e.g., 'Za')
+    gfxRoundWorld: false, 
+    gfxLowerBound: 'Hh',  
+    gfxAirLock: false,    
+    gfxCommandLog: false, 
+    fillTileCode: null, 
+    gfxZBase: 10,
 
     // --- Cursor Walk Variables ---
-    gfxCycle: 200,             // Tick speed in ms
-    cursorInterval: null,      // Internal loop pointer
+    gfxCycle: 200,             
+    cursorInterval: null,      
+    networkInterval: null,
 
     // Backwards compatibility aliases
     get mapx() { return this.gridWide; },
@@ -53,18 +58,16 @@ window.CylonGFX = {
     get pendingCursorAction() { return window.playerDo; },
     set pendingCursorAction(v) { window.playerDo = v; },
 
-    // --- State Variables ---
     currentPath: '',
     gfxGrid: false, 
+    lastRenderedItems: "",
+    isSyncing: false,
 
-    // --- Unified Save Method ---
     persistState: async function(path, data) {
         let safeData = String(data || "\\n");
-        
         if (this.gfxCommandLog && typeof window.CylonCommand === 'function') {
             let cliData = safeData.replace(/\n/g, '\\n');
             if (cliData.trim() === '') cliData = '\\n'; 
-            
             await window.CylonCommand(`save ${path} ${cliData}`);
         } else if (window.parent && window.parent.CylonDOS) {
             await window.parent.CylonDOS.save(path, safeData);
@@ -73,28 +76,27 @@ window.CylonGFX = {
 
     init: async function(startPath) {
         this.setupListeners();
-      
         this.currentPath = startPath;
-        
         let parts = startPath.replace(/\/$/, '').split('/');
         window.map = parts[parts.length - 1] || "A1";
-        
         let drive = startPath.split(':')[0]; 
         
         if (window.CylonSDK && window.CylonSDK.injectDesktopStyles) {
             window.CylonSDK.injectDesktopStyles();
         }
 
-        // Handle safe headless boot mode for native OS initialization
         let dosObj = window.parent && window.parent.CylonDOS ? window.parent.CylonDOS : window.CylonDOS;
         if (!dosObj) return;
 
-        // 1. Load GFX Variables from VFS
         let tDir = await this.qdosLoadSafe(dosObj, `${drive}:/a/gfxTileDir`);
         let iDir = await this.qdosLoadSafe(dosObj, `${drive}:/a/gfxIconDir`);
         let cDir = await this.qdosLoadSafe(dosObj, `${drive}:/a/gfxCharDir`);
         let mDir = await this.qdosLoadSafe(dosObj, `${drive}:/a/gfxMapsDir`);
         let tSize = await this.qdosLoadSafe(dosObj, `${drive}:/a/gfxTileSize`);
+        
+        let zBaseLoad = await this.qdosLoadSafe(dosObj, `${drive}:/a/gfxZBase`);
+        if (zBaseLoad) this.gfxZBase = parseInt(zBaseLoad, 10) || 10;
+        else this.gfxZBase = 10;
         
         let gWide = await this.qdosLoadSafe(dosObj, `${drive}:/a/gfxGridWide`);
         if (!gWide) gWide = await this.qdosLoadSafe(dosObj, `${drive}:/a/mapx`); 
@@ -104,17 +106,16 @@ window.CylonGFX = {
         
         let gStretch = await this.qdosLoadSafe(dosObj, `${drive}:/a/gfxGridStretch`);
         let cz = await this.qdosLoadSafe(dosObj, `${drive}:/a/playerZ`);
-        if (!cz) cz = await this.qdosLoadSafe(dosObj, `${drive}:/a/gfxCursorZ`); // Legacy
+        if (!cz) cz = await this.qdosLoadSafe(dosObj, `${drive}:/a/gfxCursorZ`); 
         
         let pItem = await this.qdosLoadSafe(dosObj, `${drive}:/a/playerItem`);
         
-        // --- Spatial Navigation Variables ---
         let rWorld = await this.qdosLoadSafe(dosObj, `${drive}:/a/gfxRoundWorld`);
         let lBound = await this.qdosLoadSafe(dosObj, `${drive}:/a/gfxLowerBound`);
         let aLock = await this.qdosLoadSafe(dosObj, `${drive}:/a/gfxAirLock`);
         let cLog = await this.qdosLoadSafe(dosObj, `${drive}:/a/gfxCommandLog`);
+        let tickRate = await this.qdosLoadSafe(dosObj, `${drive}:/a/gfxTickRate`);
 
-        // 2. Apply Valid Variables
         if (tDir) this.gfxTileDir = tDir.trim();
         if (iDir) this.gfxIconDir = iDir.trim();
         if (cDir) this.gfxCharDir = cDir.trim();
@@ -128,6 +129,11 @@ window.CylonGFX = {
         if (lBound) this.gfxLowerBound = lBound.trim();
         if (aLock) this.gfxAirLock = (aLock.trim().toLowerCase() === 'true');
         if (cLog) this.gfxCommandLog = (cLog.trim().toLowerCase() === 'true');
+        // Zero means one explicit connection/update only; positive values are
+        // the periodic network poll interval in milliseconds.
+        this.gfxTickRate = tickRate !== null && tickRate !== undefined && tickRate.trim() !== ''
+            ? Math.max(0, parseInt(tickRate, 10) || 0)
+            : 250;
 
         let cycleStr = await this.qdosLoadSafe(dosObj, `${drive}:/a/gfxCycle`);
         if (cycleStr) {
@@ -135,24 +141,17 @@ window.CylonGFX = {
             if (!isNaN(val)) this.gfxCycle = Math.floor(val * 1000); 
         }
 
-        // 3. Restore Player/Cursor State
         if (pItem) window.playerItem = pItem.trim();
-        
-        window.playerZ = cz ? parseInt(cz, 10) : 0;
+        window.playerZ = cz ? parseInt(cz, this.gfxZBase) : 0;
         if (isNaN(window.playerZ)) window.playerZ = 0;
         
         this.startCursorTick();
-
         window.dispatchEvent(new Event('resize'));
         await this.renderScreen();
     },
 
     qdosLoadSafe: async function(dos, path) {
-        try {
-            return await dos.load(path);
-        } catch(e) {
-            return null;
-        }
+        try { return await dos.load(path); } catch(e) { return null; }
     },
 
     setupListeners: function() {
@@ -210,17 +209,25 @@ window.CylonGFX = {
                 }
                 
                 if (wrapper.id === 'desktop-wrapper') {
-                    // STEP 1: Pop the target selection menu up directly at the click location!
+                    if (this.enableFileMove && this.pendingMovePath) {
+                        const pendingPath = this.pendingMovePath;
+                        this.pendingMovePath = null;
+                        window.playerWalk = -1;
+                        this.setCursorZ(z);
+                        this.moveObjectToZ(pendingPath, z).then(() => this.showTargetMenu(z, e.clientX, e.clientY));
+                        return;
+                    }
+                    if (this.clickMovesCursor) {
+                        window.playerWalk = -1;
+                        this.setCursorZ(z);
+                    }
                     this.showTargetMenu(z, e.clientX, e.clientY);
                 }
             });
 
             wrapper.addEventListener('contextmenu', (e) => {
                 e.preventDefault();
-
-                if (window.parent && window.parent.document) {
-                    window.parent.document.dispatchEvent(new Event('click'));
-                }
+                if (window.parent && window.parent.document) window.parent.document.dispatchEvent(new Event('click'));
 
                 let rect = wrapper.getBoundingClientRect();
                 let pctX = (e.clientX - rect.left) / rect.width;
@@ -233,26 +240,214 @@ window.CylonGFX = {
                 let z = y * this.gridWide + x;
 
                 window.lastClickZ = z;
-                if (window.parent && window.parent !== window) {
-                    window.parent.lastClickZ = z;
-                }
+                if (window.parent && window.parent !== window) { window.parent.lastClickZ = z; }
 
                 if (wrapper.id === 'desktop-wrapper') {
                     window.playerWalk = -1; 
                     this.setCursorZ(z);
-                    // Right clicking forces a target menu jump too
                     this.showTargetMenu(z, e.clientX, e.clientY);
                 }
             });
-
             this._bgClickBound = true;
+        }
+    },
+
+    // ------------------------------------------------------------------------
+    // MULTIPLAYER PHYSICS ENGINE NETWORKING LOOP 
+    // ------------------------------------------------------------------------
+    startNetworkTick: function() {
+        if (this.networkInterval) clearInterval(this.networkInterval);
+        this.networkInterval = null;
+        // Always do one explicit handshake/update. A tick rate of zero disables
+        // only the recurring poll, so initial session setup still takes place.
+        this.networkTick();
+        const rate = Number.isFinite(this.gfxTickRate) ? this.gfxTickRate : 250;
+        if (rate > 0) this.networkInterval = setInterval(() => this.networkTick(), rate);
+    },
+
+    networkTick: async function() {
+        if (this.isSyncing) return;
+        this.isSyncing = true;
+        
+        try {
+            let plugs = window.gfxDo || "RF";
+            window.gfxDo = "RF"; 
+            
+            let response = "";
+            if (window.remoteQandylandUrl) {
+                let serverDrive = window.desktopDrive.endsWith('.gfx') ? window.desktopDrive : window.desktopDrive + '.gfx';
+                let res = await fetch(window.remoteQandylandUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    body: `c=${encodeURIComponent(plugs)}&d=${encodeURIComponent(serverDrive)}&s=${encodeURIComponent(window.cylonGfxSession || '')}`
+                });
+                response = await res.text();
+            }
+            
+            if (!response) return;
+
+            let col = 0;
+            let newItems = "";
+            let pathChanged = false;
+            
+            while (col < response.length) {
+                let cmd = response.substring(col, col + 2);
+                
+                if (cmd === 'ST') {
+                    window.cylonGfxSession = response.substring(col + 2, col + 10);
+                    col += 10;
+                }
+                else if (cmd === 'PI') {
+                    // In local desktop mode, the server is only used to obtain a
+                    // session token. Cursor position and identity remain local.
+                    if (this.gfxTickRate !== 0) {
+                        window.playerItem = response.substring(col + 2, col + 4);
+                        let zStr = response.substring(col + 4, col + 6);
+                        window.playerZ = parseInt(zStr, this.gfxZBase);
+                        window.playerId = response.substring(col + 6, col + 10);
+                    }
+                    col += 10;
+                }
+                else if (cmd === 'RF') {
+                    if (this.gfxTickRate !== 0) {
+                        let sector = response.substring(col + 2, col + 4);
+                        newItems = response.substring(col + 6);
+                        let targetPath = window.desktopDrive + ':/w/' + sector;
+                        if (this.currentPath !== targetPath) {
+                            this.currentPath = targetPath;
+                            window.map = sector;
+                            pathChanged = true;
+                        }
+                    }
+                    // RF consumes the remainder of the response in both modes;
+                    // in desktop mode do not reconcile or overwrite local files.
+                    col = response.length;
+                }
+                else if (cmd === 'S^') {
+                    let end = response.indexOf('^S', col);
+                    if (end !== -1) {
+                        let sPlugs = response.substring(col + 2, end);
+                        if (typeof window.serverdown === 'function') window.serverdown(sPlugs);
+                        col = end + 2;
+                    } else {
+                        if (typeof window.serverdown === 'function') window.serverdown(response.substring(col + 2));
+                        col = response.length;
+                    }
+                } else {
+                    col++; 
+                }
+            }
+            
+            this.setCursorZ(window.playerZ);
+            
+            // Sync items safely to DOS mirroring Unix files as objects so they can be interacted with natively
+            if (pathChanged || newItems !== this.lastRenderedItems) {
+                this.lastRenderedItems = newItems;
+                
+                let dos = window.parent && window.parent.CylonDOS ? window.parent.CylonDOS : window.CylonDOS;
+                if (dos && window.remoteQandylandUrl) {
+                    try {
+                        let targetPath = window.desktopDrive + ':/w/' + window.map;
+                        let serverFileList = newItems.split('~').filter(f => f);
+                        let localFiles = await dos.dir(targetPath);
+                        
+                        for (let lf of localFiles) {
+                            let fname = lf.name.substring(lf.name.lastIndexOf('/') + 1);
+                            if (fname === 'm' || fname === 'e' || fname === 't') continue;
+                            if (!serverFileList.includes(fname)) {
+                                await dos.delete(lf.name);
+                            }
+                        }
+                        for (let sf of serverFileList) {
+                            let fpath = targetPath + '/' + sf;
+                            if (!(await dos.exists(fpath))) {
+                                await dos.save(fpath, "");
+                            }
+                        }
+                    } catch(e) {}
+                }
+                await this.renderScreen();
+            }
+        } catch (e) {
+            console.error("Network tick error:", e);
+        } finally {
+            this.isSyncing = false;
         }
     },
 
     handleGfxCommand: async function(cmd, data) {
         switch(cmd) {
+            case 'list':
+                let output = "[.2]Available GFX Servers:[.]\n\n";
+                let dos = window.parent && window.parent.CylonDOS ? window.parent.CylonDOS : window.CylonDOS;
+                
+                let serverUrl = window.remoteQandylandUrl || window.location.origin + '/qandyland.js';
+                let remoteFound = false;
+                
+                if (serverUrl.startsWith('http')) {
+                    try {
+                        let res = await fetch(serverUrl, { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: `c=SYS:DRIVES` });
+                        if (res.ok) {
+                            let remoteDrives = await res.text();
+                            if (remoteDrives.trim()) {
+                                remoteDrives.split(',').forEach(d => {
+                                    if (d.trim()) output += `  qandyland ${d.trim().replace(/\.gfx$/i, '')}\n`;
+                                });
+                                remoteFound = true;
+                            }
+                        }
+                    } catch(e) {}
+                }
+                
+                if (!remoteFound) output += "  [.4]qandyland unreachable[.]\n";
+
+                let localFound = false;
+                if (dos) {
+                    let mnts = await dos.mounts();
+                    let gfxMnts = mnts.filter(m => m.name.endsWith('.gfx') || m.name === 'capflag' || m.name === 'queville');
+                    if (gfxMnts.length > 0) {
+                        gfxMnts.forEach(m => output += `      local ${m.name.replace(/\.gfx$/i, '')}\n`);
+                        localFound = true;
+                    }
+                }
+
+                if (!localFound && !remoteFound) output = "(No GFX servers found)\n";
+                if (window.parent && window.parent.print) window.parent.print(output);
+                break;
+
+            case 'connect':
+                if (data) {
+                    let parts = data.trim().split(/\s+/);
+                    let url = parts[0];
+                    let world = parts[1] || 'capflag';
+                    
+                    window.remoteQandylandUrl = url;
+                    window.desktopDrive = world;
+                    window.cylonGfxSession = null;
+                    window.gfxDo = "ST";
+                    
+                    let startSector = 'Aa';
+                    let jdos = window.parent && window.parent.CylonDOS ? window.parent.CylonDOS : window.CylonDOS;
+                    if (jdos) {
+                        try {
+                            let loaded = await jdos.load(`${world}:/a/gfxSector`);
+                            if (loaded && loaded.trim().length === 2) startSector = loaded.trim();
+                        } catch(e) {}
+                    }
+                    
+                    await this.init(`${world}:/w/${startSector}`);
+                    
+                    if (this.gfxCommandLog && window.parent && window.parent.print) {
+                        window.parent.print(`[.3]Connected to GFX Server: ${url} (World: ${world})[.]\n`);
+                    }
+                    
+                    this.startNetworkTick();
+                } else {
+                    if (window.parent && window.parent.print) window.parent.print(`[.4]GFX Error: 'gfx connect [url] [world]' required.[.]\n`);
+                }
+                break;
+                
             case 'refresh':
-                // Reprocess all /a/ variables and refresh desktop
                 await this.init(this.currentPath);
                 if (this.gfxCommandLog && window.parent.print) window.parent.print(`[.3]GFX Engine: Desktop Refreshed.[.]\n`);
                 break;
@@ -260,7 +455,7 @@ window.CylonGFX = {
             case 'tile':
                 if (typeof this.setTileAtCursor === 'function') {
                     await this.setTileAtCursor(data);
-                    this.renderScreen(); // Force refresh to visually confirm
+                    this.renderScreen(); 
                 }
                 break;
 
@@ -290,16 +485,15 @@ window.CylonGFX = {
                     let id = parts[0];
                     let dataField = parts[1];
                     
-                    // Allows user to type `gfx obj AqAa` directly as one argument
                     if (id && id.length > 2 && !dataField) {
                         dataField = id.substring(2);
                         id = id.substring(0, 2);
                     } else if (!dataField) {
-                        dataField = 'Za'; // Default Data Field
+                        dataField = 'Za'; 
                     }
                     
                     if (id && id.length === 2) {
-                        let zHex = window.playerZ.toString(16).padStart(2, '0').toLowerCase();
+                        let zHex = window.playerZ.toString(this.gfxZBase).padStart(2, '0');
                         dataField = dataField.substring(0, 2).padEnd(2, 'a');
                         
                         let filename = id + zHex + dataField;
@@ -324,7 +518,7 @@ window.CylonGFX = {
                     
                     if (id && id.length >= 2) {
                         id = id.substring(0, 2);
-                        let zHex = window.playerZ.toString(16).padStart(2, '0').toLowerCase();
+                        let zHex = window.playerZ.toString(this.gfxZBase).padStart(2, '0');
                         
                         let filename = id + zHex;
                         let pathPrefix = this.currentPath.endsWith('/') ? this.currentPath : this.currentPath + '/';
@@ -371,10 +565,14 @@ window.CylonGFX = {
         if (tilesLayer) tilesLayer.innerHTML = '';
         
         let tData = "";
-        try { tData = await dos.load(`${this.currentPath}/t`); } catch (e) { }
+        try { tData = await dos.load(`${this.currentPath}/m`); } catch (e) { }
 
         if (tData) {
+            // FIX 2: Strip newlines/spaces so visually formatted 'm' files parse correctly
+            tData = tData.replace(/\s+/g, ''); 
+
             let expectedLen = this.gridWide * this.gridTall * 2;
+            
             if (tData.length < expectedLen) {
                 let needed = (expectedLen - tData.length) / 2;
                 if (needed > 0) tData += 'Za'.repeat(Math.ceil(needed));
@@ -414,16 +612,18 @@ window.CylonGFX = {
 
             if (filename === 'm' || filename === 't' || file.type !== 'file') continue;
 
-            // Ensures 4-char items (Aq00) and 6-char objects (Aq00Za) render natively
             if (filename.length >= 4) {
                 let iconId = filename.substring(0, 2);
                 let zHex = filename.substring(2, 4);
+                let pubId = filename.length >= 8 ? filename.substring(4, 8) : "";
                 
-                // Automatically fetch Item ID from the Cylon Item Library
+                // Exclude double-drawing our own cursor item on the map
+                if (iconId === window.playerItem && pubId === window.playerId) continue;
+
                 let labelText = typeof window.gfxItemID === 'function' ? window.gfxItemID(iconId) : iconId;
                 
-                let z = parseInt(zHex, 16);
-                if (isNaN(z)) continue; // Failsafe against poorly named files
+                let z = parseInt(zHex, this.gfxZBase);
+                if (isNaN(z)) continue; 
 
                 let x = z % this.gridWide;
                 let y = Math.floor(z / this.gridWide);
@@ -467,13 +667,35 @@ window.CylonGFX = {
         lbl.className = 'icon-label';
         lbl.textContent = labelText;
         
+        // Large Item Adjustment (T and U rows anchor their bottom-right to the visual layout)
+        if (iconId.charAt(0) === 'T' || iconId.charAt(0) === 'U') {
+            img.onload = function() {
+                let tilesX = Math.round(this.naturalWidth / 32);
+                let tilesY = Math.round(this.naturalHeight / 32);
+                
+                if (tilesX > 1 || tilesY > 1) {
+                    wrap.style.width = ((tilesX / self.gridWide) * 100) + '%';
+                    wrap.style.height = ((tilesY / self.gridTall) * 100) + '%';
+                    wrap.style.left = (((x - tilesX + 1) / self.gridWide) * 100) + '%';
+                    wrap.style.top = (((y - tilesY + 1) / self.gridTall) * 100) + '%';
+                    
+                    img.style.maxWidth = '100%';
+                    img.style.maxHeight = '100%';
+                    img.style.width = '100%';
+                    img.style.height = '100%';
+                    img.style.objectFit = 'fill';
+                    
+                    lbl.style.position = 'absolute';
+                    lbl.style.bottom = '5px';
+                }
+            };
+        }
+        
         wrap.appendChild(img);
         wrap.appendChild(lbl);
 
         iconsLayer.appendChild(wrap);
     },
-
-    // --- SYSTEM CURSOR & SPATIAL NAVIGATION ENGINE ---
 
     renderCursor: function() {
         const iconsLayer = document.getElementById('icons-layer');
@@ -519,8 +741,8 @@ window.CylonGFX = {
         if (!currentSector || currentSector.length < 2) return null;
         if (!maxMapBounds || maxMapBounds.length !== 2) maxMapBounds = 'Hh';
 
-        let minY = 65; // 'A'
-        let minX = 97; // 'a'
+        let minY = 65; 
+        let minX = 97; 
         let maxY = maxMapBounds.charCodeAt(0);
         let maxX = maxMapBounds.charCodeAt(1);
 
@@ -636,13 +858,8 @@ window.CylonGFX = {
         
         let targetZ = ny * this.gridWide + nx;
 
-        let oldFile = `${this.currentPath}/${window.playerItem}${window.playerZ.toString(16).padStart(2, '0').toLowerCase()}`;
-        let newFile = `${this.currentPath}/${window.playerItem}${targetZ.toString(16).padStart(2, '0').toLowerCase()}`;
+        // Let UNIVAC or the server handle the filesystem update
         
-        if (window.parent && window.parent.CylonDOS && window.playerItem.charAt(0) === 'S') {
-            window.parent.CylonDOS.rename(oldFile, newFile).catch(()=> {});
-        }
-
         this.setCursorZ(targetZ);
 
         if (this.fillTileCode && typeof this.setTileAtCursor === 'function') {
@@ -704,12 +921,10 @@ window.CylonGFX = {
     },
 
     executeCursor: function() {
-        // Hitting "Enter" acts identically to clicking the tile the player is currently standing on
         let z = window.playerZ;
         let x = z % this.gridWide;
         let y = Math.floor(z / this.gridWide);
         const wrapper = document.getElementById('desktop-wrapper');
-        
         if (!wrapper) return;
         
         let rect = wrapper.getBoundingClientRect();
@@ -721,24 +936,18 @@ window.CylonGFX = {
         this.showTargetMenu(z, clientX, clientY);
     },
 
-    // STEP 1: What is on this tile?
     showTargetMenu: function(z, clientX, clientY) {
-        if (!window.parent || !window.parent.CylonPopManager || typeof window.parent.CylonPopManager.showContextMenu !== 'function') {
-            console.warn("GFX Warning: Context menu manager unavailable.");
-            return;
-        }
+        if (!window.parent || !window.parent.CylonPopManager || typeof window.parent.CylonPopManager.showContextMenu !== 'function') return;
 
         let items = [];
-        
-        // Scan for interactable icons/entities on this specific Z tile
         let iconWraps = document.querySelectorAll(`.icon-wrap[data-z="${z}"]`);
+        
         iconWraps.forEach(wrap => {
             let labelText = wrap.getAttribute('data-label');
             let fullPath = wrap.getAttribute('data-path');
             if (labelText && fullPath) {
                 items.push({
                     label: labelText,
-                    // Selecting the target engages the auto-walk, which defers the Action Menu until arrival!
                     action: () => this.walkToZ(z, () => this.showActionMenu(z, labelText, fullPath))
                 });
             }
@@ -763,37 +972,33 @@ window.CylonGFX = {
         if (y === this.gridTall - 1) addScroll('S', 'Scroll South', 0, 1);
         if (x === this.gridWide - 1) addScroll('E', 'Scroll East', 1, 0);
         if (x === 0) addScroll('W', 'Scroll West', -1, 0);
-        // Always allow a basic walk/move command if clicking the map
+        
         items.push({
             label: 'Walk Here',
             action: () => this.walkToZ(z)
         });
-        // Bypass menu if 'Walk Here' is the only option ---
+        
         if (items.length === 1) {
             items[0].action();
             return;
         }
+        
         let mockEvent = { clientX, clientY, view: window };
         window.parent.CylonPopManager.showContextMenu(mockEvent, items);
     },
     
-    // STEP 2: We have arrived at the target. What do you want to do with it?
     showActionMenu: function(z, labelText, fullPath) {
         if (!window.parent || !window.parent.CylonPopManager || typeof window.parent.CylonPopManager.showContextMenu !== 'function') return;
-
         let items = [];
-        
-        items.push({
-            label: 'Open ' + labelText,
-            action: () => this.executeScript(fullPath)
-        });
-        
-        items.push({
-            label: 'Remove ' + labelText,
-            action: () => this.removeScript(fullPath)
-        });
+        items.push({ label: 'Open ' + labelText, action: () => this.executeScript(fullPath) });
+        if (this.enableFileMove) {
+            items.push({ label: 'Move ' + labelText, action: () => {
+                this.pendingMovePath = fullPath;
+                if (window.parent && window.parent.print) window.parent.print('Select a destination tile to move this file.\n');
+            }});
+        }
+        items.push({ label: 'Remove ' + labelText, action: () => this.removeScript(fullPath) });
 
-        // Visually center the Action Menu on the physical tile coordinates the player is now standing on
         let x = z % this.gridWide;
         let y = Math.floor(z / this.gridWide);
         const wrapper = document.getElementById('desktop-wrapper');
@@ -803,78 +1008,44 @@ window.CylonGFX = {
         
         let clientX = rect.left + (x + 0.5) * w;
         let clientY = rect.top + (y + 0.5) * h;
-
         let mockEvent = { clientX, clientY, view: window };
         window.parent.CylonPopManager.showContextMenu(mockEvent, items);
     },
 
-    showIconPicker: function(z) {
-        let html = '<div style="text-align:center; padding:15px; user-select:none;">';
-        html += '<div style="margin-bottom:15px; color:var(--fg-color,#0f0); font-family:var(--font-face,monospace); font-size:16px; font-weight:bold;">Select Icon</div>';
-        
-        let rows = ['A', 'B', 'C'];
-        rows.forEach(prefix => {
-            html += '<div style="display:flex; justify-content:center; gap:6px; margin-bottom:6px;">';
-            for(let c = 'q'.charCodeAt(0); c <= 'z'.charCodeAt(0); c++) {
-                let code = prefix + String.fromCharCode(c);
-                html += `<a href="gfx:pickicon ${code} ${z}" style="display:flex; align-items:center; justify-content:center; width:36px; height:36px; line-height:0; border:1px solid transparent; border-radius:3px; transition:border 0.1s;" onmouseover="this.style.border='1px solid var(--sel-fg, #0f0)'" onmouseout="this.style.border='1px solid transparent'"><img src="${this.gfxIconDir}${code}.png" style="width:32px; height:32px; image-rendering:pixelated; cursor:pointer;" onerror="this.src='q/file.png'" title="${code}" /></a>`;
-            }
-            html += '</div>';
-        });
-        html += '</div>';
-
-        if (window.parent && window.parent.popHtm) {
-            window.parent.popHtm(html, 'center');
+    moveObjectToZ: async function(filePath, z) {
+        const dos = window.parent && window.parent.CylonDOS ? window.parent.CylonDOS : window.CylonDOS;
+        if (!dos || typeof dos.rename !== 'function') {
+            if (window.parent && window.parent.print) window.parent.print('Cannot move file: DOS rename is unavailable.\n');
+            return false;
         }
-    },
-
-    showIconNamer: function(code, z) {
-        let html = `<div style="text-align:center; padding:15px;">
-            <div style="margin-bottom:15px; color:var(--fg-color,#0f0); font-family:var(--font-face,monospace); font-weight:bold;">Name New Icon</div>
-            <img src="${this.gfxIconDir}${code}.png" style="width:64px; height:64px; image-rendering:pixelated; margin-bottom:15px; filter:drop-shadow(2px 2px 2px rgba(0,0,0,0.8));" onerror="this.src='q/file.png'"/>
-            <div style="margin-bottom:15px;">
-                <input type="text" id="gfx-new-icon-name" placeholder="Alpha-numeric name" style="width:100%; box-sizing:border-box; padding:8px; background:var(--input-bg,#000); color:var(--input-fg,#0f0); border:1px solid var(--sel-bg,#333); font-family:var(--font-face,monospace); font-size:16px; outline:none;" maxlength="20" autocomplete="off" spellcheck="false" />
-            </div>
-            <a href="#" id="gfx-new-icon-submit" onclick="
-                var inputEl = document.getElementById('gfx-new-icon-name');
-                if(!inputEl) return false;
-                var val = inputEl.value.replace(/[^a-zA-Z0-9]/g, '');
-                if(!val) { inputEl.focus(); return false; }
-                let activeFrame = document.querySelector('.page-frame.active');
-                if(activeFrame && activeFrame.contentWindow) {
-                    activeFrame.contentWindow.postMessage({ type: 'gfx', cmd: 'saveicon ${code} ${z} ' + val }, (window.location.origin && window.location.origin !== 'null' ? window.location.origin : '*'));
-                } else {
-                    window.postMessage({ type: 'gfx', cmd: 'saveicon ${code} ${z} ' + val }, (window.location.origin && window.location.origin !== 'null' ? window.location.origin : '*'));
-                }
-                if(typeof hpop === 'function') hpop();
+        const slash = filePath.lastIndexOf('/');
+        const basename = filePath.substring(slash + 1);
+        if (basename.length < 4) return false;
+        const zText = Number(z).toString(this.gfxZBase || 10).padStart(2, '0');
+        const newName = basename.substring(0, 2) + zText + basename.substring(4);
+        if (newName === basename) {
+            await this.renderScreen();
+            return true;
+        }
+        const newPath = filePath.substring(0, slash + 1) + newName;
+        try {
+            if (await dos.exists(newPath)) {
+                if (window.parent && window.parent.print) window.parent.print('That tile already contains a file with this name.\n');
                 return false;
-            " style="display:inline-block; padding:8px 16px; background:var(--sel-bg,#333); color:var(--sel-fg,#0f0); text-decoration:none; cursor:pointer; border-radius:3px; font-weight:bold; font-family:var(--font-face,monospace);">Submit</a>
-        </div>`;
-
-        if (window.parent && window.parent.popHtm) {
-            window.parent.popHtm(html, 'center');
-            setTimeout(() => {
-                let input = window.parent.document.getElementById('gfx-new-icon-name');
-                if (input) {
-                    input.focus();
-                    input.onkeydown = function(e) {
-                        if(e.key === 'Enter') {
-                            e.preventDefault();
-                            let submitBtn = window.parent.document.getElementById('gfx-new-icon-submit');
-                            if(submitBtn) submitBtn.click();
-                        }
-                    };
-                }
-            }, 100);
+            }
+            await dos.rename(filePath, newPath);
+            await this.renderScreen();
+            return true;
+        } catch (err) {
+            console.error('GFX move failed:', err);
+            if (window.parent && window.parent.print) window.parent.print(`Move failed: ${String(err.message || err)}\n`);
+            return false;
         }
     },
 
     executeScript: async function(filePath) {
         let scriptData = await window.qdosLoad(filePath);
-        if (!scriptData) {
-            console.error(`GFX Error: Could not load script at ${filePath}.`);
-            return;
-        }
+        if (!scriptData) return;
         await window.CylonScript(scriptData);
         this.renderScreen();
     },
@@ -884,20 +1055,21 @@ window.CylonGFX = {
             try {
                 await window.parent.CylonDOS.delete(filePath);
                 this.renderScreen();
-            } catch(err) {
-                console.error("GFX Error: Could not remove icon file.", err);
-            }
+            } catch(err) {}
         }
     },
 
-    setTileAtCursor: async function(code) {
+        setTileAtCursor: async function(code) {
         let dos = window.parent && window.parent.CylonDOS ? window.parent.CylonDOS : window.CylonDOS;
         if (!dos) return;
         
-        let tPath = `${this.currentPath}/t`;
+        let tPath = `${this.currentPath}/m`; 
         let tData = "";
         try { tData = await dos.load(tPath); } catch (e) {}
         if (!tData) tData = "";
+        // FIX: Strip spaces from existing data so we don't accidentally corrupt it
+        tData = tData.replace(/\s+/g, '');
+
 
         let expectedLen = this.gridWide * this.gridTall * 2;
         if (tData.length < expectedLen) {
@@ -905,29 +1077,21 @@ window.CylonGFX = {
             if (needed > 0) tData += 'Za'.repeat(Math.ceil(needed));
         }
 
-        // IMPROVEMENT: Display tile info when no code is passed
         if (!code) {
             let currentCode = tData.substring(window.playerZ * 2, window.playerZ * 2 + 2) || 'Za';
-            
-            // 1. Keep the optional terminal printout
             if (this.gfxCommandLog && window.parent.print) {
                 window.parent.print(`\n[.3]GFX Tile Engine: Tile at Cursor (${window.playerZ}) is [${currentCode}][.]\n`);
             }
-
-            // 2. Trigger the OS visual popup
             let html = `<div> ${currentCode} </div>`;
-
             if (window.parent && typeof window.parent.popHtm === 'function') {
                 window.parent.popHtm(html, 'center');
             } else if (typeof window.pop === 'function') {
                 window.pop(html, 'cursor');
             }
-
             return;
         }
 
         code = String(code).padEnd(2, 'a').substring(0, 2);
-        
         let prefix = tData.substring(0, window.playerZ * 2);
         let suffix = tData.substring(window.playerZ * 2 + 2);
         tData = prefix + code + suffix;
@@ -964,7 +1128,6 @@ window.CylonGFX = {
             img.style.height = ((1 / this.gridTall) * 100) + '%';
             img.style.imageRendering = 'pixelated';
             img.id = `gfx-tile-${z}`;
-            
             tilesLayer.appendChild(img);
         }
     },
@@ -973,110 +1136,21 @@ window.CylonGFX = {
         this.gfxGrid = typeof state === 'boolean' ? state : !this.gfxGrid;
         this.renderScreen(); 
     }
+
 };
 
-// ============================================================================
-// GFX SECURITY SANDBOX & SYNC FILESYSTEM
-// ============================================================================
+window.CylonGFX.setupListeners(); 
 
-// 1. Asynchronous Macro Loader (Locked out of IndexedDB)
 window.qdosLoad = async function(filename) {
     let dos = window.parent && window.parent.CylonDOS ? window.parent.CylonDOS : window.CylonDOS;
     if (!dos) throw new Error("CylonDOS not available");
-
-    // Determine target drive
     let driveName = filename.split(':')[0];
-    if (!driveName || driveName === filename) {
-        driveName = dos.mountedDrive; // Fallback to current working drive
-    }
-
-    // Security Gate: Check drive type
+    if (!driveName || driveName === filename) driveName = dos.mountedDrive;
     let mounts = await dos.mounts();
     let targetMount = mounts.find(m => m.name === driveName);
     
     if (targetMount && targetMount.type === 'idb') {
-        console.error(`GFX SECURITY BLOCK: Attempted read on System Drive [${driveName}:]`);
         throw new Error("SECURITY EXCEPTION: GFX Engine cannot access IndexedDB drives.");
     }
-
     return await dos.load(filename);
-};
-
-// 2. Synchronous FileSystem for UNIVAC (Strictly localStorage)
-window.GfxSyncFS = {
-    getPrefix: function(driveName) {
-        return 'cylon:' + driveName + ':';
-    },
-
-    fileLoad: function(driveName, root, filepath, session) {
-        let key = this.getPrefix(driveName) + filepath;
-        let raw = window.localStorage.getItem(key);
-        if (!raw) return { success: false };
-        try {
-            let entry = JSON.parse(raw);
-            return { success: true, content: entry.content };
-        } catch(e) {
-            return { success: false };
-        }
-    },
-
-    fileSave: function(driveName, root, filepath, content, session1, session2, timestamp) {
-        let key = this.getPrefix(driveName) + filepath;
-        // Matches CylonDOS internal schema so DOS can still view/delete these files
-        let entry = {
-            path: filepath,
-            type: 'file',
-            content: String(content),
-            size: String(content).length,
-            timestamp: timestamp || new Date().toISOString(),
-            readOnly: false
-        };
-        try {
-            window.localStorage.setItem(key, JSON.stringify(entry));
-            return { success: true };
-        } catch(e) {
-            return { success: false, error: "localStorage full" };
-        }
-    },
-    
-    fileDelete: function(driveName, root, filepath, session) {
-        window.localStorage.removeItem(this.getPrefix(driveName) + filepath);
-        return { success: true };
-    },
-
-    fileRename: function(driveName, root, oldPath, newPath, session) {
-        let loadRes = this.fileLoad(driveName, root, oldPath, session);
-        if (loadRes.success) {
-            let saveRes = this.fileSave(driveName, root, newPath, loadRes.content, session, session);
-            if (saveRes.success) {
-                this.fileDelete(driveName, root, oldPath, session);
-                return { success: true };
-            }
-        }
-        return { success: false };
-    },
-
-    fileList: function(driveName, directory, ignored, session) {
-        let prefix = this.getPrefix(driveName) + directory;
-        let files = [];
-        for (let i = 0; i < window.localStorage.length; i++) {
-            let key = window.localStorage.key(i);
-            if (key.startsWith(prefix)) {
-                // Extract just the filename, ignoring the directory path
-                let filename = key.substring(prefix.length).replace(/^\//, '');
-                if (filename.indexOf('/') === -1) { // Ensure it's not a sub-directory
-                    files.push(filename);
-                }
-            }
-        }
-        return { success: true, listing: files.join(' ') };
-    },
-
-    futureTimestamp: function(minutes) {
-        let d = new Date();
-        d.setMinutes(d.getMinutes() + minutes);
-        let p = (n) => String(n).padStart(2, '0');
-        return String(d.getFullYear()) + p(d.getMonth() + 1) + p(d.getDate()) +
-               p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
-    }
 };

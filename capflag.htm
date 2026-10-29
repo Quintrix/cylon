@@ -1,514 +1,621 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Capture the Flag</title>
+<meta charset="UTF-8">
+<title>Capture the Flag 2029</title>
+<script src="cylon-sdk.js"></script>
+<script src="qandyland-univac.js"></script>
+<script src="cylon-gfx-itemid.js"></script>
+<script src="cylon-gfx.js"></script>
+<style>
+    body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; color: #0f0; font-family: monospace; overflow: hidden; user-select: none; }
+    #desktop-wrapper { position: relative; width: 100%; height: calc(100% - 60px); overflow: hidden; }
     
-    <!-- Cylon OS Dependencies -->
-    <script src="cylon-sdk.js"></script>
-    <script src="gfx-itemid.js"></script>
-    <script src="gfx.js"></script>
+    /* Action-RPG Style Inventory HUD */
+    #inventory-bar { position: absolute; bottom: 0; width: 100%; height: 60px; border-top: 2px solid #333; background: #111; display: flex; align-items: center; padding: 0 10px; box-sizing: border-box; }
+    .inv-item { cursor: pointer; margin-right: 10px; transition: transform 0.1s; }
+    .inv-item:hover { transform: scale(1.1); }
+    .progress-container { flex: 1; height: 10px; background: #500; margin: 0 15px; border: 1px solid #333; }
+    .progress-bar { height: 100%; background: #0f0; transition: width 0.2s; }
+    .stat-block { display: flex; flex-direction: column; font-size: 12px; margin-right: 10px; color: #aaa; }
     
-    <style>
-        html, body {
-            margin: 0; 
-            padding: 0; 
-            width: 100vw; 
-            height: 100vh;
-            background-color: var(--bg-color, #000);
-            color: var(--fg-color, #0f0);
-            font-family: var(--font-face, monospace);
-            overflow: hidden; 
-            user-select: none;
-            -webkit-user-select: none;
-        }
-
-        /* Enforce pixel-perfect sharpness for retro graphics */
-        img, canvas {
-            image-rendering: -moz-crisp-edges;
-            image-rendering: -webkit-optimize-contrast;
-            image-rendering: crisp-edges;
-            image-rendering: pixelated;
-        }
-
-        /* Match the 1984 3D drop-shadow aesthetic */
-        .char, .item, .objs {
-            filter: drop-shadow(2px 2px 2px rgba(0,0,0,0.8));
-        }
-    </style>
+    #bg-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; image-rendering: pixelated; }
+    #tiles-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 5; }
+    #icons-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; }
+    
+    .icon-wrap { position: absolute; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: background-color 0.1s; }
+    .icon-wrap:hover { background-color: rgba(255, 255, 255, 0.1); z-index: 20; }
+    .icon-img { max-width: 60%; max-height: 55%; object-fit: contain; image-rendering: pixelated; filter: drop-shadow(2px 2px 2px rgba(0,0,0,0.8)); }
+    .icon-label { display: none; } 
+</style>
 </head>
 <body>
+<div id="desktop-wrapper">
+   <canvas id="bg-canvas"></canvas>
+   <div id="tiles-layer"></div>
+   <div id="icons-layer"></div>
+</div>
+<div id="inventory-bar"></div>
+
 <script>
-
-        // ==========================================
-        // Capflag.js Core Logic
-        // ==========================================
-
-        if (typeof window.GFX === "undefined") window.GFX = 0;
-
-        // Multiplayer state
-        var emptySlots = [];        
-        var rfInterval = null;      
-        var playerItemId = null;
-        var walkhere = -1; // set to 0-95 z-location for player to walk to     
-
-        window.gameState = 'idle';
-        window.gfxConsole = window.gfxConsole || [];
-
-        var ts = 5000;
-        setTimeout(function() { startup(); }, 400);
-
-        async function startup(){
-            if (window.GFX == 0) {
-                ts = ts - 200;
-                if (ts > 0) { setTimeout(startup, 200); }
-                return;
-            } else {
-                window.map = "Fb"; // first map displayed
-                window.PopAlign = "center"; // "center", "click", or "full"
-                window.PopUpVis = "visible"; // current target visibility
-                window.PopForce = "visible";   // forced visibility on mouseout
-                window.lastClickedZ = 0;     // last grid coordinate clicked
-                window.gfxDrive = 'capflag.gfx';
-                var gameState = await gfxConnect(0);
-
-                window.PopForce = "hidden";   // hidden popup on mouseout
-                setTimeout(function() {
-                    pop("<p align=center>Capture the Flag<p align=center>Select player<br>hat to join team!");
-                }, 1000);
+// ============================================================================
+// LOCAL OFFLINE FILESYSTEM & UNIVAC EMULATOR
+// ============================================================================
+window.GfxSyncFS = {
+    getPrefix: function(driveName) { return 'cylon:' + driveName + ':'; },
+    fileLoad: function(driveName, root, filepath, session) {
+        let key = this.getPrefix(driveName) + filepath;
+        let raw = window.localStorage.getItem(key);
+        if (!raw) return { success: false };
+        try { let entry = JSON.parse(raw); return { success: true, content: entry.content }; } catch(e) { return { success: false }; }
+    },
+    fileSave: function(driveName, root, filepath, content, session1, session2, timestamp) {
+        let key = this.getPrefix(driveName) + filepath;
+        let entry = { path: filepath, type: 'file', content: String(content), size: String(content).length, timestamp: timestamp || new Date().toISOString(), readOnly: false };
+        try { window.localStorage.setItem(key, JSON.stringify(entry)); return { success: true }; } catch(e) { return { success: false, error: "localStorage full" }; }
+    },
+    fileDelete: function(driveName, root, filepath, session) { window.localStorage.removeItem(this.getPrefix(driveName) + filepath); return { success: true }; },
+    fileSearch: function(driveName, pattern) {
+        let prefix = this.getPrefix(driveName);
+        let results = [];
+        let regexStr = '^' + pattern.replace(/\*/g, '.*').replace(/\?/g, '.') + '$';
+        let regex = new RegExp(regexStr);
+        for (let i = 0; i < window.localStorage.length; i++) {
+            let key = window.localStorage.key(i);
+            if (key.startsWith(prefix)) {
+                let path = key.substring(prefix.length);
+                let basename = path.split('/').pop();
+                if (regex.test(path) || regex.test(basename)) {
+                    let raw = window.localStorage.getItem(key);
+                    let size = 0, timestamp = '';
+                    try { let e = JSON.parse(raw); size = e.size || 0; timestamp = e.timestamp || ''; } catch(e) {}
+                    results.push({ name: path, size: size, timestamp: timestamp });
+                }
             }
         }
+        return { success: true, results: results };
+    },
+    fileList: function(driveName, directory, ignored, session) {
+        let dirPath = directory.endsWith('/') ? directory : directory + '/';
+        let prefix = this.getPrefix(driveName) + dirPath;
+        let files = [];
+        for (let i = 0; i < window.localStorage.length; i++) {
+            let key = window.localStorage.key(i);
+            if (key.startsWith(prefix)) {
+                let filename = key.substring(prefix.length).replace(/^\//, '');
+                if (filename.indexOf('/') === -1) files.push(filename);
+            }
+        }
+        return { success: true, listing: files.join(' ') };
+    }
+};
 
-        function mainloop() {}
+window.localPlayerIndex = new Map();
+window.register = {};
 
-        window.zdown = function(z) {
-            window.PopForce = "hidden";
-            hpop();
-            var localZ = (window.movingItems && window.movingItems[window.playerItem]) ? 
-                        window.movingItems[window.playerItem].z : window.playerZ;
+window.localPlugboard = function(plugs, drive, session) {
+    let output = "";
+    let player = window.localPlayerIndex.get(session);
+    if (!player) player = { drive: drive, fullPath: null, map: "Aa", z: 0, item: "", avatar: "", pubId: "" };
 
-            if (localZ != z) {
-                // 1. Check to see if there are no objects or items on the destination z
-                let hasStuff = false;
-                
-                // Read collisions dynamically from the live DOM
-                var staticObjs = document.querySelectorAll('.objs');
-                for (var i = 0; i < staticObjs.length; i++) {
-                    var objZ = parseInt(staticObjs[i].getAttribute('data-z'), 10);
-                    if (objZ === z) {
-                        hasStuff = true;
-                        break;
+    // Fetch Z-Base config
+    let zBase = 10;
+    let aZBaseLoad = window.GfxSyncFS.fileLoad(drive, '/', 'a/gfxZBase', session);
+    if (aZBaseLoad && aZBaseLoad.success && aZBaseLoad.content) {
+        zBase = parseInt(aZBaseLoad.content, 10) || 10;
+    }
+
+    function runtape(code) {
+        if (code && typeof window.UNIVAC === 'function') {
+            let uResult = window.UNIVAC(drive, player.fullPath, "RAM:" + code, session);
+            if (uResult) {
+                player.map = uResult.sector; player.z = uResult.z; player.avatar = uResult.avatar;
+                if (uResult.playerid) player.pubId = uResult.playerid;
+                if (uResult.item) player.item = uResult.item + player.pubId;
+                player.fullPath = uResult.fullPath; output += uResult.output;
+            }
+        }
+    }
+    
+    function runfile(filepath) {
+        if (typeof window.UNIVAC === 'function') {
+            let uResult = window.UNIVAC(drive, player.fullPath, filepath, session);
+            if (uResult) {
+                player.map = uResult.sector; player.z = uResult.z; player.avatar = uResult.avatar;
+                if (uResult.playerid) player.pubId = uResult.playerid;
+                if (uResult.item) player.item = uResult.item + player.pubId;
+                player.fullPath = uResult.fullPath; output += uResult.output;
+            }
+        }
+    }
+
+    runfile('w/b'); // Before script
+    let refresh = true; let column = 0; let tape = "";
+
+    while (column < plugs.length) {
+        let code = plugs.slice(column, column + 2);
+        column += 2; 
+        switch (code) {
+            case 'Vn': case 'Vs': case 'Ve': case 'Vw':
+                if (player.item) tape += code; break;
+            case 'Vd': 
+                if (player.item) tape += code + plugs.slice(column, column + 2); 
+                column += 2; break;
+            case 'OD':
+                if (tape) { runtape(tape); tape = ""; }
+                let objid = plugs.slice(column, column + 2);
+                let objz  = plugs.slice(column + 2, column + 4);
+                column += 4;
+                if (player.item === 'Za' && objid.charAt(0) === 'S') player.z = parseInt(objz, zBase) || 0;
+                let pZStr = player.z.toString(zBase).padStart(2, '0');
+                let odSearch = 'w/' + player.map + '/' + objid + pZStr + '??';
+                let odFiles = window.GfxSyncFS.fileSearch(drive, odSearch);
+                let objfile = null;
+                if (odFiles.success && odFiles.results.length > 0) {
+                    for (let r of odFiles.results) {
+                        let base = r.name.split('/').pop();
+                        if (base.length === 6) { objfile = r.name; break; }
                     }
                 }
+                if (objfile) runfile(objfile);
+                break;
+            case 'ID':
+                if (tape) { runtape(tape); tape = ""; }
+                let itemId = plugs.slice(column, column + 2);
+                let itemZ  = plugs.slice(column + 2, column + 4);
+                column += 4;
+                
+                let idSearch = 'w/' + player.map + '/' + itemId + '*';
+                let idFiles = window.GfxSyncFS.fileSearch(drive, idSearch);
+                if (idFiles.success && idFiles.results.length > 0) {
+                    for (let r of idFiles.results) {
+                        let base = r.name.split('/').pop();
+                        if (base.substring(2, 4) === itemZ) {
+                            let pubId = base.length >= 8 ? base.substring(4, 8) : "";
+                            let fullId = pubId ? itemId + pubId : itemId;
+                            
+                            if (itemId === 'Zj') { runfile('w/f'); break; } 
+                            if (fullId === player.item) {
+                                let invLoad = window.GfxSyncFS.fileLoad(drive, '/', player.fullPath, session);
+                                output += "S^Vi" + (invLoad.success ? invLoad.content : '') + "^S";
+                                break;
+                            }
 
-                // Also check dynamic items/players before deciding the tile is empty
-                if (!hasStuff && window.items) {
-                    for (var j = 0; j < window.items.length; j++) {
-                        var itm = window.items[j];
-                        if (!itm || itm.length < 4) continue;
-                        if (itm.length === 6 && (itm.charAt(0) === 'V' || itm.charAt(0) === 'X')) continue;
-                        
-                        var itemZ = parseInt(itm.slice(2, 4), 10);
-                        if (itemZ === z) {
-                            hasStuff = true;
+                            // Ghost takes ownership of player items (Sa-Sl)
+                            if (itemId >= 'Sa' && itemId <= 'Sl' && player.item.startsWith('Za')) {
+                                let newBase = itemId + itemZ + player.pubId;
+                                window.GfxSyncFS.fileSave(drive, '/', 'w/' + player.map + '/' + newBase, "");
+                                window.GfxSyncFS.fileDelete(drive, '/', r.name);
+                                player.item = itemId + player.pubId;
+                                player.z = parseInt(itemZ, zBase) || 0;
+                                break;
+                            }
+
+                            if (itemId >= 'Aa' && itemId < 'Qa') tape += 'XnVd' + itemId;
                             break;
                         }
                     }
                 }
+                break;
+            case 'ST':
+                if (tape) { runtape(tape); tape = ""; }
+                if (!window.localPlayerIndex.has(session)) {
+                    let chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+                    let pubId = '';
+                    for (let i = 0; i < 4; i++) pubId += chars.charAt(Math.floor(Math.random() * chars.length));
+                    player = { drive, fullPath: null, map: "Aa", item: "", z: 0, avatar: "", pubId };
+                    window.localPlayerIndex.set(session, player);
+                    runtape("XaZa"); // Spawn Ghost slot
+                    player.item = 'Za';
+                    output += "ST" + session;
+                    refresh = false;
+                }
+                column = plugs.length;
+                break;
+            default: tape += code; break;
+        }
+    }
 
-                if (!hasStuff) {
-                    window.playerWalk = parseInt(z, 10);
-                    window.playerDo = ""; 
+    if (tape) runtape(tape);
+    runfile('w/c'); // After script
+    window.localPlayerIndex.set(session, player);
+
+    if (refresh) {
+        let list = window.GfxSyncFS.fileList(drive, 'w/' + player.map, null, session);
+        let items = [];
+        if (list.success && list.listing) {
+            let files = list.listing.split(' ');
+            files.sort(); // Lock sorting down to prevent flapping ticks
+            files.forEach(f => {
+                if (f.length !== 6 || f.charAt(0) === 'V' || f.charAt(0) === 'X') items.push(f); 
+            });
+        }
+        let numericZ = parseInt(player.z, 10) || 0;
+        let z = numericZ < 0 ? "00" : numericZ.toString(zBase).padStart(2, '0');
+        let pItemId = player.item ? player.item.substring(0, 2) : "Za";
+        let pPubId = (player.pubId || "0000").padEnd(4, '0');
+        
+        output = "PI" + pItemId + z + pPubId + output;
+        output += "RF" + player.map + z + items.join('~');
+    }
+    return output;
+};
+
+
+// ============================================================================
+// CAPTURE THE FLAG CLIENT ENGINE
+// ============================================================================
+window.onload = async function() {
+    if (window.CylonSDK && window.CylonSDK.injectDesktopStyles) {
+        window.CylonSDK.applyColors(window.parent.CylonColors);
+    }
+    if (typeof window.UNIVAC !== 'undefined') window.UNIVAC.inject(window.GfxSyncFS);
+
+    // Initial Engine State
+    window.gfxDo = "ST";
+    window.playerItem = "Za";
+    window.playerInven = "";
+    window.wRegisters = {};
+    window.wzValue = 0;
+
+    // Route CylonGFX cursor movements through the UNIVAC punch code pipeline
+    window.CylonGFX.moveCursor = function(dx, dy) {
+        let cmd = null;
+        if (dy < 0) cmd = 'Vn';
+        else if (dy > 0) cmd = 'Vs';
+        else if (dx < 0) cmd = 'Vw';
+        else if (dx > 0) cmd = 'Ve';
+        
+        if (cmd) {
+            if (window.gfxDo === "RF") window.gfxDo = "";
+            window.gfxDo += cmd;
+        }
+    };
+
+    window.CylonGFX.setCursorZ = function(newZ) {
+        window.playerZ = newZ;
+        this.renderCursor();
+    };
+
+    // Buffer keyboard commands seamlessly
+    window.keydown = function(key, e) {
+        if (!window.CylonGFX) return;
+        window.CylonGFX.targetCursorZ = -1;
+        window.CylonGFX.pendingCursorAction = null;
+
+        let handled = false;
+        let todo = null;
+        
+        if (key === 'ArrowUp' || key === 'w' || key === 'W')    { todo = 'Vn'; handled = true; }
+        if (key === 'ArrowDown' || key === 's' || key === 'S')  { todo = 'Vs'; handled = true; }
+        if (key === 'ArrowLeft' || key === 'a' || key === 'A')  { todo = 'Vw'; handled = true; }
+        if (key === 'ArrowRight' || key === 'd' || key === 'D') { todo = 'Ve'; handled = true; }
+        
+        if (todo) {
+            if (window.gfxDo === "RF") window.gfxDo = "";
+            window.gfxDo += todo;
+        }
+        if (handled && e) e.preventDefault(); 
+    };
+
+    // Trigger action when user uses Qandy popup system
+    window.capflagInteract = function(itemId, zStr, isOd) {
+        if (window.parent && window.parent.hpop) window.parent.hpop();
+        else if (window.hpop) window.hpop();
+        
+        let targetZ = parseInt(zStr, window.CylonGFX.gfxZBase || 10);
+        
+        window.CylonGFX.walkToZ(targetZ, () => {
+            if (window.gfxDo === "RF") window.gfxDo = "";
+            window.gfxDo += (isOd ? "OD" : "ID") + itemId + zStr;
+        });
+    };
+
+    // Inject Action-RPG "Walk to and Interact" pop controller
+    window.CylonGFX.showTargetMenu = function(z, clientX, clientY) {
+        let items = [];
+        let iconWraps = document.querySelectorAll(`.icon-wrap[data-z="${z}"]`);
+        
+        iconWraps.forEach(wrap => {
+            let path = wrap.getAttribute('data-path');
+            let basename = path.split('/').pop();
+            let itemId = basename.substring(0, 2);
+            let pubId = basename.length >= 8 ? basename.substring(4, 8) : "";
+            let zHex = basename.substring(2, 4);
+            let labelText = wrap.getAttribute('data-label') || itemId;
+
+            let isOd = basename.length === 6;
+
+            items.push({
+                label: `Interact with ${labelText}`,
+                action: () => {
+                    // Instantly interact with player hats/flags
+                    if (itemId >= 'Sa' && itemId <= 'Sd') {
+                        if (window.playerItem === "Za") {
+                            if (window.gfxDo === "RF") window.gfxDo = "";
+                            window.gfxDo += "ID" + itemId + zHex;
+                        } else if (itemId === window.playerItem && pubId === window.playerId) {
+                            if (window.gfxDo === "RF") window.gfxDo = "";
+                            let zStr = window.playerZ.toString(window.CylonGFX.gfxZBase || 10).padStart(2, '0');
+                            window.gfxDo += "ID" + window.playerItem + zStr;
+                        } else {
+                            if (window.gfxDo === "RF") window.gfxDo = "";
+                            window.gfxDo += "Xt" + pubId;
+                        }
+                        if (window.parent && window.parent.hpop) window.parent.hpop();
+                        else if (window.hpop) window.hpop();
+                        return;
+                    }
+
+                    // Standard Qandy Pop Menu for interacting with generic objects (items, flags, powerups, etc)
+                    let desc = typeof window.gfxItemID === 'function' ? window.gfxItemID(itemId) : itemId;
+                    let PUP = `<div align="center" style="padding:10px;">
+                        <strong>${desc}</strong><br><br>
+                        <img src="q/${itemId}.png" height="32" width="32" style="image-rendering:pixelated;"><br><br>
+                        <a href="#" onclick="window.capflagInteract('${itemId}', '${zHex}', ${isOd}); return false;" style="display:inline-block; padding:6px 12px; background:var(--sel-bg, #333); color:var(--sel-fg, #0f0); text-decoration:none; border-radius:3px; font-weight:bold;">Interact</a>
+                    </div>`;
                     
-                    let wImg = document.createElement("img");
-                    wImg.src = "i/Zb.png";
-                    wImg.style.position = "absolute";
-                    wImg.style.width = "32px";
-                    wImg.style.height = "32px";
-                    wImg.style.pointerEvents = "none"; 
-                    wImg.style.zIndex = "9999";
-                    let tile = document.getElementById("T" + z);
-                    if (tile) {
-                        wImg.style.left = tile.style.left;
-                        wImg.style.top = tile.style.top;
-                        document.body.appendChild(wImg);
-                        setTimeout(function() {
-                            if (wImg && wImg.parentNode) wImg.parentNode.removeChild(wImg);
-                        }, 200);
+                    if (window.parent && window.parent.popHtm) {
+                        window.parent.PopAlign = "click";
+                        window.parent.lastClickZ = z;
+                        window.parent.popHtm(PUP);
+                    } else if (window.popHtm) {
+                        window.PopAlign = "click";
+                        window.lastClickZ = z;
+                        window.popHtm(PUP);
                     }
                 }
-            }
-        }
+            });
+        });
 
-        window.walkdown = function () {
-            if (window.playerWalk === -1) return; 
+        // Add Scroll Options
+        let x = z % this.gridWide;
+        let y = Math.floor(z / this.gridWide);
+        let parts = this.currentPath.split('/');
+        let currentSector = parts[parts.length - 1];
 
-            var mi = window.movingItems && window.movingItems[window.playerItem];
-            var currentZ = mi ? mi.z : window.playerZ;
-
-            if (currentZ === window.playerWalk) {
-                if (window.playerDo) {
-                    if (window.gfxDo === "RF") window.gfxDo = "";
-                    window.gfxDo += window.playerDo; 
-                }
-                window.playerWalk = -1;
-                window.playerDo = "";
-                return;
-            }
-
-            var p = zToXY(currentZ);
-            var t = zToXY(window.playerWalk);
-            var dx = t.x - p.x;
-            var dy = t.y - p.y;
-            
-            var dirX = dx < 0 ? 'Vw' : (dx > 0 ? 'Ve' : null);
-            var dirY = dy < 0 ? 'Vn' : (dy > 0 ? 'Vs' : null);
-            
-            var primaryCmd = null, secondaryCmd = null;
-            if (Math.abs(dx) > Math.abs(dy)) {
-                primaryCmd = dirX; secondaryCmd = dirY;
-            } else {
-                primaryCmd = dirY; secondaryCmd = dirX;
-            }
-
-            var moveCmd = null;
-            var nextZPrimary = primaryCmd ? window.moveZ(currentZ, primaryCmd) : currentZ;
-            var nextZSecondary = secondaryCmd ? window.moveZ(currentZ, secondaryCmd) : currentZ;
-
-            if (primaryCmd && nextZPrimary !== currentZ && window.isWalkable(nextZPrimary)) {
-                moveCmd = primaryCmd;
-            } else if (secondaryCmd && nextZSecondary !== currentZ && window.isWalkable(nextZSecondary)) {
-                moveCmd = secondaryCmd;
-            }
-
-            if (moveCmd) {
-                if (window.gfxDo === "RF") window.gfxDo = "";
-                window.gfxDo += moveCmd;
-                beep(900, 25, 0.01);
-                if (!window.movingItems) window.movingItems = {};
-                if (!window.movingItems[window.playerItem]) {
-                    window.movingItems[window.playerItem] = { z: currentZ, queue: [], avatar: window.playerAvatar };
-                }
-                window.movingItems[window.playerItem].queue.push(moveCmd);
-                
-            } else {
-                window.playerWalk = -1;
-                window.playerDo = "";
+        let addScroll = (dirChar, label, dx, dy) => {
+            let nextSector = this.calculateTargetSector(currentSector, dirChar, this.gfxLowerBound, this.gfxRoundWorld);
+            if (nextSector) {
+                items.push({
+                    label: label,
+                    action: () => this.walkToZ(z, () => this.moveCursor(dx, dy))
+                });
             }
         };
 
-        window.isWalkable = function(z) {
-            if (z < 0 || z > 95) return false;
-            if (!window.mapTiles || !window.mapTiles[window.map]) return false;
-            
-            var code = window.mapTiles[window.map].substring(z * 2, z * 2 + 2);
-            var type = code.charAt(0);
+        if (y === 0) addScroll('N', 'Scroll North', 0, -1);
+        if (y === this.gridTall - 1) addScroll('S', 'Scroll South', 0, 1);
+        if (x === this.gridWide - 1) addScroll('E', 'Scroll East', 1, 0);
+        if (x === 0) addScroll('W', 'Scroll West', -1, 0);
 
-            if (type >= 'A' && type <= 'K') return true;
-
-            var inv = window.playerInven || window.playerInventory || ""; 
-            var has = function(item) { return inv.indexOf(item) !== -1; };
-            var master = has('Aa'); 
-
-            switch (type) {
-                case 'M': return master || has('Ae');              
-                case 'R': return master || has('Ab');              
-                case 'S': return master || has('Ad') || has('Ae'); 
-                case 'T': return master || has('Ac');              
-                default:  return false;                            
-            }
-        };
-
-        window.invdown = function(code) {
-            window.PopForce = "hidden";   
-            
-            let column = 0; 
-            let outputItems = "";
-            let wRegisters = {}; 
-            let wzValue = 0;
-            let items = ""; 
-
-            if (code) {
-                if (code.charAt(0) === '-') {
-                    let item = code.substring(1,3);
-                    items = code.substring(3);
-                    let desc = gfxItemID(item);
-                    let PUP = `<div align="center">`;
-                    PUP += `${desc}<p>`;
-                    PUP += `<img src="i/${item}.png" height="32" width="32"><p>`;
-                    PUP += `<a href="gfx:SDVd${item}">Drop</a> &nbsp `;
-                    PUP += `<a href="gfx:ID${playerItem}${playerZ}">Back</a>`;
-                    PUP += `</div>`;
-                    pop(PUP);
-                    return;
-                } else {
-                    items = code; 
+        if (window.playerItem !== "Za") {
+            items.push({
+                label: 'Walk Here',
+                action: () => {
+                    window.playerWalk = z;
+                    window.playerDo = null;
                 }
-                    
-                while (column < items.length) {
-                    let verb = items.substring(column, column + 2); 
-                    column += 2;
-                    
-                    if (verb < "Pa") {
-                        outputItems += `<a href="gfx:IN-${verb}${items}">`;
-                        outputItems += `<img src="i/${verb}.png" height="32" width="32" alt="${verb}"></a> &nbsp; `;
-                    } else {
-                        let valStr = items.substring(column, column + 2);
-                        column += 2;
-                        
-                        if (verb === "Wz") wzValue = parseInt(valStr, 10) || 0;
-                        if (verb.charAt(0) === "W") wRegisters[verb] = valStr;
-                    }
-                }
-            } else {
-                if (playerItem != "Za") {
-                    let zStr = (playerZ < 10 ? '0' : '') + playerZ;
-                    window.gfxDo += "ID" + playerItem.substring(0,2) + zStr + playerItem.substring(2);
-                    return;
-                }
-            }
-            
-            let greenW = Math.max(0, Math.min(100, wzValue));
-            let redW = 100 - greenW;
-            let output = `<div align="center"><img src="i/Zn.png" width="${greenW}px" height="6px"><img src="i/Zo.png" width="${redW}px" height="6px"></div><p>`;
-
-            if (outputItems !== "") output += outputItems + "<p>";
-
-            let outputStats = "";
-            let wKeys = Object.keys(wRegisters).sort();
-            for (let i = 0; i < wKeys.length; i++) {
-                let stat = wKeys[i];
-                let desc = typeof gfxItemID === "function" ? gfxItemID(stat) : stat;
-                outputStats += `${stat} ${wRegisters[stat]} ${desc}<br>`;
-            }
-
-            output += outputStats;
-            pop(output);  
+            });
         }
-
-        window.serverdown = function(code) {
-            window.PopForce = "hidden";   
-            hpop();
-
-            let column = 0; 
-            while (column < code.length) {
-                var verb = code.substring(column, column + 2); column += 2;
-            
-                if (verb === "Va") capflagAvatar("");
-
-                if (verb === "Vr") {
-                    let noun = code.substring(column, column + 2); column += 2;
-                    let zloc = code.substring(column, column + 2); column += 2;
-                    let numericZ = parseInt(zloc, 10);
-                    let targetObj = document.getElementById('obj_' + noun + '_' + numericZ);
-                    if (targetObj) { targetObj.remove(); }
-                }  
-
-                if (verb === "Vi") { 
-                    let nextDotDot = code.indexOf("..", column);
-                    if (nextDotDot < 0) {
-                        window.playerInven = code.substring(column, code.length);
-                        column = code.length;
-                    } else {
-                        window.playerInven = code.substring(column, nextDotDot);
-                        column = nextDotDot + 2;
-                    }
-                    invdown(playerInven);
-                }  
-            }
+        
+        if (items.length === 1) {
+            items[0].action();
             return;
         }
 
-        window.capflagAvatar = function(avatar) {
-            let hat="";
-            let body="";
-            
-            if (playerItem === "Sa") { body="D3"; hat="J0"; }
-            if (playerItem === "Sb") { body="D0"; hat="J1"; }
-
-            let PUP = "<p align=center>Select Face:<p align=center>";
-
-            if (body && hat) {
-                PUP += `<a href="gfx:SDVAB0${body}${hat}--"><img src="c/B0.png" height=32 width=32></a> &nbsp; `;
-                PUP += `<a href="gfx:SDVAB1${body}${hat}--"><img src="c/B1.png" height=32 width=32></a> &nbsp; `;
-                PUP += `<a href="gfx:SDVAB2${body}${hat}--"><img src="c/B2.png" height=32 width=32></a><br>`;
-                PUP += `<a href="gfx:SDVAB3${body}${hat}--"><img src="c/B3.png" height=32 width=32></a> &nbsp; `;
-                PUP += `<a href="gfx:SDVAB4${body}${hat}--"><img src="c/B4.png" height=32 width=32></a> &nbsp; `;
-                PUP += `<a href="gfx:SDVAB5${body}${hat}--"><img src="c/B5.png" height=32 width=32></a> &nbsp; `;
-                PUP += `<a href="gfx:SDVAB6${body}${hat}--"><img src="c/B6.png" height=32 width=32></a><p>`;
-
-                if (playerItem === "Sa") { body="H3";  }
-                if (playerItem === "Sb") { body="H0";  }
-                
-                PUP += `<p align=center>`;
-                PUP += `<a href="gfx:SDVA${avatar}F0H0I1--"><img src="c/F0.png" height=32 width=32></a> &nbsp; `;
-                PUP += `<a href="gfx:SDVA${avatar}F1H0I1--"><img src="c/F1.png" height=32 width=32></a> &nbsp; `;
-                PUP += `<a href="gfx:SDVA${avatar}F2H0I1--"><img src="c/F2.png" height=32 width=32></a><br>`;
-                PUP += `<a href="gfx:SDVA${avatar}F3H0I1--"><img src="c/F3.png" height=32 width=32></a> &nbsp; `;
-                PUP += `<a href="gfx:SDVA${avatar}F4H0I1--"><img src="c/F4.png" height=32 width=32></a> &nbsp; `;
-                PUP += `<a href="gfx:SDVA${avatar}F5H0I1--"><img src="c/F5.png" height=32 width=32></a> &nbsp; `;
-                PUP += `<a href="gfx:SDVA${avatar}F6H0I1--"><img src="c/F6.png" height=32 width=32></a><p>`;
-            } else {
-                PUP="<p align=center><font color=red>ERROR:</font><br>No Team Item Selected";
+        if (items.length > 0) {
+            let mockEvent = { clientX, clientY, view: window };
+            if (window.parent && window.parent.CylonPopManager) {
+                window.parent.CylonPopManager.showContextMenu(mockEvent, items);
+            } else if (window.CylonPopManager) {
+                window.CylonPopManager.showContextMenu(mockEvent, items);
             }
-            window.PopForce = "visible"; 
-            pop(PUP);
-            return;
-        }	
+        }
+    };
 
-        window.itemdown = function(code) {
-            window.PopForce = "hidden";   
-            hpop();
-            var itemid = code.substring(0, 2);
-            var itemzStr = code.substring(2, 4);
-            var itemz = parseInt(itemzStr, 10);
-            var uniqueid = code.length >= 8 ? code.substring(4, 8) : "";
-
-            if (itemid === "VA") return;
-
-            if (itemid >= 'Sa' && itemid <= 'Sd') {
-                if (playerItem === "Za") {
-                    if (window.gfxDo === "RF") window.gfxDo = "";
-                    window.gfxDo += "ID" + itemid + itemzStr;
-                    return;
+    window.gfxCollisionHook = function(z, item) {
+        let tile = document.getElementById(`gfx-tile-${z}`);
+        if (tile) {
+            let src = tile.src;
+            let codeMatch = src.match(/\/([a-zA-Z0-9]{2})\.png$/);
+            if (codeMatch) {
+                let code = codeMatch[1];
+                let t = code.charAt(0);
+                if (t >= 'A' && t <= 'K') return true;
+                
+                let inv = window.playerInven || "";
+                let has = (itm) => inv.indexOf(itm) !== -1;
+                let master = has('Aa');
+                switch (t) {
+                    case 'M': return master || has('Ae');
+                    case 'R': return master || has('Ab');
+                    case 'S': return master || has('Ad') || has('Ae');
+                    case 'T': return master || has('Ac');
+                    default: return false;
                 }
-                if (itemid+uniqueid === playerItem) { 
-                    invdown(""); 
+            }
+        }
+        return true;
+    };
+
+    // Client-side execution of server punch codes!
+    window.serverdown = function(sPlugs) {
+        let sCol = 0;
+        while (sCol < sPlugs.length) {
+            let verb = sPlugs.substring(sCol, sCol + 2); sCol += 2;
+            if (verb === "Va") {
+                window.capflagAvatar("");
+            } else if (verb === "Vr") {
+                sCol += 4; // visual removal natively handled by DOM sync
+            } else if (verb === "Vi") {
+                let nextDash = sPlugs.indexOf("--", sCol);
+                if (nextDash < 0) {
+                    window.playerInven = sPlugs.substring(sCol);
+                    sCol = sPlugs.length;
                 } else {
-                    if (window.gfxDo === "RF") window.gfxDo = "";
-                    window.gfxDo += "Xt" + uniqueid;      
-                }    	  
-                return;
-            }  
+                    window.playerInven = sPlugs.substring(sCol, nextDash);
+                    sCol = nextDash + 2;
+                }
+                window.renderInventory();
+            }
+        }
+    };
 
-            var localZ = (window.movingItems && window.movingItems[window.playerItem]) ? 
-                        window.movingItems[window.playerItem].z : window.playerZ;
+    // UI Avatar Pop
+    window.capflagAvatar = function(avatar) {
+        let hat = ""; let body = "";
+        if (window.playerItem === "Sa") { body = "D3"; hat = "J0"; }
+        if (window.playerItem === "Sb") { body = "D0"; hat = "J1"; }
 
-            if (localZ !== itemz)  {
-                window.playerWalk = itemz;
-                window.playerDo = "ID" + itemid + itemzStr;
+        if (body && hat) {
+            let PUP = `<div style="text-align:center; padding:10px;">
+                <div style="margin-bottom:10px; font-weight:bold;">Select Face:</div>
+                <a href="gfx:VAB0${body}${hat}--"><img src="c/B0.png" width=32 height=32 style="image-rendering:pixelated"></a> &nbsp; 
+                <a href="gfx:VAB1${body}${hat}--"><img src="c/B1.png" width=32 height=32 style="image-rendering:pixelated"></a> &nbsp; 
+                <a href="gfx:VAB2${body}${hat}--"><img src="c/B2.png" width=32 height=32 style="image-rendering:pixelated"></a><br>
+                <a href="gfx:VAB3${body}${hat}--"><img src="c/B3.png" width=32 height=32 style="image-rendering:pixelated"></a> &nbsp; 
+                <a href="gfx:VAB4${body}${hat}--"><img src="c/B4.png" width=32 height=32 style="image-rendering:pixelated"></a> &nbsp; 
+                <a href="gfx:VAB5${body}${hat}--"><img src="c/B5.png" width=32 height=32 style="image-rendering:pixelated"></a>
+                <div style="margin:10px 0; font-weight:bold;">Female:</div>
+                <a href="gfx:VA${avatar}F0H0I1--"><img src="c/F0.png" width=32 height=32 style="image-rendering:pixelated"></a> &nbsp; 
+                <a href="gfx:VA${avatar}F1H0I1--"><img src="c/F1.png" width=32 height=32 style="image-rendering:pixelated"></a> &nbsp; 
+                <a href="gfx:VA${avatar}F2H0I1--"><img src="c/F2.png" width=32 height=32 style="image-rendering:pixelated"></a><br>
+                <a href="gfx:VA${avatar}F3H0I1--"><img src="c/F3.png" width=32 height=32 style="image-rendering:pixelated"></a> &nbsp; 
+                <a href="gfx:VA${avatar}F4H0I1--"><img src="c/F4.png" width=32 height=32 style="image-rendering:pixelated"></a> &nbsp; 
+                <a href="gfx:VA${avatar}F5H0I1--"><img src="c/F5.png" width=32 height=32 style="image-rendering:pixelated"></a>
+            </div>`;
+            if (window.parent && window.parent.popHtm) window.parent.popHtm(PUP, 'center');
+            else if (window.popHtm) window.popHtm(PUP, 'center');
+        } else {
+            let PUP = `<div style="text-align:center; padding:15px; width:220px; font-family:var(--font-face, monospace);">
+                <h3 style="margin-top:0; color:var(--text-fg2, #ff0);">Capture the Flag</h3>
+                <p style="font-size:13px; color:var(--menu-fg, #aaa);">Click a team hat on the map to join!</p>
+            </div>`;
+            if (window.parent && window.parent.popHtm) window.parent.popHtm(PUP, 'center');
+            else if (window.popHtm) window.popHtm(PUP, 'center');
+        }
+    };
+
+    window.renderInventory = function() {
+        let items = window.playerInven;
+        let hud = document.getElementById('inventory-bar');
+        if (!hud) return;
+        
+        let html = ''; let col = 0;
+        window.wRegisters = {}; window.wzValue = 0;
+
+        while (col < items.length) {
+            let verb = items.substring(col, col + 2); col += 2;
+            if (verb < "Pa") {
+                html += `<div class="inv-item" onclick="handleInvClick('${verb}')"><img src="i/${verb}.png" width="32" height="32" title="${verb}"></div>`;
             } else {
-                if (window.gfxDo === "RF") window.gfxDo = "";
-                window.gfxDo += "ID" + itemid + itemzStr;
+                let valStr = items.substring(col, col + 2); col += 2;
+                if (verb === "Wz") window.wzValue = parseInt(valStr, 10) || 0;
+                if (verb.charAt(0) === "W") window.wRegisters[verb] = valStr;
             }
         }
-
-        window.objdown = function(code) {
-            hpop();
-            var itemid = code.substring(0, 2); 
-            var itemzStr = code.substring(2, 4);
-            var itemz = parseInt(itemzStr, 10); 
-
-            var cmd = "OD" + itemid + itemzStr;
-
-            if (itemid === "Xt") {
-                var uniqueid = code.length >= 8 ? code.substring(4, 8) : code.substring(4);
-                cmd = "Xt" + uniqueid;
-            }
-
-            var localZ = (window.movingItems && window.movingItems[window.playerItem]) ? 
-                        window.movingItems[window.playerItem].z : window.playerZ;
-
-            if (localZ === itemz) {
-                if (window.gfxDo === "RF") window.gfxDo = "";
-                window.gfxDo += cmd;
-                window.playerWalk = -1;
-                window.playerDo = "";
-            } else {
-                window.playerWalk = itemz;
-                window.playerDo = cmd;
-            }
+        
+        let greenW = Math.max(0, Math.min(100, window.wzValue));
+        html += `<div class="progress-container"><div class="progress-bar" style="width:${greenW}%;"></div></div>`;
+        html += `<div class="stat-block">`;
+        for(let reg in window.wRegisters) {
+            if (reg !== "Wz") html += `<div>${reg}: ${window.wRegisters[reg]}</div>`;
         }
+        html += `</div>`;
+        hud.innerHTML = html;
+    };
 
-        window.moveZ = function(z, cmd) {
-            z = parseInt(z, 10);
-            var cols = mapx + 1; 
-            var total = cols * (mapy + 1); 
-            var col = z % cols;
-            if (cmd === 'Vn' && z - cols >= 0) return z - cols;
-            if (cmd === 'Vs' && z + cols < total) return z + cols;
-            if (cmd === 'Vw' && col > 0) return z - 1;
-            if (cmd === 'Ve' && col < cols - 1) return z + 1;
-            return z; 
+    window.handleInvClick = function(item) {
+        let desc = typeof window.gfxItemID === 'function' ? window.gfxItemID(item) : item;
+        let PUP = `<div align="center" style="padding:10px;">
+            <strong>${desc}</strong><br><br>
+            <img src="i/${item}.png" height="32" width="32" style="image-rendering:pixelated;"><br><br>
+            <a href="gfx:Vd${item}" style="display:inline-block; margin-right:10px; padding:6px 12px; background:var(--sel-bg, #333); color:var(--sel-fg, #0f0); text-decoration:none; border-radius:3px; font-weight:bold;">Drop</a>
+            <a href="#" onclick="if(window.parent && window.parent.hpop) window.parent.hpop(); else if (window.hpop) window.hpop(); return false;" style="display:inline-block; padding:6px 12px; background:#111; color:#aaa; border:1px solid #333; text-decoration:none; border-radius:3px; font-weight:bold;">Back</a>
+        </div>`;
+        if (window.parent && window.parent.popHtm) window.parent.popHtm(PUP, 'center');
+        else if (window.popHtm) window.popHtm(PUP, 'center');
+    };
+
+    window.addEventListener('message', async (e) => {
+        if (e.data.type === 'gfx') {
+            let cmd = e.data.cmd;
+            if (cmd.startsWith("SD")) { cmd = cmd.substring(2); }
+            if (window.gfxDo === "RF") window.gfxDo = "";
+            window.gfxDo += cmd;
+            if (window.parent && window.parent.hpop) window.parent.hpop();
+            else if (window.hpop) window.hpop();
         }
+    });
 
-        window.reverseMoveZ = function(z, cmd) {
-            if (cmd === 'Vn') return window.moveZ(z, 'Vs');
-            if (cmd === 'Vs') return window.moveZ(z, 'Vn');
-            if (cmd === 'Vw') return window.moveZ(z, 'Ve');
-            if (cmd === 'Ve') return window.moveZ(z, 'Vw');
-            return z;
+    // ========================================================================
+    // STARTUP UI BOOTLOADER 
+    // Uses terminal macros to boot GFX engine cleanly 
+    // ========================================================================
+    
+    let ts = 5000;
+    let checkInit = () => {
+        if (!window.parent || !window.parent.CylonDOS || !window.CylonGFX) {
+            ts -= 200;
+            if (ts > 0) setTimeout(checkInit, 200);
+            return;
         }
+        startup();
+    };
 
-        window.keydown = function(key, e) {
-            hpop();
-            var keyStr = (typeof e === 'object' && e.key) ? e.key : key;
-            if (window.playerItem === "Za" || !window.playerItem) return;
+    let startup = async () => {
+        window.PopAlign = "center"; 
+        
+        let isLocal = window.location.origin.includes('localhost') || window.location.origin.includes('127.0.0.1');
+        let url = isLocal ? 'http://localhost:8080/qandyland.js' : 'https://qandy.onrender.com/qandyland.js';
+        let world = 'capflag';
 
-            if (key === 27) {
-                isLooking = false;
-                window.gfxDo = "RF";
-            }
-            
-            if (keyStr === "l" || keyStr === "L") {
-                if (window.gfxDo === "RF") window.gfxDo = "";
-                window.gfxDo += "Vl";
-            }
+        let PUP = `<div style="text-align:center; padding:15px; font-family:var(--font-face, monospace);">
+            <h3 style="margin-top:0; color:var(--text-fg2, #ff0);">Connecting...</h3>
+        </div>`;
+        if (window.parent && window.parent.popHtm) window.parent.popHtm(PUP, 'center');
+        else if (window.popHtm) window.popHtm(PUP, 'center');
 
-            if (window.gfxDo && window.gfxDo !== "RF") {
-                var isPureMove = true;
-                for (var i = 0; i < window.gfxDo.length; i += 2) {
-                    var chk = window.gfxDo.slice(i, i + 2);
-                    if (!['Vn', 'Vs', 'Ve', 'Vw'].includes(chk)) {
-                        isPureMove = false;
-                        break;
-                    }
-                }
-                if (!isPureMove) return; 
-            }
+        // Automatically issue the required Cylon OS Terminal commands to boot the world!
+        await CylonCommand(`mount ${url.replace('/qandyland.js', '')}/${world}.gfx ram ${world}`);
+        await CylonCommand(`gfx connect ${url} ${world}`);
+        
+        if (window.parent && window.parent.hpop) window.parent.hpop();
+        else if (window.hpop) window.hpop();
+    };
 
-            var testZ = window.playerZ;
-            if (window.movingItems && window.movingItems[window.playerItem]) {
-                var q = window.movingItems[window.playerItem].queue;
-                for (var qIdx = 0; qIdx < q.length; qIdx++) {
-                    var qCol = testZ % (mapx + 1);
-                    var qRow = Math.floor(testZ / (mapx + 1));
-                    if ((q[qIdx] === 'Vn' && qRow === 0) ||
-                        (q[qIdx] === 'Vs' && qRow === mapy) ||
-                        (q[qIdx] === 'Vw' && qCol === 0) ||
-                        (q[qIdx] === 'Ve' && qCol === mapx)) {
-                        return; 
-                    }
-                    testZ = window.moveZ(testZ, q[qIdx]);
-                }
-            }
+    setTimeout(checkInit, 400);
 
-            var todo = null;
-            switch (keyStr) {
-                case "ArrowUp":   case "w": case "W": todo = "Vn"; break;
-                case "ArrowDown": case "s": case "S": todo = "Vs"; break;
-                case "ArrowLeft": case "a": case "A": todo = "Vw"; break;
-                case "ArrowRight":case "d": case "D": todo = "Ve"; break;
-            }
-            
-            if (todo) {
-                var targetZ = window.moveZ(testZ, todo);
+    window.addEventListener('resize', fitDesktopToScreen);
+    if (window.ResizeObserver) {
+        new ResizeObserver(fitDesktopToScreen).observe(document.body);
+    }
+};
 
-                if (targetZ !== testZ && !window.isWalkable(targetZ)) {
-                    return; 
-                }
-
-                if (window.gfxDo === "RF") window.gfxDo = "";
-                window.gfxDo += todo;
-                
-                if (!window.movingItems) window.movingItems = {};
-                if (!window.movingItems[window.playerItem]) {
-                    window.movingItems[window.playerItem] = { z: window.playerZ, queue: [], avatar: window.playerAvatar };
-                }
-                window.movingItems[window.playerItem].queue.push(todo);
-            }
-        };
-    </script>
+function fitDesktopToScreen() {
+   if (!window.CylonGFX) return;
+   const wrapper = document.getElementById('desktop-wrapper');
+   const screenW = window.innerWidth;
+   const screenH = wrapper.clientHeight; 
+   const cols = window.CylonGFX.gridWide;
+   const rows = window.CylonGFX.gridTall;
+ 
+   if (!cols || !rows || screenW === 0 || screenH === 0) return;
+   let w, h;
+   if (window.CylonGFX.gfxGridStretch) {
+       const aspect = cols / rows;
+       w = screenW;
+       h = screenW / aspect;
+       if (h > screenH) { h = screenH; w = screenH * aspect; }
+       w = Math.floor(w * 0.98); h = Math.floor(h * 0.98); 
+   } else {
+       w = cols * window.CylonGFX.gfxTileSize; h = rows * window.CylonGFX.gfxTileSize;
+   }
+   wrapper.style.width = w + 'px';
+   wrapper.style.height = h + 'px';
+   wrapper.style.margin = '0 auto';
+}
+</script>
 </body>
 </html>

@@ -476,7 +476,17 @@ async function handleCylonCommand(line) {
               var dtPart = parts.filter(function(p) { return p.name === 'desktop' || p.name === 'cylon-desktop.gfx'; })[0];
 
               if (flags.uninstall) {
-                if (!cylonPart && !dtPart) {
+                var lsDesktopExists = false;
+                if (typeof localStorage !== 'undefined') {
+                    for (var i = 0; i < localStorage.length; i++) {
+                        if (localStorage.key(i).startsWith('cylon:desktop:')) {
+                            lsDesktopExists = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!cylonPart && !dtPart && !lsDesktopExists) {
                   return { handled: true, output: 'System is not installed.' };
                 }
 
@@ -491,9 +501,12 @@ async function handleCylonCommand(line) {
                     uncmds.push('fdisk delete ' + cylonPart.name + ' -y');
                 }
                 if (dtPart) {
-                    if (mnts.some(function(m) { return m.name === 'desktop'; })) uncmds.push('umount desktop');
+                    if (mnts.some(function(m) { return m.name === 'desktop' && m.type === 'idb'; })) uncmds.push('umount desktop');
                     uncmds.push('fdisk delete ' + dtPart.name + ' -y');
                 }            
+                if (lsDesktopExists) {
+                    if (mnts.some(function(m) { return m.name === 'desktop' && m.type === 'ls'; })) uncmds.push('umount desktop');
+                }
         
                 uncmds.push('echo Uninstallation sequence complete!');
                 uncmds.push('echo Please restart the system.');
@@ -504,6 +517,7 @@ async function handleCylonCommand(line) {
                     'To uninstall Cylon OS, the following commands will be executed:'
                   ];
                   for (var j = 0; j < uncmds.length; j++) unLines.push('  ' + uncmds[j]);
+                  if (lsDesktopExists) unLines.push('  (Wipe localStorage desktop drive)');
                   unLines.push('To proceed, run: uninstall -y');
                   return { handled: true, output: unLines.join('\n') };
                 }
@@ -512,6 +526,16 @@ async function handleCylonCommand(line) {
                   try {
                     for (var i = 0; i < uncmds.length; i++) {
                        if (await global.injectAndExecute(uncmds[i]) === false) throw new Error('step failed: ' + uncmds[i]);
+                    }
+                    if (lsDesktopExists && typeof localStorage !== 'undefined') {
+                        var keysToRemove = [];
+                        for (var k = 0; k < localStorage.length; k++) {
+                            if (localStorage.key(k).startsWith('cylon:desktop:')) {
+                                keysToRemove.push(localStorage.key(k));
+                            }
+                        }
+                        keysToRemove.forEach(function(k) { localStorage.removeItem(k); });
+                        global.injectAndExecute('echo localStorage desktop drive erased.');
                     }
                   } catch (e) {
                     global.injectAndExecute('echo Uninstall macro failed: ' + e.message + '');
@@ -561,7 +585,7 @@ async function handleCylonCommand(line) {
                   '',
                   'This installs Cylon OS to your browser\'s IndexedDB.',
                   'Desktop profile selected: ' + (args[0] || 'default (' + sourceGfx + ')'),
-                  'Estimated download size:  ' + payloadStr,
+                  'Estimated download size:  ' + (typeof payloadStr !== 'undefined' ? payloadStr : 'Unknown'),
                   'Storage quota required: ' + dos.formatSize(dos.constants.DEFAULT_QUOTA * 2) + ' (IndexedDB + LocalStorage)',
                   '',
                   'To proceed, run: install ' + profileStr + '-y',
@@ -809,7 +833,15 @@ async function handleCylonCommand(line) {
 
           result = await dos.exportDrive(targetDrive);
           
-          if (fileName) {
+          if (fileName === '<c>') {
+              if (!navigator.clipboard) return { handled: true, output: 'Error: [.4]Clipboard API not supported in this environment.[.]' };
+              try {
+                  await navigator.clipboard.writeText(result);
+                  return { handled: true, output: 'Drive exported to clipboard.' };
+              } catch (e) {
+                  return { handled: true, output: 'Error writing to clipboard: [.4]' + e.message + '[.]' };
+              }
+          } else if (fileName) {
             var blob = new Blob([result], { type: 'application/json' });
             var url = URL.createObjectURL(blob);
             var anchor = document.createElement('a');
@@ -822,11 +854,7 @@ async function handleCylonCommand(line) {
           return { handled: true, output: result };
 
         case 'import':
-          // 
-          // TO DO: Prevent import from overwriting idb without explicit permission. 
-          //        If import targets an idb drive, force it to require a -y flag
-          // 
-          if (!args[0]) return { handled: true, output: usage('import <file> [type] [drive]') };
+          if (!args[0]) return { handled: true, output: usage('import <file|<c>> [type] [drive]') };
           var fileArg = args[0];
           var typeArg = args[1];
           var driveArg = args[2];
@@ -853,7 +881,15 @@ async function handleCylonCommand(line) {
               return { handled: true, output: 'Error: [.4]Security Violation: .json files cannot be flashed to localStorage.[.]' };
           }
 
-          if (fileArg.charAt(0) !== '{') {
+          if (fileArg === '<c>') {
+              if (!navigator.clipboard) return { handled: true, output: 'Error: [.4]Clipboard API not supported in this environment.[.]' };
+              try {
+                  rawText = await navigator.clipboard.readText();
+                  if (!rawText) throw new Error("Clipboard is empty.");
+              } catch (e) {
+                  return { handled: true, output: 'Error reading clipboard: [.4]' + e.message + '[.]' };
+              }
+          } else if (fileArg.charAt(0) !== '{') {
             var isFile = false;
             try { isFile = await dos.exists(fileArg); } catch (e) {}
             

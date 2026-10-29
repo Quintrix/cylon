@@ -1,4 +1,3 @@
-
 //
 // ──── Qandyland Server v2 ────────────────────────────────────────────────────
 //
@@ -272,8 +271,6 @@ function displayStartupBanner(publicIP, registryStatus, serverId) {
   console.log('');
   console.log('[TIME    ] CLIENT          ACTION    DRIVE    FILE         SESSION  RESULT');
 }
-
-// ── JSON Archive Export / Import ──────────────────────────────────────────────
 
 // ── JSON Archive Export / Import ──────────────────────────────────────────────
 
@@ -1014,16 +1011,16 @@ function bigbang(driveName, session) {
   if (!drives[driveName]) return { success: false, error: 'drive not mounted: ' + driveName };
 
   // Load .gfx map file from the server's working directory
-  var gfxPath = path.join(process.cwd(), sysopGfx);
+  var gfxPath = path.join(process.cwd(), driveName);
   var raw;
   try {
     raw = fs.readFileSync(gfxPath, 'utf8');
   } catch (e) {
-    return { success: false, error: 'cannot read ' + sysopGfx + ': ' + (e.message || String(e)) };
+    return { success: false, error: 'cannot read ' + driveName + ': ' + (e.message || String(e)) };
   }
 
   // --- NEW: Load matching .qpc tapes file ---
-  var qpcPath = path.join(process.cwd(), sysopGfx.replace(/\.gfx$/i, '.qpc'));
+  var qpcPath = path.join(process.cwd(), driveName.replace(/\.gfx$/i, '.qpc'));
   var qpcTapes = {};
   try {
     if (fs.existsSync(qpcPath)) {
@@ -1103,7 +1100,7 @@ function bigbang(driveName, session) {
   }
 
   if (sectors.length === 0) {
-    return { success: false, error: sysopGfx + ' contains no valid world sectors' };
+    return { success: false, error: driveName + ' contains no valid world sectors' };
   }
 
   var created = [];
@@ -1339,6 +1336,14 @@ function calculateLineOfSight(driveName, centerSector) {
 }
 
 function plugboard(req, stacker, plugs, drive, session) {
+  
+  let gfxZBase = 10;
+  let zBaseLoad = fileLoad(drive, '/', 'a/gfxZBase', session);
+  if (zBaseLoad.success && zBaseLoad.content) {
+    let parsedBase = parseInt(zBaseLoad.content, 10);
+    if (!isNaN(parsedBase) && parsedBase >= 2 && parsedBase <= 36) gfxZBase = parsedBase;
+  }
+  
   let output = "";
   if (plugs != "RF") { 
     // console.log(plugs+" "+drive+" "+session);
@@ -1433,11 +1438,11 @@ function plugboard(req, stacker, plugs, drive, session) {
         
         if (player.item === 'Za') {
         	 if (objid.charAt(0) === 'S') {
-        	 	player.z = objz;
+        	 	player.z = parseInt(objz, gfxZBase) || 0;
         	 }
         }
 
-        let pZStr = (player.z < 10 ? '0' : '') + player.z;
+        let pZStr = player.z.toString(gfxZBase).toUpperCase().padStart(2, '0');
 
         let odSearchPattern = 'w/' + player.map + '/' + objid + pZStr + '??';
         let odFilesResponse = fileSearch(drive, odSearchPattern);
@@ -1622,7 +1627,7 @@ function plugboard(req, stacker, plugs, drive, session) {
 
         let pCSV = pCSVArr.join('~');
         let visibleSectorsStr = currentlyVisibleSectorsArr.join('');
-        let zStr = player.z < 10 ? "0" + player.z : String(player.z);
+        let zStr = player.z.toString(gfxZBase).toUpperCase().padStart(2, '0');
         
         output += "Vl" + player.map + zStr + pCSV + "|" + visibleSectorsStr + "|" + tsStr;
         break;
@@ -1737,8 +1742,9 @@ function plugboard(req, stacker, plugs, drive, session) {
         }
       });
     }
+    
     let numericZ = parseInt(player.z, 10) || 0;
-    let z = numericZ < 0 ? "00" : (numericZ < 10 ? "0" + numericZ : String(numericZ));
+    let z = numericZ < 0 ? "00" : numericZ.toString(gfxZBase).toUpperCase().padStart(2, '0');
 
     let pItemId = player.item ? player.item.substring(0, 2) : "Za";
     let pPubId = player.pubId ? player.pubId : "0000";
@@ -1779,6 +1785,12 @@ var server = http.createServer(function (req, res) {
       command = bodyText;
       drive   = reqUrl.searchParams.get('d');
       session = getSession(req);
+    }
+
+    if (command === 'SYS:DRIVES') {
+        var driveNames = Object.keys(drives).filter(n => n.endsWith('.gfx'));
+        res.writeHead(200, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' });
+        return res.end(driveNames.join(','));
     }
 
     if (session && playerIndex.has(session)) {
@@ -2320,7 +2332,7 @@ if (process.stdin.isTTY) {
 
 function _proceedWithStartup() {
 
-  var driveList = ['queville.gfx', 'capflag.gfx', 'cylon.gfx']; // HARDCODED: Add all desired initial drive names here.
+  var driveList = ['queville.gfx', 'capflag.gfx', 'cylon.gfx']; 
   
   for (var i = 0; i < driveList.length; i++) {
     var dn = normName(driveList[i]);
@@ -2331,30 +2343,38 @@ function _proceedWithStartup() {
         continue;
       }
       
-      drives[dn] = {
-        storage:     new Map(),     // Map<key, value> for O(1) access
-        manifestMap: new Map(), // Initialize empty manifest map
-        owner:       'console', // Default owner for drives from config
-        created:     timestamp(),
-        fileCount:   0,
-        totalSize:   0
-      };
+      var filepath = path.join(process.cwd(), dn);
+      if (!fs.existsSync(filepath)) {
+          console.warn(`  Warning: File ${dn} not found on disk.`);
+          continue;
+      }
 
-      // Load initial manifest from storage IF IT EXISTS AND IS NOT EMPTY.
-      // This is crucial for pre-existing drive data from a config (like capflag.gfx)
-      // that might have been loaded from a previous run or a fixed file.
-      // If there's no persistence, the initial _dir.sys! will be empty.
-      var initialManifestText = _storageGet(drives[dn].storage, MANIFEST_KEY);
-      var initialEntries = _parseManifestText(initialManifestText);
-      _saveManifest(dn, initialEntries); // Populates manifestMap & updates _dir.sys! (debounced)
+      var raw = fs.readFileSync(filepath, 'utf8');
 
-      if (dn.endsWith('.gfx')) {
-        console.log(`\n  Initiating Big Bang for world drive '${dn}' using file '${sysopGfx}'...`);
-        var initResult = bigbang(dn, 'system'); // 'system' session for bigbang operation
+      if (raw.trim().startsWith('{')) {
+        console.log(`\n  Importing JSON drive '${dn}'...`);
+        var impRes = importDrive(dn, dn, 'system');
+        if (impRes.success) console.log(`  ✓ JSON World '${dn}' imported.\n`);
+        else console.error(`  ✗ Failed to import '${dn}': ${impRes.error}`);
+      } else {
+        console.log(`\n  Initiating Big Bang for legacy world drive '${dn}'...`);
+        drives[dn] = {
+          storage:     new Map(),
+          manifestMap: new Map(), 
+          owner:       'console', 
+          created:     timestamp(),
+          fileCount:   0,
+          totalSize:   0
+        };
+        var initialManifestText = _storageGet(drives[dn].storage, MANIFEST_KEY);
+        var initialEntries = _parseManifestText(initialManifestText);
+        _saveManifest(dn, initialEntries); 
+        
+        var initResult = bigbang(dn, 'system'); 
         if (initResult.success) {
-          console.log(`  \u2713 World '${dn}' initialized.\n`);
+          console.log(`  ✓ World '${dn}' initialized.\n`);
         } else {
-          console.error(`  \u2717 Failed to initialize world '${dn}': ${initResult.error}`);
+          console.error(`  ✗ Failed to initialize world '${dn}': ${initResult.error}`);
         }
       }
     }

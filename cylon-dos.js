@@ -716,6 +716,13 @@
     if (kind === 'ls' && (restLower.endsWith('.json') || intendedName === 'cylon')) {
         fail('Security Violation: .json files (and the cylon OS drive) cannot be mounted to localStorage.[.]');
     }
+    if (kind === 'ls' && intendedName === 'desktop') {
+        var partsCheck = await partitions();
+        var isInstalled = partsCheck.some(function(p) { return p.name === 'cylon' || p.name === 'cylon.json'; });
+        if (!isInstalled) {
+            fail('Security Violation: Cannot mount desktop to localStorage unless Cylon OS is installed.[.]');
+        }
+    }
     // ----------------------------------------
 
     var m;

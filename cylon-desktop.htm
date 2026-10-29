@@ -5,7 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Cylon Desktop</title>
 <script src="cylon-sdk.js"></script>
-<script src="qandyland-univac.js"></script>
 <script src="cylon-gfx-itemid.js"></script>
 <script src="cylon-gfx.js"></script>
 <style>
@@ -19,7 +18,7 @@ body, html {
     color: var(--fg-color, #0f0);
     font-family: var(--font-face, monospace);
     display: flex;
-    align-items: flex-start; /* FIX: Aligns the grid to the top of the iframe so the bottom doesn't slide under the OS clipping mask */
+    align-items: flex-start;
     justify-content: center;
     overflow: hidden;
     user-select: none;
@@ -32,7 +31,7 @@ body, html {
    border: 2px solid var(--sel-bg, #333);
    box-shadow: 0px 10px 30px rgba(0, 0, 0, 0.8);
    overflow: hidden;
-   box-sizing: border-box; /* FIX: Forces the 2px border to render inside the calculated Javascript height rather than adding to it */
+   box-sizing: border-box; 
 }
  
 #bg-canvas {
@@ -118,79 +117,151 @@ body, html {
    <div id="icons-layer"></div>
 </div>
 <script>
-window.onload = async function() {
-if (window.CylonSDK && window.CylonSDK.injectDesktopStyles) {
-window.CylonSDK.injectDesktopStyles();
-}
- 
-if (!window.CylonCommand || !window.qdosLoad) {
-document.body.innerHTML = "<h3 style='padding:20px;'>Error: Cylon OS not fully connected.</h3>";
-return;
-}
- 
-window.keydown = function(key, e) {
-   if (!window.CylonGFX) return;
+// ============================================================================
+// LOCAL DESKTOP CLIENT
+// The desktop is a local, editable RAM drive.
+// CylonGFX supplies the renderer, local cursor, and file-based desktop actions.
+// ============================================================================
 
-   // Check if a context menu is open in the parent OS and route keys to it
-   if (window.parent && window.parent.CylonPopManager && window.parent.CylonPopManager.isMenuOpen) {
-       if (window.parent.CylonPopManager.handleMenuKey(key)) {
-           if (e) e.preventDefault();
-           return;
-       }
-   }
-   
-   // Interrupt auto-walking if user takes manual control
-   window.CylonGFX.targetCursorZ = -1;
-   window.CylonGFX.pendingCursorAction = null;
- 
-   let handled = false;
-   if (key === 'ArrowUp')    { window.CylonGFX.moveCursor(0, -1); handled = true; }
-   if (key === 'ArrowDown')  { window.CylonGFX.moveCursor(0, 1); handled = true; }
-   if (key === 'ArrowLeft')  { window.CylonGFX.moveCursor(-1, 0); handled = true; }
-   if (key === 'ArrowRight') { window.CylonGFX.moveCursor(1, 0); handled = true; }
-   if (key === 'Enter')      { window.CylonGFX.executeCursor(); handled = true; }
-   
-   if (handled && e) {
-       e.preventDefault(); // Prevent iframe from scrolling
-   }
+window.onload = async function() {
+    if (window.CylonSDK && window.CylonSDK.injectDesktopStyles) {
+        window.CylonSDK.applyColors(window.parent.CylonColors);
+    }
+
+    if (!window.CylonCommand || !window.CylonGFX) {
+        document.body.innerHTML = "<h3 style='padding:20px;'>Error: Cylon OS or CylonGFX is not available.</h3>";
+        return;
+    }
+
+    // Set Identity properties for the local desktop
+    window.desktopDrive = 'desktop';
+    window.playerItem = 'Si'; // System cursor icon
+    window.gfxDo = 'RF';
+    
+    // Enable point-and-click functionality rather than pathing/walking
+    window.CylonGFX.clickMovesCursor = true;
+    window.CylonGFX.enableFileMove = true;
+
+    // ------------------------------------------------------------------------
+    // OVERRIDE: TARGET MENU
+    // Disables "Walk Here" and "Scroll", providing instant execution instead.
+    // ------------------------------------------------------------------------
+    window.CylonGFX.showTargetMenu = function(z, clientX, clientY) {
+        if (!window.parent || !window.parent.CylonPopManager || typeof window.parent.CylonPopManager.showContextMenu !== 'function') return;
+
+        let items = [];
+        let iconWraps = document.querySelectorAll(`.icon-wrap[data-z="${z}"]`);
+        
+        iconWraps.forEach(wrap => {
+            let labelText = wrap.getAttribute('data-label');
+            let fullPath = wrap.getAttribute('data-path');
+            if (labelText && fullPath) {
+                items.push({ label: 'Open ' + labelText, action: () => this.executeScript(fullPath) });
+                if (this.enableFileMove) {
+                    items.push({ label: 'Move ' + labelText, action: () => {
+                        this.pendingMovePath = fullPath;
+                        if (window.parent && window.parent.print) window.parent.print('Select a destination tile to drop this file.\n');
+                    }});
+                }
+                items.push({ label: 'Remove ' + labelText, action: () => this.removeScript(fullPath) });
+            }
+        });
+
+        // Only pop a context menu if there is something under the cursor to interact with
+        if (items.length > 0) {
+            let mockEvent = { clientX, clientY, view: window };
+            window.parent.CylonPopManager.showContextMenu(mockEvent, items);
+        }
+    };
+
+    // ------------------------------------------------------------------------
+    // OVERRIDE: EXECUTE CURSOR (Keyboard Enter)
+    // Ensures users can drop a pending "Moved" file by pressing Enter
+    // ------------------------------------------------------------------------
+    const origExecuteCursor = window.CylonGFX.executeCursor.bind(window.CylonGFX);
+    window.CylonGFX.executeCursor = function() {
+        if (this.enableFileMove && this.pendingMovePath) {
+            const pendingPath = this.pendingMovePath;
+            this.pendingMovePath = null;
+            let z = window.playerZ;
+            
+            this.moveObjectToZ(pendingPath, z).then(() => {
+                let x = z % this.gridWide;
+                let y = Math.floor(z / this.gridWide);
+                const wrapper = document.getElementById('desktop-wrapper');
+                let rect = wrapper.getBoundingClientRect();
+                let clientX = rect.left + (x + 0.5) * (rect.width / this.gridWide);
+                let clientY = rect.top + (y + 0.5) * (rect.height / this.gridTall);
+                this.showTargetMenu(z, clientX, clientY);
+            });
+            return;
+        }
+        origExecuteCursor();
+    };
+
+    // ------------------------------------------------------------------------
+    // NATIVE KEYBOARD HANDLING
+    // Move the cursor fluidly, no step logic, block native mainframe collisions
+    // ------------------------------------------------------------------------
+    window.keydown = function(key, e) {
+        const gfx = window.CylonGFX;
+        if (!gfx) return;
+        
+        // Pass keyboard actions to the popup menu if it's currently focused
+        if (window.parent && window.parent.CylonPopManager && window.parent.CylonPopManager.isMenuOpen) {
+            if (window.parent.CylonPopManager.handleMenuKey(key)) {
+                if (e) e.preventDefault();
+                return;
+            }
+        }
+        
+        let dx = 0, dy = 0;
+        if (key === 'ArrowUp' || key === 'w' || key === 'W') dy = -1;
+        else if (key === 'ArrowDown' || key === 's' || key === 'S') dy = 1;
+        else if (key === 'ArrowLeft' || key === 'a' || key === 'A') dx = -1;
+        else if (key === 'ArrowRight' || key === 'd' || key === 'D') dx = 1;
+        else if (key === 'Enter') { 
+            gfx.executeCursor(); 
+            if (e) e.preventDefault(); 
+            return; 
+        }
+        else return;
+        
+        gfx.moveCursor(dx, dy);
+        if (e) e.preventDefault();
+    };
+
+    // ------------------------------------------------------------------------
+    // BOOT SEQUENCE
+    // ------------------------------------------------------------------------
+    const isLocal = window.location.origin.includes('localhost') || window.location.origin.includes('127.0.0.1');
+
+    //const url = isLocal ? 'http://localhost:8080/qandyland.js' : 'https://qandy.onrender.com/qandyland.js';
+    const url = 'http://localhost:8080/qandyland.js';
+    
+    const baseUrl = url.replace('/qandyland.js', '');
+
+    try {
+        // 1. Mount the remote desktop graphics package into RAM
+        await CylonCommand(`mount ${baseUrl}/cylon-desktop.gfx ram desktop`);
+        
+        // 2. Set tick rate to 0 so we don't continuously poll the server (single user mode)
+        await CylonCommand('save desktop:/a/gfxTickRate 0');
+        
+        // 3. Connect to server to register session, apply map, and complete one-time sync
+        await CylonCommand(`gfx connect ${url} desktop`);
+    } catch (err) {
+        console.error('Cylon Desktop startup failed:', err);
+        if (window.parent && window.parent.print) {
+            window.parent.print(`[.4]Cylon Desktop startup failed: ${String(err.message || err)}[.]\n`);
+        }
+    }
+
+    // Connect Screen Scaling Observer
+    window.addEventListener('resize', fitDesktopToScreen);
+    if (window.ResizeObserver) new ResizeObserver(fitDesktopToScreen).observe(document.body);
 };
  
-// ====================================================================
-// OS BOOT SCRIPT - Transparent terminal logic driven by iferror
-// ====================================================================
- 
-await window.CylonCommand(`desktop:`);
-await window.CylonCommand(`iferror mount desktop ls`);
-await window.CylonCommand(`cd desktop:/a`);
-await window.CylonCommand(`iferror import cylon-desktop.gfx ls desktop`);
-await window.CylonCommand(`cylon:`);
-await window.CylonCommand(`iferror ram:`);
- 
-// Initialize the Graphics Engine on the desktop root sector
-if (window.CylonGFX) {
-   let startSector = 'Aa';
-   try {
-       let loaded = await window.qdosLoad('desktop:/a/gfxSector');
-       if (loaded) {
-           let s = loaded.trim();
-           if (s.length === 2) startSector = s;
-       }
-   } catch(e) {}
-   
-   await window.CylonGFX.init('desktop:/w/' + startSector);
-} else {
-   console.error("CylonGFX Engine missing!");
-}
- 
-// Keep it scaled properly if screen orientation/size changes
-window.addEventListener('resize', fitDesktopToScreen);
- 
-if (window.ResizeObserver) {
-new ResizeObserver(fitDesktopToScreen).observe(document.body);
-}
-};
- 
-// Calculate container sizing logically scaling or adhering to static tiles
 function fitDesktopToScreen() {
    if (!window.CylonGFX) return;
  
@@ -201,28 +272,23 @@ function fitDesktopToScreen() {
    const cols = window.CylonGFX.gridWide;
    const rows = window.CylonGFX.gridTall;
  
-   // Failsafe: Avoid applying sizing calculations if DOM/iframe geometry isn't ready
    if (!cols || !rows || screenW === 0 || screenH === 0) return;
  
    let w, h;
  
-   // Utilize the stretching parameter properly
    if (window.CylonGFX.gfxGridStretch) {
        const aspect = cols / rows;
        w = screenW;
        h = screenW / aspect;
  
-       // If the calculated height exceeds the window, constrain by height instead
        if (h > screenH) {
            h = screenH;
            w = screenH * aspect;
        }
  
-       // 98% allows a slight visual border clearance on the edges
        w = Math.floor(w * 0.98);
        h = Math.floor(h * 0.98); 
    } else {
-       // Strictly adhere to TileSize without stretching
        w = cols * window.CylonGFX.gfxTileSize;
        h = rows * window.CylonGFX.gfxTileSize;
    }
@@ -230,8 +296,6 @@ function fitDesktopToScreen() {
    wrapper.style.width = w + 'px';
    wrapper.style.height = h + 'px';
 }
- 
 </script>
- 
 </body>
 </html>

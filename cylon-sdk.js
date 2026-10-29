@@ -30,15 +30,6 @@ window.hpop = function() {
     }
 };
 
-// disable by security 
-// 2. File System (Routes to CylonDOS)
-// window.qdosLoad = async function(filename) {
-//     if (window.parent && window.parent.CylonDOS) {
-//         return await window.parent.CylonDOS.load(filename);
-//     }
-//     throw new Error("CylonDOS not available");
-// };
-
 // 3. Hardware / System Utilities
 window.dosExit = function() {
     if (window.parent && typeof window.parent.showTerminal === 'function') {
@@ -96,11 +87,6 @@ window.CylonScript = async function(scriptText) {
     return true;
 };
 
-// disabled by security
-// Backwards compatibility alias for older applications
-// window.qdosScript = async function(scriptText) { 
-//     return await window.CylonScript(scriptText);
-// };
 
 // ========================================================================
 // 1. INPUT INTERCEPTION (Keyboard & Textarea handling)
@@ -196,10 +182,10 @@ window.addEventListener('message', (e) => {
     if (e.source !== window && e.source !== window.parent) return;
     // ------------------------------------------------------
 
-    // NEW: Catch virtual keystrokes forwarded from the parent OS
+    // Catch virtual keystrokes forwarded from the parent OS
     if (e.data.type === 'QANDY_VKEY') {
         if (typeof window.keydown === 'function') {
-            window.keydown(e.data.key, null); // Pass null for event as it's virtual
+            window.keydown(e.data.key, null); 
         }
     } 
     if (e.data.type === 'QANDY_UPDATE_INPUT' || e.data.type === 'QANDY_COMMIT_INPUT') {
@@ -224,7 +210,7 @@ window.addEventListener('message', (e) => {
 // ========================================================================
 
 window.CylonSDK = window.CylonSDK || {};
-window.CylonSDK.apps = {}; // Global app registry for popups
+window.CylonSDK.apps = {}; 
 
 /**
  * Sync CSS Variables from the Parent OS
@@ -416,7 +402,10 @@ window.CylonSDK.showAppPopup = function(item) {
 
     if (typeof window.parent.popHtm === 'function') {
         if (window.parent.PopAlign !== undefined) window.parent.PopAlign = "click";
-        if (item.zLocation) window.parent.lastClickedZ = parseInt(item.zLocation, 16); 
+        if (item.zLocation) {
+            let zBase = (window.parent.CylonGFX && window.parent.CylonGFX.gfxZBase) ? window.parent.CylonGFX.gfxZBase : 10;
+            window.parent.lastClickedZ = parseInt(item.zLocation, zBase); 
+        }
         window.parent.popHtm(html);
     } else if (typeof popHtm === 'function') {
         popHtm(html);

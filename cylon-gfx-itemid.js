@@ -305,13 +305,7 @@ window.gfxItemID = function(i) {
         "Aw": "Theme",
         "Ax": "Calc",
         "Ay": "Box Cursor",
-        "Az": "Trash",
-        
-        "Bq': "Book",
-        "Br': "Page",
-        "Bs': "Page"
-        
-        
+        "Az": "Trash"        
 
     };
 
