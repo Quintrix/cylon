@@ -246,7 +246,7 @@ window.onload = async function() {
         await CylonCommand(`mount ${baseUrl}/cylon-desktop.gfx ram desktop`);
         
         // 2. Set tick rate to 0 so we don't continuously poll the server (single user mode)
-        await CylonCommand('save desktop:/a/gfxTickRate 0');
+        // await CylonCommand('save desktop:/a/gfxTickRate 0');
         
         // 3. Connect to server to register session, apply map, and complete one-time sync
         await CylonCommand(`gfx connect ${url} desktop`);

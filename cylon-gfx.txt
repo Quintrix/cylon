@@ -72,6 +72,8 @@ gfxGridStretch if true, stretch grid to fill full screen
                leaving a terminal record of each command and it's output for the developer.
       gfxCycle speed player moves from tile to tile   
      gfxSector current map sector being rendered
+   gfxRickRate How often client pings the server, 0 = single player, capflag = 1 second
+        
 
 
 

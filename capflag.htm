@@ -2,9 +2,8 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Capture the Flag 2029</title>
+<title>Capture the Flag</title>
 <script src="cylon-sdk.js"></script>
-<script src="qandyland-univac.js"></script>
 <script src="cylon-gfx-itemid.js"></script>
 <script src="cylon-gfx.js"></script>
 <style>
@@ -39,217 +38,12 @@
 
 <script>
 // ============================================================================
-// LOCAL OFFLINE FILESYSTEM & UNIVAC EMULATOR
-// ============================================================================
-window.GfxSyncFS = {
-    getPrefix: function(driveName) { return 'cylon:' + driveName + ':'; },
-    fileLoad: function(driveName, root, filepath, session) {
-        let key = this.getPrefix(driveName) + filepath;
-        let raw = window.localStorage.getItem(key);
-        if (!raw) return { success: false };
-        try { let entry = JSON.parse(raw); return { success: true, content: entry.content }; } catch(e) { return { success: false }; }
-    },
-    fileSave: function(driveName, root, filepath, content, session1, session2, timestamp) {
-        let key = this.getPrefix(driveName) + filepath;
-        let entry = { path: filepath, type: 'file', content: String(content), size: String(content).length, timestamp: timestamp || new Date().toISOString(), readOnly: false };
-        try { window.localStorage.setItem(key, JSON.stringify(entry)); return { success: true }; } catch(e) { return { success: false, error: "localStorage full" }; }
-    },
-    fileDelete: function(driveName, root, filepath, session) { window.localStorage.removeItem(this.getPrefix(driveName) + filepath); return { success: true }; },
-    fileSearch: function(driveName, pattern) {
-        let prefix = this.getPrefix(driveName);
-        let results = [];
-        let regexStr = '^' + pattern.replace(/\*/g, '.*').replace(/\?/g, '.') + '$';
-        let regex = new RegExp(regexStr);
-        for (let i = 0; i < window.localStorage.length; i++) {
-            let key = window.localStorage.key(i);
-            if (key.startsWith(prefix)) {
-                let path = key.substring(prefix.length);
-                let basename = path.split('/').pop();
-                if (regex.test(path) || regex.test(basename)) {
-                    let raw = window.localStorage.getItem(key);
-                    let size = 0, timestamp = '';
-                    try { let e = JSON.parse(raw); size = e.size || 0; timestamp = e.timestamp || ''; } catch(e) {}
-                    results.push({ name: path, size: size, timestamp: timestamp });
-                }
-            }
-        }
-        return { success: true, results: results };
-    },
-    fileList: function(driveName, directory, ignored, session) {
-        let dirPath = directory.endsWith('/') ? directory : directory + '/';
-        let prefix = this.getPrefix(driveName) + dirPath;
-        let files = [];
-        for (let i = 0; i < window.localStorage.length; i++) {
-            let key = window.localStorage.key(i);
-            if (key.startsWith(prefix)) {
-                let filename = key.substring(prefix.length).replace(/^\//, '');
-                if (filename.indexOf('/') === -1) files.push(filename);
-            }
-        }
-        return { success: true, listing: files.join(' ') };
-    }
-};
-
-window.localPlayerIndex = new Map();
-window.register = {};
-
-window.localPlugboard = function(plugs, drive, session) {
-    let output = "";
-    let player = window.localPlayerIndex.get(session);
-    if (!player) player = { drive: drive, fullPath: null, map: "Aa", z: 0, item: "", avatar: "", pubId: "" };
-
-    // Fetch Z-Base config
-    let zBase = 10;
-    let aZBaseLoad = window.GfxSyncFS.fileLoad(drive, '/', 'a/gfxZBase', session);
-    if (aZBaseLoad && aZBaseLoad.success && aZBaseLoad.content) {
-        zBase = parseInt(aZBaseLoad.content, 10) || 10;
-    }
-
-    function runtape(code) {
-        if (code && typeof window.UNIVAC === 'function') {
-            let uResult = window.UNIVAC(drive, player.fullPath, "RAM:" + code, session);
-            if (uResult) {
-                player.map = uResult.sector; player.z = uResult.z; player.avatar = uResult.avatar;
-                if (uResult.playerid) player.pubId = uResult.playerid;
-                if (uResult.item) player.item = uResult.item + player.pubId;
-                player.fullPath = uResult.fullPath; output += uResult.output;
-            }
-        }
-    }
-    
-    function runfile(filepath) {
-        if (typeof window.UNIVAC === 'function') {
-            let uResult = window.UNIVAC(drive, player.fullPath, filepath, session);
-            if (uResult) {
-                player.map = uResult.sector; player.z = uResult.z; player.avatar = uResult.avatar;
-                if (uResult.playerid) player.pubId = uResult.playerid;
-                if (uResult.item) player.item = uResult.item + player.pubId;
-                player.fullPath = uResult.fullPath; output += uResult.output;
-            }
-        }
-    }
-
-    runfile('w/b'); // Before script
-    let refresh = true; let column = 0; let tape = "";
-
-    while (column < plugs.length) {
-        let code = plugs.slice(column, column + 2);
-        column += 2; 
-        switch (code) {
-            case 'Vn': case 'Vs': case 'Ve': case 'Vw':
-                if (player.item) tape += code; break;
-            case 'Vd': 
-                if (player.item) tape += code + plugs.slice(column, column + 2); 
-                column += 2; break;
-            case 'OD':
-                if (tape) { runtape(tape); tape = ""; }
-                let objid = plugs.slice(column, column + 2);
-                let objz  = plugs.slice(column + 2, column + 4);
-                column += 4;
-                if (player.item === 'Za' && objid.charAt(0) === 'S') player.z = parseInt(objz, zBase) || 0;
-                let pZStr = player.z.toString(zBase).padStart(2, '0');
-                let odSearch = 'w/' + player.map + '/' + objid + pZStr + '??';
-                let odFiles = window.GfxSyncFS.fileSearch(drive, odSearch);
-                let objfile = null;
-                if (odFiles.success && odFiles.results.length > 0) {
-                    for (let r of odFiles.results) {
-                        let base = r.name.split('/').pop();
-                        if (base.length === 6) { objfile = r.name; break; }
-                    }
-                }
-                if (objfile) runfile(objfile);
-                break;
-            case 'ID':
-                if (tape) { runtape(tape); tape = ""; }
-                let itemId = plugs.slice(column, column + 2);
-                let itemZ  = plugs.slice(column + 2, column + 4);
-                column += 4;
-                
-                let idSearch = 'w/' + player.map + '/' + itemId + '*';
-                let idFiles = window.GfxSyncFS.fileSearch(drive, idSearch);
-                if (idFiles.success && idFiles.results.length > 0) {
-                    for (let r of idFiles.results) {
-                        let base = r.name.split('/').pop();
-                        if (base.substring(2, 4) === itemZ) {
-                            let pubId = base.length >= 8 ? base.substring(4, 8) : "";
-                            let fullId = pubId ? itemId + pubId : itemId;
-                            
-                            if (itemId === 'Zj') { runfile('w/f'); break; } 
-                            if (fullId === player.item) {
-                                let invLoad = window.GfxSyncFS.fileLoad(drive, '/', player.fullPath, session);
-                                output += "S^Vi" + (invLoad.success ? invLoad.content : '') + "^S";
-                                break;
-                            }
-
-                            // Ghost takes ownership of player items (Sa-Sl)
-                            if (itemId >= 'Sa' && itemId <= 'Sl' && player.item.startsWith('Za')) {
-                                let newBase = itemId + itemZ + player.pubId;
-                                window.GfxSyncFS.fileSave(drive, '/', 'w/' + player.map + '/' + newBase, "");
-                                window.GfxSyncFS.fileDelete(drive, '/', r.name);
-                                player.item = itemId + player.pubId;
-                                player.z = parseInt(itemZ, zBase) || 0;
-                                break;
-                            }
-
-                            if (itemId >= 'Aa' && itemId < 'Qa') tape += 'XnVd' + itemId;
-                            break;
-                        }
-                    }
-                }
-                break;
-            case 'ST':
-                if (tape) { runtape(tape); tape = ""; }
-                if (!window.localPlayerIndex.has(session)) {
-                    let chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-                    let pubId = '';
-                    for (let i = 0; i < 4; i++) pubId += chars.charAt(Math.floor(Math.random() * chars.length));
-                    player = { drive, fullPath: null, map: "Aa", item: "", z: 0, avatar: "", pubId };
-                    window.localPlayerIndex.set(session, player);
-                    runtape("XaZa"); // Spawn Ghost slot
-                    player.item = 'Za';
-                    output += "ST" + session;
-                    refresh = false;
-                }
-                column = plugs.length;
-                break;
-            default: tape += code; break;
-        }
-    }
-
-    if (tape) runtape(tape);
-    runfile('w/c'); // After script
-    window.localPlayerIndex.set(session, player);
-
-    if (refresh) {
-        let list = window.GfxSyncFS.fileList(drive, 'w/' + player.map, null, session);
-        let items = [];
-        if (list.success && list.listing) {
-            let files = list.listing.split(' ');
-            files.sort(); // Lock sorting down to prevent flapping ticks
-            files.forEach(f => {
-                if (f.length !== 6 || f.charAt(0) === 'V' || f.charAt(0) === 'X') items.push(f); 
-            });
-        }
-        let numericZ = parseInt(player.z, 10) || 0;
-        let z = numericZ < 0 ? "00" : numericZ.toString(zBase).padStart(2, '0');
-        let pItemId = player.item ? player.item.substring(0, 2) : "Za";
-        let pPubId = (player.pubId || "0000").padEnd(4, '0');
-        
-        output = "PI" + pItemId + z + pPubId + output;
-        output += "RF" + player.map + z + items.join('~');
-    }
-    return output;
-};
-
-
-// ============================================================================
 // CAPTURE THE FLAG CLIENT ENGINE
 // ============================================================================
 window.onload = async function() {
     if (window.CylonSDK && window.CylonSDK.injectDesktopStyles) {
         window.CylonSDK.applyColors(window.parent.CylonColors);
     }
-    if (typeof window.UNIVAC !== 'undefined') window.UNIVAC.inject(window.GfxSyncFS);
 
     // Initial Engine State
     window.gfxDo = "ST";
@@ -259,161 +53,11 @@ window.onload = async function() {
     window.wzValue = 0;
 
     // Route CylonGFX cursor movements through the UNIVAC punch code pipeline
-    window.CylonGFX.moveCursor = function(dx, dy) {
-        let cmd = null;
-        if (dy < 0) cmd = 'Vn';
-        else if (dy > 0) cmd = 'Vs';
-        else if (dx < 0) cmd = 'Vw';
-        else if (dx > 0) cmd = 'Ve';
-        
-        if (cmd) {
-            if (window.gfxDo === "RF") window.gfxDo = "";
-            window.gfxDo += cmd;
-        }
-    };
-
     window.CylonGFX.setCursorZ = function(newZ) {
         window.playerZ = newZ;
         this.renderCursor();
     };
-
-    // Buffer keyboard commands seamlessly
-    window.keydown = function(key, e) {
-        if (!window.CylonGFX) return;
-        window.CylonGFX.targetCursorZ = -1;
-        window.CylonGFX.pendingCursorAction = null;
-
-        let handled = false;
-        let todo = null;
-        
-        if (key === 'ArrowUp' || key === 'w' || key === 'W')    { todo = 'Vn'; handled = true; }
-        if (key === 'ArrowDown' || key === 's' || key === 'S')  { todo = 'Vs'; handled = true; }
-        if (key === 'ArrowLeft' || key === 'a' || key === 'A')  { todo = 'Vw'; handled = true; }
-        if (key === 'ArrowRight' || key === 'd' || key === 'D') { todo = 'Ve'; handled = true; }
-        
-        if (todo) {
-            if (window.gfxDo === "RF") window.gfxDo = "";
-            window.gfxDo += todo;
-        }
-        if (handled && e) e.preventDefault(); 
-    };
-
-    // Trigger action when user uses Qandy popup system
-    window.capflagInteract = function(itemId, zStr, isOd) {
-        if (window.parent && window.parent.hpop) window.parent.hpop();
-        else if (window.hpop) window.hpop();
-        
-        let targetZ = parseInt(zStr, window.CylonGFX.gfxZBase || 10);
-        
-        window.CylonGFX.walkToZ(targetZ, () => {
-            if (window.gfxDo === "RF") window.gfxDo = "";
-            window.gfxDo += (isOd ? "OD" : "ID") + itemId + zStr;
-        });
-    };
-
-    // Inject Action-RPG "Walk to and Interact" pop controller
-    window.CylonGFX.showTargetMenu = function(z, clientX, clientY) {
-        let items = [];
-        let iconWraps = document.querySelectorAll(`.icon-wrap[data-z="${z}"]`);
-        
-        iconWraps.forEach(wrap => {
-            let path = wrap.getAttribute('data-path');
-            let basename = path.split('/').pop();
-            let itemId = basename.substring(0, 2);
-            let pubId = basename.length >= 8 ? basename.substring(4, 8) : "";
-            let zHex = basename.substring(2, 4);
-            let labelText = wrap.getAttribute('data-label') || itemId;
-
-            let isOd = basename.length === 6;
-
-            items.push({
-                label: `Interact with ${labelText}`,
-                action: () => {
-                    // Instantly interact with player hats/flags
-                    if (itemId >= 'Sa' && itemId <= 'Sd') {
-                        if (window.playerItem === "Za") {
-                            if (window.gfxDo === "RF") window.gfxDo = "";
-                            window.gfxDo += "ID" + itemId + zHex;
-                        } else if (itemId === window.playerItem && pubId === window.playerId) {
-                            if (window.gfxDo === "RF") window.gfxDo = "";
-                            let zStr = window.playerZ.toString(window.CylonGFX.gfxZBase || 10).padStart(2, '0');
-                            window.gfxDo += "ID" + window.playerItem + zStr;
-                        } else {
-                            if (window.gfxDo === "RF") window.gfxDo = "";
-                            window.gfxDo += "Xt" + pubId;
-                        }
-                        if (window.parent && window.parent.hpop) window.parent.hpop();
-                        else if (window.hpop) window.hpop();
-                        return;
-                    }
-
-                    // Standard Qandy Pop Menu for interacting with generic objects (items, flags, powerups, etc)
-                    let desc = typeof window.gfxItemID === 'function' ? window.gfxItemID(itemId) : itemId;
-                    let PUP = `<div align="center" style="padding:10px;">
-                        <strong>${desc}</strong><br><br>
-                        <img src="q/${itemId}.png" height="32" width="32" style="image-rendering:pixelated;"><br><br>
-                        <a href="#" onclick="window.capflagInteract('${itemId}', '${zHex}', ${isOd}); return false;" style="display:inline-block; padding:6px 12px; background:var(--sel-bg, #333); color:var(--sel-fg, #0f0); text-decoration:none; border-radius:3px; font-weight:bold;">Interact</a>
-                    </div>`;
-                    
-                    if (window.parent && window.parent.popHtm) {
-                        window.parent.PopAlign = "click";
-                        window.parent.lastClickZ = z;
-                        window.parent.popHtm(PUP);
-                    } else if (window.popHtm) {
-                        window.PopAlign = "click";
-                        window.lastClickZ = z;
-                        window.popHtm(PUP);
-                    }
-                }
-            });
-        });
-
-        // Add Scroll Options
-        let x = z % this.gridWide;
-        let y = Math.floor(z / this.gridWide);
-        let parts = this.currentPath.split('/');
-        let currentSector = parts[parts.length - 1];
-
-        let addScroll = (dirChar, label, dx, dy) => {
-            let nextSector = this.calculateTargetSector(currentSector, dirChar, this.gfxLowerBound, this.gfxRoundWorld);
-            if (nextSector) {
-                items.push({
-                    label: label,
-                    action: () => this.walkToZ(z, () => this.moveCursor(dx, dy))
-                });
-            }
-        };
-
-        if (y === 0) addScroll('N', 'Scroll North', 0, -1);
-        if (y === this.gridTall - 1) addScroll('S', 'Scroll South', 0, 1);
-        if (x === this.gridWide - 1) addScroll('E', 'Scroll East', 1, 0);
-        if (x === 0) addScroll('W', 'Scroll West', -1, 0);
-
-        if (window.playerItem !== "Za") {
-            items.push({
-                label: 'Walk Here',
-                action: () => {
-                    window.playerWalk = z;
-                    window.playerDo = null;
-                }
-            });
-        }
-        
-        if (items.length === 1) {
-            items[0].action();
-            return;
-        }
-
-        if (items.length > 0) {
-            let mockEvent = { clientX, clientY, view: window };
-            if (window.parent && window.parent.CylonPopManager) {
-                window.parent.CylonPopManager.showContextMenu(mockEvent, items);
-            } else if (window.CylonPopManager) {
-                window.CylonPopManager.showContextMenu(mockEvent, items);
-            }
-        }
-    };
-
+    
     window.gfxCollisionHook = function(z, item) {
         let tile = document.getElementById(`gfx-tile-${z}`);
         if (tile) {
@@ -464,26 +108,32 @@ window.onload = async function() {
 
     // UI Avatar Pop
     window.capflagAvatar = function(avatar) {
-        let hat = ""; let body = "";
-        if (window.playerItem === "Sa") { body = "D3"; hat = "J0"; }
-        if (window.playerItem === "Sb") { body = "D0"; hat = "J1"; }
+        let hat = ""; let body = ""; let fbody = "";
+        
+        if (window.playerItem === "Sa") { body = "D3"; fbody = "H3"; hat = "J0"; }
+        if (window.playerItem === "Sb") { body = "D0"; fbody = "H0"; hat = "J1"; }
+        if (window.playerItem === "Sc") { body = "D1"; fbody = "H1"; hat = "J2"; }
+        if (window.playerItem === "Sd") { body = "D2"; fbody = "H2"; hat = "J3"; }
+        
+        // Fallback for safety
+        if (!body) { body = "D0"; fbody = "H0"; hat = "J1"; }
 
         if (body && hat) {
             let PUP = `<div style="text-align:center; padding:10px;">
                 <div style="margin-bottom:10px; font-weight:bold;">Select Face:</div>
-                <a href="gfx:VAB0${body}${hat}--"><img src="c/B0.png" width=32 height=32 style="image-rendering:pixelated"></a> &nbsp; 
-                <a href="gfx:VAB1${body}${hat}--"><img src="c/B1.png" width=32 height=32 style="image-rendering:pixelated"></a> &nbsp; 
-                <a href="gfx:VAB2${body}${hat}--"><img src="c/B2.png" width=32 height=32 style="image-rendering:pixelated"></a><br>
-                <a href="gfx:VAB3${body}${hat}--"><img src="c/B3.png" width=32 height=32 style="image-rendering:pixelated"></a> &nbsp; 
-                <a href="gfx:VAB4${body}${hat}--"><img src="c/B4.png" width=32 height=32 style="image-rendering:pixelated"></a> &nbsp; 
-                <a href="gfx:VAB5${body}${hat}--"><img src="c/B5.png" width=32 height=32 style="image-rendering:pixelated"></a>
+                <a href="gfx:VA${avatar}B0${body}${hat}--"><img src="c/B0.png" width=32 height=32 style="image-rendering:pixelated"></a> &nbsp; 
+                <a href="gfx:VA${avatar}B1${body}${hat}--"><img src="c/B1.png" width=32 height=32 style="image-rendering:pixelated"></a> &nbsp; 
+                <a href="gfx:VA${avatar}B2${body}${hat}--"><img src="c/B2.png" width=32 height=32 style="image-rendering:pixelated"></a><br>
+                <a href="gfx:VA${avatar}B3${body}${hat}--"><img src="c/B3.png" width=32 height=32 style="image-rendering:pixelated"></a> &nbsp; 
+                <a href="gfx:VA${avatar}B4${body}${hat}--"><img src="c/B4.png" width=32 height=32 style="image-rendering:pixelated"></a> &nbsp; 
+                <a href="gfx:VA${avatar}B5${body}${hat}--"><img src="c/B5.png" width=32 height=32 style="image-rendering:pixelated"></a>
                 <div style="margin:10px 0; font-weight:bold;">Female:</div>
-                <a href="gfx:VA${avatar}F0H0I1--"><img src="c/F0.png" width=32 height=32 style="image-rendering:pixelated"></a> &nbsp; 
-                <a href="gfx:VA${avatar}F1H0I1--"><img src="c/F1.png" width=32 height=32 style="image-rendering:pixelated"></a> &nbsp; 
-                <a href="gfx:VA${avatar}F2H0I1--"><img src="c/F2.png" width=32 height=32 style="image-rendering:pixelated"></a><br>
-                <a href="gfx:VA${avatar}F3H0I1--"><img src="c/F3.png" width=32 height=32 style="image-rendering:pixelated"></a> &nbsp; 
-                <a href="gfx:VA${avatar}F4H0I1--"><img src="c/F4.png" width=32 height=32 style="image-rendering:pixelated"></a> &nbsp; 
-                <a href="gfx:VA${avatar}F5H0I1--"><img src="c/F5.png" width=32 height=32 style="image-rendering:pixelated"></a>
+                <a href="gfx:VA${avatar}F0${fbody}${hat}--"><img src="c/F0.png" width=32 height=32 style="image-rendering:pixelated"></a> &nbsp; 
+                <a href="gfx:VA${avatar}F1${fbody}${hat}--"><img src="c/F1.png" width=32 height=32 style="image-rendering:pixelated"></a> &nbsp; 
+                <a href="gfx:VA${avatar}F2${fbody}${hat}--"><img src="c/F2.png" width=32 height=32 style="image-rendering:pixelated"></a><br>
+                <a href="gfx:VA${avatar}F3${fbody}${hat}--"><img src="c/F3.png" width=32 height=32 style="image-rendering:pixelated"></a> &nbsp; 
+                <a href="gfx:VA${avatar}F4${fbody}${hat}--"><img src="c/F4.png" width=32 height=32 style="image-rendering:pixelated"></a> &nbsp; 
+                <a href="gfx:VA${avatar}F5${fbody}${hat}--"><img src="c/F5.png" width=32 height=32 style="image-rendering:pixelated"></a>
             </div>`;
             if (window.parent && window.parent.popHtm) window.parent.popHtm(PUP, 'center');
             else if (window.popHtm) window.popHtm(PUP, 'center');
@@ -568,18 +218,36 @@ window.onload = async function() {
         window.PopAlign = "center"; 
         
         let isLocal = window.location.origin.includes('localhost') || window.location.origin.includes('127.0.0.1');
-        let url = isLocal ? 'http://localhost:8080/qandyland.js' : 'https://qandy.onrender.com/qandyland.js';
+        //let url = isLocal ? 'http://localhost:8080/qandyland.js' : 'https://qandy.onrender.com/qandyland.js';
+        let url = 'http://localhost:8080/qandyland.js';
+        let baseUrl = url.replace('/qandyland.js', '');
         let world = 'capflag';
 
-        let PUP = `<div style="text-align:center; padding:15px; font-family:var(--font-face, monospace);">
-            <h3 style="margin-top:0; color:var(--text-fg2, #ff0);">Connecting...</h3>
-        </div>`;
+        let PUP = `<div>Connecting...</div>`;
         if (window.parent && window.parent.popHtm) window.parent.popHtm(PUP, 'center');
         else if (window.popHtm) window.popHtm(PUP, 'center');
 
-        // Automatically issue the required Cylon OS Terminal commands to boot the world!
-        await CylonCommand(`mount ${url.replace('/qandyland.js', '')}/${world}.gfx ram ${world}`);
-        await CylonCommand(`gfx connect ${url} ${world}`);
+        // Mount the filesystem into the OS RAM so the engine can pull the tile graphics natively
+        await CylonCommand(`mount ${baseUrl}/${world}.gfx ram ${world}`);
+        
+        // Directly connect our App's local engine rather than backgrounding it to the OS Terminal
+        window.remoteQandylandUrl = url;
+        window.desktopDrive = world;
+        window.cylonGfxSession = null;
+        window.gfxDo = "ST"; 
+
+        // Locate designated starting sector map bounds
+        let startSector = 'Aa';
+        try {
+            let loaded = await window.parent.CylonDOS.load(`${world}:/a/gfxSector`);
+            if (loaded && loaded.trim().length === 2) startSector = loaded.trim();
+        } catch(e) {}
+
+        await window.CylonGFX.init(`${world}:/w/${startSector}`);
+        
+        // Start explicit 1-second server network polling loop!
+        window.CylonGFX.gfxTickRate = 1000;
+        window.CylonGFX.startNetworkTick();
         
         if (window.parent && window.parent.hpop) window.parent.hpop();
         else if (window.hpop) window.hpop();
@@ -591,6 +259,186 @@ window.onload = async function() {
     if (window.ResizeObserver) {
         new ResizeObserver(fitDesktopToScreen).observe(document.body);
     }
+
+    // Buffer keyboard commands directly to the server while triggering a fast visual predictor
+    window.CylonGFX.moveCursor = function(dx, dy) {
+        let cmd = null;
+        if (dy < 0) cmd = 'Vn';
+        else if (dy > 0) cmd = 'Vs';
+        else if (dx < 0) cmd = 'Vw';
+        else if (dx > 0) cmd = 'Ve';
+        
+        if (cmd) {
+            if (window.gfxDo === "RF") window.gfxDo = "";
+            window.gfxDo += cmd; // <-- Pings Server cleanly on next network tick
+
+            // Local Visual Predictor Routine
+            let x = window.playerZ % this.gridWide;
+            let y = Math.floor(window.playerZ / this.gridWide);
+            let nx = x + dx;
+            let ny = y + dy;
+
+            if (nx >= 0 && nx < this.gridWide && ny >= 0 && ny < this.gridTall) {
+                let targetZ = ny * this.gridWide + nx;
+                let moveBlocked = false;
+                
+                if (typeof window.gfxCollisionHook === 'function') {
+                    moveBlocked = !window.gfxCollisionHook(targetZ, window.playerItem);
+                }
+
+                if (!moveBlocked) {
+                    this.setCursorZ(targetZ);
+                } else {
+                    this.targetCursorZ = -1;
+                    this.pendingCursorAction = null;
+                }
+            } else {
+                // If it hits an edge scroll bound, we visually stop and let the server handle it
+                this.targetCursorZ = -1;
+                this.pendingCursorAction = null;
+            }
+        }
+    };
+
+    // Buffer keyboard commands seamlessly into the new moveCursor predictor
+    window.keydown = function(key, e) {
+        if (!window.CylonGFX) return;
+        window.CylonGFX.targetCursorZ = -1;
+        window.CylonGFX.pendingCursorAction = null;
+
+        let handled = false;
+        let dx = 0, dy = 0;
+        
+        if (key === 'ArrowUp' || key === 'w' || key === 'W')    { dy = -1; handled = true; }
+        else if (key === 'ArrowDown' || key === 's' || key === 'S')  { dy = 1; handled = true; }
+        else if (key === 'ArrowLeft' || key === 'a' || key === 'A')  { dx = -1; handled = true; }
+        else if (key === 'ArrowRight' || key === 'd' || key === 'D') { dx = 1; handled = true; }
+        
+        if (handled) {
+            window.CylonGFX.moveCursor(dx, dy);
+            if (e) e.preventDefault(); 
+        }
+    };
+
+    // Inject Action-RPG Context Controller aligned natively to UNIVAC IDs and ODs
+    window.CylonGFX.showTargetMenu = function(z, clientX, clientY) {
+        let items = [];
+        let iconWraps = document.querySelectorAll(`.icon-wrap[data-z="${z}"]`);
+        
+        iconWraps.forEach(wrap => {
+            let path = wrap.getAttribute('data-path');
+            let basename = path.split('/').pop();
+            let itemId = basename.substring(0, 2);
+            let pubId = basename.length >= 8 ? basename.substring(4, 8) : "";
+            let zHex = basename.substring(2, 4);
+            let labelText = wrap.getAttribute('data-label') || itemId;
+
+            // Anything length 6 that doesn't start with V or X is generally a static object
+            let isOd = (basename.length === 6 && itemId.charAt(0) !== 'V' && itemId.charAt(0) !== 'X');
+
+            // 1. Instantly interact with player team hats/slots
+            if (itemId >= 'Sa' && itemId <= 'Sd') {
+                if (window.playerItem === "Za" && basename.length < 8) {
+                    items.push({
+                        label: `Join Team ${labelText}`,
+                        action: () => {
+                            // Ghost bypass - send instantly, do not try to physically walk
+                            if (window.gfxDo === "RF") window.gfxDo = "";
+                            window.gfxDo += "ID" + itemId + zHex;
+                        }
+                    });
+                } else if (itemId + pubId === window.playerItem) {
+                    items.push({
+                        label: `View Inventory`,
+                        action: () => {
+                            if (window.gfxDo === "RF") window.gfxDo = "";
+                            window.gfxDo += "Vi";
+                        }
+                    });
+                } else if (pubId) {
+                    items.push({
+                        label: `Attack ${labelText}`,
+                        action: () => {
+                            this.walkToZ(z, () => {
+                                if (window.gfxDo === "RF") window.gfxDo = "";
+                                window.gfxDo += "Xt" + pubId;
+                            });
+                        }
+                    });
+                }
+            } 
+            // 2. Interact with Tag Markers directly
+            else if (itemId === 'Xt') {
+                items.push({
+                    label: `Tag Marker`,
+                    action: () => {
+                        this.walkToZ(z, () => {
+                            if (window.gfxDo === "RF") window.gfxDo = "";
+                            window.gfxDo += "Xt" + (pubId || basename.substring(4));
+                        });
+                    }
+                });
+            } 
+            // 3. Standard objects & items (Flags, powers, etc)
+            else if (itemId.charAt(0) !== 'V' && itemId.charAt(0) !== 'X') {
+                items.push({
+                    label: `${labelText}`,
+                    action: () => {
+                        this.walkToZ(z, () => {
+                            if (window.gfxDo === "RF") window.gfxDo = "";
+                            window.gfxDo += (isOd ? "OD" : "ID") + itemId + zHex;
+                        });
+                    }
+                });
+            }
+        });
+
+        // Native Scroll Edge Options 
+        let x = z % this.gridWide;
+        let y = Math.floor(z / this.gridWide);
+        let parts = this.currentPath.split('/');
+        let currentSector = parts[parts.length - 1];
+
+        let addScroll = (dirChar, label, dx, dy) => {
+            let nextSector = this.calculateTargetSector(currentSector, dirChar, this.gfxLowerBound, this.gfxRoundWorld);
+            if (nextSector) {
+                items.push({
+                    label: label,
+                    action: () => this.walkToZ(z, () => this.moveCursor(dx, dy))
+                });
+            }
+        };
+
+        if (y === 0) addScroll('N', 'Scroll North', 0, -1);
+        if (y === this.gridTall - 1) addScroll('S', 'Scroll South', 0, 1);
+        if (x === this.gridWide - 1) addScroll('E', 'Scroll East', 1, 0);
+        if (x === 0) addScroll('W', 'Scroll West', -1, 0);
+
+        if (window.playerItem !== "Za" || items.length === 0) {
+            items.push({
+                label: 'Walk Here',
+                action: () => this.walkToZ(z)
+            });
+        }
+        
+        // Fast-Execute action if there's only 1 thing under the cursor (No popup stutter)
+        if (items.length === 1) {
+            items[0].action();
+            if (window.parent && window.parent.hpop) window.parent.hpop();
+            else if (window.hpop) window.hpop();
+            return;
+        }
+        
+        // Render native Cylon OS context menu drop-down
+        if (items.length > 0) {
+            let mockEvent = { clientX, clientY, view: window };
+            if (window.parent && window.parent.CylonPopManager) {
+                window.parent.CylonPopManager.showContextMenu(mockEvent, items);
+            } else if (window.CylonPopManager) {
+                window.CylonPopManager.showContextMenu(mockEvent, items);
+            }
+        }
+    };
 };
 
 function fitDesktopToScreen() {

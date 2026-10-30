@@ -298,12 +298,14 @@ window.CylonGFX = {
                     col += 10;
                 }
                 else if (cmd === 'PI') {
-                    // In local desktop mode, the server is only used to obtain a
-                    // session token. Cursor position and identity remain local.
                     if (this.gfxTickRate !== 0) {
                         window.playerItem = response.substring(col + 2, col + 4);
                         let zStr = response.substring(col + 4, col + 6);
-                        window.playerZ = parseInt(zStr, this.gfxZBase);
+                        let parsedZ = parseInt(zStr, this.gfxZBase);
+                        // Stop server ticks overriding player walk routines when stepping
+                        if (window.playerWalk === -1) {
+                            window.playerZ = parsedZ;
+                        }
                         window.playerId = response.substring(col + 6, col + 10);
                     }
                     col += 10;
@@ -537,6 +539,110 @@ window.CylonGFX = {
         }
     },
 
+    buildAvatarOrIcon: function(container, iconId, avatarStr) {
+        let overlayId = null;
+        let registerVal = null;
+        
+        while (avatarStr) {
+            let regMatch = avatarStr.match(/\-([0-9]{2})$/);
+            if (regMatch) {
+                registerVal = parseInt(regMatch[1], 10);
+                avatarStr = avatarStr.substring(0, avatarStr.length - 3);
+                continue;
+            }
+            let itemMatch = avatarStr.match(/\-([A-Z][A-Za-z0-9])$/);
+            if (itemMatch) {
+                overlayId = itemMatch[1];
+                avatarStr = avatarStr.substring(0, avatarStr.length - 3);
+                continue;
+            }
+            break;
+        }
+
+        if (!avatarStr || avatarStr.length < 2) {
+            let img = document.createElement('img');
+            img.src = this.gfxIconDir + iconId + '.png';
+            img.className = 'icon-img';
+            img.style.maxWidth = '60%';
+            img.style.maxHeight = '55%';
+            img.style.objectFit = 'contain';
+            img.style.imageRendering = 'pixelated';
+            img.style.filter = 'drop-shadow(2px 2px 2px rgba(0,0,0,0.8))';
+            img.onerror = function() { this.src = 'q/file.png'; };
+            container.appendChild(img);
+            return img;
+        }
+
+        const typeMap = {
+            'A': 'head', 'B': 'head', 'E': 'head', 'F': 'head',
+            'C': 'body', 'D': 'body', 'G': 'body', 'H': 'body',
+            'I': 'hat',  'J': 'hat',  'K': 'hat',  'L': 'hat',
+            'M': 'sword', 'N': 'sword',
+            'O': 'shield', 'P': 'shield'
+        };
+        const partOrder = ['body', 'head', 'hat', 'sword', 'shield'];
+        const currentParts = {};
+
+        for (let i = 0; i < avatarStr.length; i += 2) {
+            const partCode = avatarStr.substring(i, i + 2);
+            const type = typeMap[partCode.charAt(0)];
+            if (type && !currentParts[type]) {
+                currentParts[type] = partCode;
+            }
+        }
+
+        partOrder.forEach((type, index) => {
+            const partCode = currentParts[type];
+            if (partCode) {
+                let el = document.createElement('img');
+                el.src = this.gfxCharDir + partCode + '.png';
+                el.style.position = 'absolute';
+                el.style.width = '100%';
+                el.style.height = '200%';
+                el.style.bottom = '10%';
+                el.style.left = '0';
+                el.style.objectFit = 'contain';
+                el.style.zIndex = (10 + index).toString();
+                el.style.imageRendering = 'pixelated';
+                container.appendChild(el);
+            }
+        });
+
+        if (overlayId) {
+            let el = document.createElement('img');
+            el.src = this.gfxIconDir + overlayId + '.png';
+            el.style.position = 'absolute';
+            el.style.width = '100%';
+            el.style.height = '100%';
+            el.style.bottom = '100%';
+            el.style.left = '0';
+            el.style.objectFit = 'contain';
+            el.style.zIndex = '20';
+            el.style.imageRendering = 'pixelated';
+            container.appendChild(el);
+        }
+
+        if (registerVal !== null) {
+            let meterEl = document.createElement('div');
+            meterEl.style.position = 'absolute';
+            meterEl.style.width = '100%';
+            meterEl.style.height = '8px';
+            meterEl.style.bottom = '180%';
+            meterEl.style.left = '0';
+            meterEl.style.zIndex = '25';
+            
+            let greenW = registerVal;
+            let redW = 100 - registerVal;
+            
+            meterEl.innerHTML = `
+                <img src="i/Zn.png" style="position:absolute; left:0; top:0; height:100%; width:${greenW}%;" />
+                <img src="i/Zm.png" style="position:absolute; right:0; top:0; height:100%; width:${redW}%;" />
+            `;
+            container.appendChild(meterEl);
+        }
+        return null; // Return null so outer wrapper understands image hasn't triggered single-tile onload mapping
+    },
+
     renderScreen: async function() {
         let dos = window.parent && window.parent.CylonDOS ? window.parent.CylonDOS : window.CylonDOS;
         const iconsLayer = document.getElementById('icons-layer');
@@ -616,9 +722,14 @@ window.CylonGFX = {
                 let iconId = filename.substring(0, 2);
                 let zHex = filename.substring(2, 4);
                 let pubId = filename.length >= 8 ? filename.substring(4, 8) : "";
-                
-                // Exclude double-drawing our own cursor item on the map
-                if (iconId === window.playerItem && pubId === window.playerId) continue;
+                let avatarStr = filename.length > 8 ? filename.substring(8) : "";
+
+                // Intercept our actual local player instance and capture their avatar metadata
+                let isLocalPlayer = (iconId === window.playerItem && (pubId === window.playerId || !window.playerId));
+                if (isLocalPlayer) {
+                    window.playerAvatar = avatarStr;
+                    continue; 
+                }
 
                 let labelText = typeof window.gfxItemID === 'function' ? window.gfxItemID(iconId) : iconId;
                 
@@ -629,14 +740,14 @@ window.CylonGFX = {
                 let y = Math.floor(z / this.gridWide);
 
                 let fullDosPath = `${drive}:/${file.name.replace(/^\/+/, '')}`;
-                this.buildSprite(iconId, x, y, z, labelText, fullDosPath);
+                this.buildSprite(iconId, x, y, z, labelText, fullDosPath, avatarStr);
             }
         }
         
         this.renderCursor();
     },
 
-    buildSprite: function(iconId, x, y, z, labelText, fullPath) {
+    buildSprite: function(iconId, x, y, z, labelText, fullPath, avatarStr) {
         const iconsLayer = document.getElementById('icons-layer');
         if (!iconsLayer) return;
         const self = this;
@@ -658,17 +769,22 @@ window.CylonGFX = {
             wrap.style.boxSizing = 'border-box';
         }
         
-        let img = document.createElement('img');
-        img.className = 'icon-img';
-        img.src = this.gfxIconDir + iconId + '.png'; 
-        img.onerror = function() { this.src = self.gfxIconDir + 'file.png'; }; 
+        let visualContainer = document.createElement('div');
+        visualContainer.style.position = 'relative';
+        visualContainer.style.width = '100%';
+        visualContainer.style.height = '100%';
+        visualContainer.style.display = 'flex';
+        visualContainer.style.justifyContent = 'center';
+        visualContainer.style.alignItems = 'center';
+        
+        let img = this.buildAvatarOrIcon(visualContainer, iconId, avatarStr);
         
         let lbl = document.createElement('div');
         lbl.className = 'icon-label';
         lbl.textContent = labelText;
         
         // Large Item Adjustment (T and U rows anchor their bottom-right to the visual layout)
-        if (iconId.charAt(0) === 'T' || iconId.charAt(0) === 'U') {
+        if (img && (iconId.charAt(0) === 'T' || iconId.charAt(0) === 'U')) {
             img.onload = function() {
                 let tilesX = Math.round(this.naturalWidth / 32);
                 let tilesY = Math.round(this.naturalHeight / 32);
@@ -691,7 +807,7 @@ window.CylonGFX = {
             };
         }
         
-        wrap.appendChild(img);
+        wrap.appendChild(visualContainer);
         wrap.appendChild(lbl);
 
         iconsLayer.appendChild(wrap);
@@ -705,18 +821,16 @@ window.CylonGFX = {
 
         let cursorEl = document.getElementById('gfx-sys-cursor');
         if (!cursorEl) {
-            cursorEl = document.createElement('img');
+            cursorEl = document.createElement('div');
             cursorEl.id = 'gfx-sys-cursor';
             cursorEl.style.position = 'absolute';
             cursorEl.style.pointerEvents = 'none'; 
             cursorEl.style.zIndex = '1000';
-            cursorEl.style.imageRendering = 'pixelated';
-            cursorEl.style.filter = 'drop-shadow(2px 2px 2px rgba(0,0,0,0.8))';
+            cursorEl.style.display = 'flex';
+            cursorEl.style.justifyContent = 'center';
+            cursorEl.style.alignItems = 'center';
             iconsLayer.appendChild(cursorEl);
         }
-        
-        cursorEl.src = this.gfxIconDir + window.playerItem + '.png';
-        cursorEl.onerror = function() { this.src = 'q/file.png'; }; 
 
         cursorEl.style.transition = `top ${transTime}s linear, left ${transTime}s linear`;
 
@@ -727,6 +841,9 @@ window.CylonGFX = {
         cursorEl.style.top = ((y / this.gridTall) * 100) + '%';
         cursorEl.style.width = ((1 / this.gridWide) * 100) + '%';
         cursorEl.style.height = ((1 / this.gridTall) * 100) + '%';
+        
+        cursorEl.innerHTML = '';
+        this.buildAvatarOrIcon(cursorEl, window.playerItem, window.playerAvatar);
     },
 
     setCursorZ: function(newZ) {
