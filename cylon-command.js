@@ -896,7 +896,7 @@ async function handleCylonCommand(line) {
             if (isFile) {
                 rawText = await dos.load(fileArg);
             } else {
-                var res = await fetch(fileArg);
+                var res = await fetch(fileArg, { cache: 'no-store' });
                 if (!res.ok) throw new Error('cannot load ' + fileArg + ': HTTP ' + res.status);
                 rawText = await res.text();
             }

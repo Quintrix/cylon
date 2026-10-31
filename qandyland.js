@@ -12,7 +12,7 @@
 // Sysop Variables
 var sysopOffline=true;        // only serves files to localHost
 var sysopCardWidth = 160;     // "Front-and-back punch card" limit
-var sysopGfx = 'capflag.gfx'; // default .gfx file
+var sysopGfx = 'cylon-capflag.gfx'; // default .gfx file
 
 const UNIVAC = require('./qandyland-univac.js');
 UNIVAC.inject({ fileLoad,
@@ -561,7 +561,7 @@ function _findEntry(manifest, userInput) {
 
 function fileSave(driveName, cwd, name, content, session, owner, customTs) {
   var drive = drives[driveName];
-  if (!drive) return { success: false, error: 'drive not mounted' };
+  if (!drive) return { success: false, error: 'drive not mounted here' };
 
   var fname = normName(name);
   if (!fname) return { success: false, error: 'invalid filename' };
@@ -1435,6 +1435,9 @@ function plugboard(req, stacker, plugs, drive, session) {
         let objid = plugs.slice(column, column + 2);
         let objz  = plugs.slice(column + 2, column + 4);
         column += 4;
+
+        console.log('### OD '+objfile+' '+objid+' '+objz+' '); 
+        // output: ## OD null Sa 66  
         
         if (player.item === 'Za') {
         	 if (objid.charAt(0) === 'S') {
@@ -1446,12 +1449,18 @@ function plugboard(req, stacker, plugs, drive, session) {
 
         let odSearchPattern = 'w/' + player.map + '/' + objid + pZStr + '??';
         let odFilesResponse = fileSearch(drive, odSearchPattern);
+
+        console.log('### OD '+pZStr+' '+odSearchPattern+' '+odFilesResponse); 
+        // output: ### OD 44 w/Ha/Sa44?? [object Object] 
         
         if (odFilesResponse.success && odFilesResponse.results.length > 0) {
           for (let i = 0; i < odFilesResponse.results.length; i++) {
+            console.log(odFilesResponse.results[i].name);
             let entryName = odFilesResponse.results[i].name;
             let matchedBase = entryName.substring(entryName.lastIndexOf('/') + 1);
             if (matchedBase.length === 6) {
+              console.log('YES');
+              // no output, this if is never executed
               objfile = entryName;
               break; 
             }
@@ -2332,7 +2341,7 @@ if (process.stdin.isTTY) {
 
 function _proceedWithStartup() {
 
-  var driveList = ['queville.gfx', 'capflag.gfx', 'cylon.gfx']; 
+  var driveList = ['cylon-capflag.gfx', 'cylon-desktop.gfx', 'queville.gfx' ]; 
   
   for (var i = 0; i < driveList.length; i++) {
     var dn = normName(driveList[i]);
@@ -2352,10 +2361,23 @@ function _proceedWithStartup() {
       var raw = fs.readFileSync(filepath, 'utf8');
 
       if (raw.trim().startsWith('{')) {
-        console.log(`\n  Importing JSON drive '${dn}'...`);
-        var impRes = importDrive(dn, dn, 'system');
-        if (impRes.success) console.log(`  ✓ JSON World '${dn}' imported.\n`);
-        else console.error(`  ✗ Failed to import '${dn}': ${impRes.error}`);
+        try {
+          var parsed = JSON.parse(raw);
+          // If the JSON contains a specific drive name, use it (e.g. desktop -> desktop.gfx)
+          var targetDn = parsed.drive ? (parsed.drive.endsWith('.gfx') ? parsed.drive : parsed.drive + '.gfx') : dn;
+          
+          if (drives[targetDn]) { 
+            console.warn(`Warning: Drive "${targetDn}" already exists during startup.`);
+            continue;
+          }
+          
+          console.log(`\n  Importing JSON drive '${dn}' into '${targetDn}'...`);
+          var impRes = importDrive(targetDn, dn, 'system');
+          if (impRes.success) console.log(`  ✓ JSON World '${targetDn}' imported.\n`);
+          else console.error(`  ✗ Failed to import '${dn}': ${impRes.error}`);
+        } catch(e) {
+          console.error(`  ✗ Failed to parse JSON in '${dn}': ${e.message}`);
+        }
       } else {
         console.log(`\n  Initiating Big Bang for legacy world drive '${dn}'...`);
         drives[dn] = {

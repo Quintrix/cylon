@@ -2,7 +2,7 @@
   "format": "qandy-ramdrive",
   "version": 2,
   "drive": "capflag",
-  "created": "2026-10-28T06:40:09.786Z",
+  "created": "2026-10-31T02:04:19.954Z",
   "entries": [
     {
       "name": "a",
@@ -56,9 +56,9 @@
     {
       "name": "a/gfxCycle",
       "type": "file",
-      "content": ".075",
-      "size": 4,
-      "timestamp": "20261028023910",
+      "content": ".2",
+      "size": 2,
+      "timestamp": "20261029012441",
       "owner": "",
       "session": "",
       "readOnly": false
@@ -66,9 +66,9 @@
     {
       "name": "a/gfxGridStretch",
       "type": "file",
-      "content": "true",
-      "size": 4,
-      "timestamp": "20261028023910",
+      "content": "false",
+      "size": 5,
+      "timestamp": "20261029012501",
       "owner": "",
       "session": "",
       "readOnly": false
@@ -76,9 +76,9 @@
     {
       "name": "a/gfxGridTall",
       "type": "file",
-      "content": "8",
-      "size": 1,
-      "timestamp": "20261028023910",
+      "content": "12",
+      "size": 2,
+      "timestamp": "20261028130600",
       "owner": "",
       "session": "",
       "readOnly": false
@@ -86,9 +86,9 @@
     {
       "name": "a/gfxGridWide",
       "type": "file",
-      "content": "16",
-      "size": 2,
-      "timestamp": "20261028023910",
+      "content": "8",
+      "size": 1,
+      "timestamp": "20261028130556",
       "owner": "",
       "session": "",
       "readOnly": false
@@ -106,9 +106,9 @@
     {
       "name": "a/gfxIconSize",
       "type": "file",
-      "content": "64",
+      "content": "32",
       "size": 2,
-      "timestamp": "20261028023910",
+      "timestamp": "20261029012517",
       "owner": "",
       "session": "",
       "readOnly": false
@@ -116,9 +116,9 @@
     {
       "name": "a/gfxLowerBound",
       "type": "file",
-      "content": "Ab",
+      "content": "Hh",
       "size": 2,
-      "timestamp": "20261028023910",
+      "timestamp": "20261029012537",
       "owner": "",
       "session": "",
       "readOnly": false
@@ -136,9 +136,9 @@
     {
       "name": "a/gfxRoundWorld",
       "type": "file",
-      "content": "true",
-      "size": 4,
-      "timestamp": "20261028023910",
+      "content": "false",
+      "size": 5,
+      "timestamp": "20261029012547",
       "owner": "",
       "session": "",
       "readOnly": false
@@ -159,6 +159,16 @@
       "content": "https://quintrix.github.io/cylon/t/",
       "size": 35,
       "timestamp": "20261028023910",
+      "owner": "",
+      "session": "",
+      "readOnly": false
+    },
+    {
+      "name": "a/gfxZBase",
+      "type": "file",
+      "content": "10",
+      "size": 2,
+      "timestamp": "20261030220349",
       "owner": "",
       "session": "",
       "readOnly": false

@@ -60,8 +60,29 @@ document.addEventListener('keydown', function(e) {
         window.keydown(e.key, e);
     }
 });
+
 // 5. Terminal Command Execution
 window.CylonCommand = async function(cmdStr) {
+    let trimmed = cmdStr.trim();
+    let lower = trimmed.toLowerCase();
+    
+    // Prevent race conditions by executing GFX commands locally if the engine is present.
+    // This stops background apps (like the desktop) from accidentally hijacking the
+    // active foreground app when they boot up and request a server connection.
+    if (lower === 'gfx' || lower.startsWith('gfx ')) {
+        if (window.CylonGFX && typeof window.CylonGFX.handleGfxCommand === 'function') {
+            let argsStr = trimmed.substring(3).trim();
+            let spaceIdx = argsStr.indexOf(' ');
+            let gfxCmd = spaceIdx > -1 ? argsStr.substring(0, spaceIdx) : argsStr;
+            let gfxData = spaceIdx > -1 ? argsStr.substring(spaceIdx + 1) : "";
+            
+            if (!gfxCmd) gfxCmd = "refresh";
+            
+            await window.CylonGFX.handleGfxCommand(gfxCmd, gfxData);
+            return true;
+        }
+    }
+
     if (window.parent && typeof window.parent.injectAndExecute === 'function') {
         return await window.parent.injectAndExecute(cmdStr);
     } else {

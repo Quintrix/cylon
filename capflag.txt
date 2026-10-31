@@ -1,0 +1,14 @@
+
+   Capture the Flag
+   Quintrix and Crew Software
+
+   Capture the Flag is an attempt to create a real-time multi-player version
+   of Richard Carr's classic 1992 Shareware of the Year award winning version
+   'Capture the Flag'. 
+   
+   The game starts in the 'lobby' where there is a flag pole and 'player hats',
+   click on any hat to claim it, and you can then select your avatar which
+   will wear this player hat. Next tag the flag pole to be teleported to your
+   team's spawn spot.
+   
+    

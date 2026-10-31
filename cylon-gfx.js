@@ -26,9 +26,9 @@ if (typeof UNIVAC !== 'undefined' && window.GfxSyncFS) {
 
 window.CylonGFX = {
     // --- GFX Configuration Defaults ---
-    gfxTileSize: 64,
+    gfxTileSize: 32,
     gfxTileDir: 't/',
-    gfxIconDir: 'q/',   
+    gfxIconDir: 'i/',   
     gfxCharDir: 'c/',
     gfxMapsDir: 'm/',
     gridWide: 8, 
@@ -568,7 +568,8 @@ window.CylonGFX = {
             img.style.objectFit = 'contain';
             img.style.imageRendering = 'pixelated';
             img.style.filter = 'drop-shadow(2px 2px 2px rgba(0,0,0,0.8))';
-            img.onerror = function() { this.src = 'q/file.png'; };
+            //img.onerror = function() { this.src = 'q/file.png'; };
+            img.onerror = function() { this.src = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxIiBoZWlnaHQ9IjEiLz4="; };
             container.appendChild(img);
             return img;
         }

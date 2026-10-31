@@ -118,6 +118,42 @@ body, html {
 </div>
 <script>
 // ============================================================================
+// SYSTEM APP ROUTING
+// ============================================================================
+window.ObjDown = function(iconId) {
+    const parent = window.parent;
+    switch(iconId) {
+        case 'Aq': // command
+            if (parent && typeof parent.showTerminal === 'function') parent.showTerminal(); 
+            return true;
+        case 'Ar': // files
+            if (parent && typeof parent.PageOpen === 'function') parent.PageOpen('cylon-files.htm'); 
+            return true;
+        case 'As': // compiler
+            if (parent && typeof parent.PageOpen === 'function') parent.PageOpen('gfx-compiler.htm'); 
+            return true;
+        case 'At': // desktop
+            if (parent && typeof parent.PageOpen === 'function') parent.PageOpen('cylon-desktop.htm'); 
+            return true;
+        case 'Av': // create
+            if (parent && typeof parent.PageOpen === 'function') parent.PageOpen('gfx-create.htm'); 
+            return true;
+        case 'Aw': // theme
+            if (parent && typeof parent.PageOpen === 'function') parent.PageOpen('cylon-theme.htm'); 
+            return true;
+        case 'Ax': // calc
+            if (parent && typeof parent.PageOpen === 'function') parent.PageOpen('cylon-calc.htm'); 
+            return true;
+        case 'Az': // trash
+            if (typeof window.pop === 'function') {
+                window.pop("<div style='padding:20px; text-align:center; font-weight:bold; line-height:1.6;'>There is no trash<br>on a Qandy Pocket Computer!</div>");
+            }
+            return true;
+    }
+    return false; // Icon wasn't a recognized core app, fallback to executing script file
+};
+
+// ============================================================================
 // LOCAL DESKTOP CLIENT
 // The desktop is a local, editable RAM drive.
 // CylonGFX supplies the renderer, local cursor, and file-based desktop actions.
@@ -156,7 +192,21 @@ window.onload = async function() {
             let labelText = wrap.getAttribute('data-label');
             let fullPath = wrap.getAttribute('data-path');
             if (labelText && fullPath) {
-                items.push({ label: 'Open ' + labelText, action: () => this.executeScript(fullPath) });
+                
+                // Add Open Target
+                items.push({ label: 'Open ' + labelText, action: () => {
+                    // Extract icon punch-code ID from the file path to route system apps
+                    let filename = fullPath.substring(fullPath.lastIndexOf('/') + 1);
+                    let iconId = filename.substring(0, 2);
+                    
+                    if (window.ObjDown && window.ObjDown(iconId)) {
+                        // The action was natively handled by the core ObjDown router
+                    } else {
+                        // Fallback to evaluating the file contents directly
+                        this.executeScript(fullPath);
+                    }
+                }});
+                
                 if (this.enableFileMove) {
                     items.push({ label: 'Move ' + labelText, action: () => {
                         this.pendingMovePath = fullPath;
