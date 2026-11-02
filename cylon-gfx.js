@@ -383,7 +383,11 @@ window.CylonGFX = {
                 let output = "[.2]Available GFX Servers:[.]\n\n";
                 let dos = window.parent && window.parent.CylonDOS ? window.parent.CylonDOS : window.CylonDOS;
                 
-                let serverUrl = window.remoteQandylandUrl || window.location.origin + '/qandyland.js';
+                let path = window.location.pathname;
+                let dir = path.substring(0, path.lastIndexOf('/'));
+                let fallbackUrl = window.location.origin !== "null" ? (window.location.origin + dir + '/qandyland.js') : "";
+                
+                let serverUrl = window.remoteQandylandUrl || fallbackUrl;
                 let remoteFound = false;
                 
                 if (serverUrl.startsWith('http')) {

@@ -631,8 +631,12 @@ window.desktopInit = async function() {
 
     let origin = window.location.origin;
     if (origin && origin !== "null") {
+        // Include the subdirectory path (e.g., /cylon) in the host origin variable
+        let path = window.location.pathname;
+        let dir = path.substring(0, path.lastIndexOf('/'));
+        let basePath = origin + dir;
         try {
-            await dos.save('/a/cylonHostOrigin', origin);
+            await dos.save('/a/cylonHostOrigin', basePath);
         } catch(e) {
             console.warn("Could not save hostOrigin to /a/");
         }
