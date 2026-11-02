@@ -635,6 +635,7 @@ window.desktopInit = async function() {
         let path = window.location.pathname;
         let dir = path.substring(0, path.lastIndexOf('/'));
         let basePath = origin + dir;
+        alert(basePath);
         try {
             await dos.save('/a/cylonHostOrigin', basePath);
         } catch(e) {
