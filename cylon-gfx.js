@@ -87,7 +87,7 @@ window.CylonGFX = {
         let hostOrigin = '';
         if (dosObj) {
             try {
-                let savedOrigin = await dosObj.load('/a/cylonHostOrigin');
+                let savedOrigin = await dosObj.load('cylon:/a/cylonHostOrigin');
                 if (savedOrigin) hostOrigin = savedOrigin.trim();
             } catch(e) {}
         }

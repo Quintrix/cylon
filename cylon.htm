@@ -642,9 +642,9 @@ window.desktopInit = async function() {
     }
 
     try {
-        await dos.save('/a/cylonHostOrigin', basePath);
+        await dos.save('cylon:/a/cylonHostOrigin', basePath);
     } catch(e) {
-        console.warn("Could not save hostOrigin to /a/");
+        console.warn("Could not save hostOrigin to cylon:/a/");
     }
 
     // Fix OS menu icon if running standalone
