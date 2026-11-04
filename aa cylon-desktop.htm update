@@ -1,0 +1,7 @@
+
+We are working on cylon-desktop.htm that runs on the cylon.htm operating system. I'd like to make some UI improvements:
+
+When the user clicks the cursor, and it on on a tile that has no objects or items on it, the context menu should pop() with an option that says '<z-location> <tile id code>' to show that tile's z-location and the background tile's two-character qandy code, this will make it easier for users to edit maps.
+
+I would like a new 'Help <obj name>' option that will open '<obj name>.txt' if it exists. We have captured the browser and their BACK button will upset the UI so we need to avoid a 'file not found' error by ensuring the file exists in the first place, it's designed to run in RAM so we can afford to use the if exists file. Does our UI allow use to make a non-clickable option? If so this 'Help <obj name>' should not be clickable unless the .txt actually exists. We should be able to load .txt files into the browser as if they were a .htm page, so we don't need any special code for that. 
+
