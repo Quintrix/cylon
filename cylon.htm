@@ -118,6 +118,9 @@ const PAGES = Object.freeze(new Set([
     'cylon-calc.htm',
     'cylon-gfx.js',
     'cylon-gfx-itemid.js',
+    'cylon-gfx-edit.htm',
+    'cylon-gfx-create.htm',
+    'cylon-gfx-compiler.htm',
     'cylon-capflag.htm',
     'cylon-capflag.gfx',
     'qandyland.js',
@@ -684,10 +687,12 @@ window.desktopInit = async function() {
     for (let line of lines) {
         line = line.trim();
         if (!line || line.startsWith('//') || line.startsWith(';')) continue;
-        if (line.toLowerCase().endsWith('.htm') || line.toLowerCase().endsWith('.html')) {
-            try { await window.PageOpen(line); } catch(e) {
-                printDOS(`{.yellow}Autoexec: Could not open ${line}{.}\n`);
-            }
+        
+        try { 
+            // Pass the line directly to the terminal's command parser
+            await window.injectAndExecute(line, { boot: true }); 
+        } catch(e) {
+            printDOS(`[.3]Autoexec Error: Could not execute ${line}[.]\n`);
         }
     }
 };

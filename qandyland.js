@@ -1,4 +1,5 @@
 //
+//
 // ──── Qandyland Server v2 ────────────────────────────────────────────────────
 //
 // Storage structure: drive.storage = Map<key, value>
@@ -12,7 +13,7 @@
 // Sysop Variables
 var sysopOffline=true;        // only serves files to localHost
 var sysopCardWidth = 160;     // "Front-and-back punch card" limit
-var sysopGfx = 'cylon-capflag.gfx'; // default .gfx file
+var sysopGfx = 'cylon-desktop.gfx'; // default .gfx file
 
 const UNIVAC = require('./qandyland-univac.js');
 UNIVAC.inject({ fileLoad,
@@ -1084,8 +1085,8 @@ function bigbang(driveName, session) {
     var itemData  = dotIdx >= 0 ? rest.substring(dotIdx + 1) : '';
 
     // tiles are first 192 chars (96 × 2); exits are the remainder
-    var tiles = mapData.substring(0, 192); 
-    var exitStr = mapData.substring(192);
+    var tiles = mapData.substring(0, 280); 
+    var exitStr = mapData.substring(280);
     
     // Parse items using comma separation
     var items = [];
@@ -2338,7 +2339,7 @@ if (process.stdin.isTTY) {
 
 function _proceedWithStartup() {
 
-  var driveList = ['cylon-capflag.gfx', 'cylon-desktop.gfx', 'queville.gfx' ]; 
+  var driveList = ['cylon-capflag.gfx', 'cylon-desktop.gfx', 'cylon-queville.gfx' ]; 
   
   for (var i = 0; i < driveList.length; i++) {
     var dn = normName(driveList[i]);
