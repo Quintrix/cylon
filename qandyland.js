@@ -16,6 +16,8 @@ var sysopCardWidth = 160;     // "Front-and-back punch card" limit
 var sysopGfx = 'cylon-desktop.gfx'; // default .gfx file
 
 const UNIVAC = require('./qandyland-univac.js');
+const Krystals = require('./qandyland-krystals.js'); // <-- NEW: Import Krystals Protocol
+
 UNIVAC.inject({ fileLoad,
                 fileSave,
                 fileDelete,
@@ -1799,6 +1801,12 @@ var server = http.createServer(function (req, res) {
         res.writeHead(200, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' });
         return res.end(driveNames.join(','));
     }
+    
+    if (command === 'SYS:KRYSTALS_LIST') {
+        var list = Krystals.getList();
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        return res.end(JSON.stringify(list));
+    }
 
     if (session && playerIndex.has(session)) {
       var cachedProfile = playerIndex.get(session);
@@ -2406,6 +2414,8 @@ function _proceedWithStartup() {
 
   // Start the HTTP server
   server.listen(PORT, '0.0.0.0', function () {
+    Krystals.init(server); // <-- NEW: Start the WebSocket server
+      
     var publicIP = '127.0.0.1'; 
     displayStartupBanner(publicIP, null, null);
     

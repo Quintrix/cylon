@@ -365,13 +365,18 @@ function keyboard() {
         if (window.fitScreenToGrid) setTimeout(window.fitScreenToGrid, 50); // Inform OS Grid Wrapper
     };
 
-    window.hideFullKeyboard = function() {
+    window.hideFullKeyboard = function(force) {
+        // check if we are locking the keyboard for Krystals hosting
+        if (!force && window.CylonKrystals && window.CylonKrystals.hosted) {
+            let isHostingKb = Object.values(window.CylonKrystals.hosted).some(k => k.device === 'keyboard');
+            if (isHostingKb) return; // Keyboard is locked on screen!
+        }
         document.getElementById('kb-overlay').classList.remove('is-open');
         document.body.classList.remove('kb-open');
         window.resetPan();
         if (window.fitScreenToGrid) setTimeout(window.fitScreenToGrid, 50); // Inform OS Grid Wrapper
     };
-
+    
     // --- KEYBOARD-AVOIDANCE PANNING ---------------------------------------
     // Given a focused field's rect (in ITS OWN iframe's viewport coordinates,
     // as reported by cylon-sdk.js), work out whether it's covered by the

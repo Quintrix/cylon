@@ -108,6 +108,11 @@ window.CylonScript = async function(scriptText) {
     return true;
 };
 
+window.CylonPrefill = function(cmdStr) {
+    if (window.parent && window.parent !== window) {
+        window.parent.postMessage({ type: 'QANDY_PREFILL', cmd: String(cmdStr) }, (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
+    }
+};
 
 // ========================================================================
 // 1. INPUT INTERCEPTION (Keyboard & Textarea handling)

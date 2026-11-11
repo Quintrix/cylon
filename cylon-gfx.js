@@ -119,6 +119,7 @@ window.CylonGFX = {
         let gStretch = await this.qdosLoadSafe(dosObj, `${drive}:/a/gfxGridStretch`);
         let cz = await this.qdosLoadSafe(dosObj, `${drive}:/a/playerZ`);
         if (!cz) cz = await this.qdosLoadSafe(dosObj, `${drive}:/a/gfxCursorZ`); 
+        if (!cz) cz = await this.qdosLoadSafe(dosObj, `${drive}:/a/gfxSpawnZ`); // Added Fallback 
         
         let pItem = await this.qdosLoadSafe(dosObj, `${drive}:/a/playerItem`);
         
@@ -461,6 +462,10 @@ window.CylonGFX = {
                         try {
                             let loaded = await jdos.load(`${world}:/a/gfxSector`);
                             if (loaded && loaded.trim().length === 2) startSector = loaded.trim();
+                            else {
+                                let spawnLoaded = await jdos.load(`${world}:/a/gfxSpawn`);
+                                if (spawnLoaded && spawnLoaded.trim().length === 2) startSector = spawnLoaded.trim();
+                            }
                         } catch(e) {}
                     }
                     

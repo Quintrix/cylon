@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>KRYSTALS</title>
+    <script src="cylon-sdk.js"></script>
+    <style>
+        :root {
+            --bg-color: #000; --fg-color: #0f0; --font-face: Courier, monospace;
+            --menu-bg: #111; --menu-fg: #aaa; --sel-bg: #333; --sel-fg: #0f0;
+        }
+
+        html, body {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            background-color: var(--bg-color); color: var(--fg-color);
+            font-family: var(--font-face); font-size: 16px;
+            display: flex; flex-direction: column; overflow-y: auto;
+            box-sizing: border-box; padding: 15px;
+        }
+
+        h2 { margin: 0 0 15px 0; border-bottom: 2px solid var(--fg-color); padding-bottom: 5px; font-size: 20px;}
+        h3 { margin: 15px 0 10px 0; font-size: 16px; color: var(--menu-fg); }
+
+        .panel {
+            border: 1px solid var(--menu-fg); padding: 10px; margin-bottom: 15px;
+            background-color: rgba(0,0,0,0.5);
+        }
+
+        .list-row {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 8px; border-bottom: 1px dashed var(--menu-bg);
+        }
+        .list-row:last-child { border-bottom: none; }
+        
+        .badge {
+            background-color: var(--sel-bg); color: var(--sel-fg);
+            padding: 2px 6px; border-radius: 3px; font-size: 12px; font-weight: bold;
+        }
+
+        input, select {
+            background-color: var(--menu-bg); color: var(--menu-fg);
+            border: 1px solid var(--fg-color); padding: 6px;
+            font-family: inherit; font-size: 14px; outline: none; margin-bottom: 10px;
+            width: 100%; box-sizing: border-box;
+        }
+
+        input:focus, select:focus { border-color: var(--sel-fg); background-color: #000; color: var(--fg-color); }
+
+        .btn {
+            background-color: var(--menu-bg); color: var(--menu-fg);
+            border: 1px solid var(--fg-color); padding: 8px 16px;
+            cursor: pointer; font-family: inherit; font-weight: bold;
+            display: inline-block; text-align: center; width: 100%; box-sizing: border-box;
+            transition: transform 0.1s;
+        }
+        .btn:active { transform: scale(0.95); }
+        .btn-danger { color: #ff6666; border-color: #ff6666; }
+
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        
+        #empty-msg { color: var(--menu-fg); font-style: italic; font-size: 14px; }
+    </style>
+</head>
+<body>
+
+    <h2>Cylon Krystals:</h2>
+
+    <div class="panel" id="active-panel">
+        <h3>Active Frequencies</h3>
+        <div id="connection-list">
+            <div id="empty-msg">No active connections.</div>
+        </div>
+    </div>
+
+    <div class="panel">
+        <h3>Create / Join Link</h3>
+        <div class="grid-2">
+            <select id="k-action" onchange="updateForm()">
+                <option value="host">Host Device</option>
+                <option value="connect">Connect to Freq</option>
+            </select>
+            <select id="k-device">
+                <option value="keyboard">Keyboard</option>
+                <option value="display" disabled>Display (Soon)</option>
+                <option value="camera" disabled>Camera (Soon)</option>
+            </select>
+            <input type="text" id="k-freq" placeholder="Frequency" style="display:none; text-transform: lowercase;">
+        </div>
+        <input type="text" id="k-pin" placeholder="PIN (Optional)">
+        <div class="btn" onclick="executeLink()" style="background-color: var(--sel-bg); color: var(--sel-fg);">EXECUTE LINK</div>
+        <div id="status-msg" style="margin-top: 10px; font-size: 12px; text-align: center; color: var(--menu-fg);"></div>
+    </div>
+
+    <script>
+        function updateForm() {
+            let action = document.getElementById('k-action').value;
+            let devSelect = document.getElementById('k-device');
+            let freqInput = document.getElementById('k-freq');
+            
+            if (action === 'host') {
+                devSelect.style.display = 'block';
+                freqInput.style.display = 'none';
+            } else {
+                devSelect.style.display = 'none';
+                freqInput.style.display = 'block';
+            }
+        }
+
+        function executeLink() {
+            let action = document.getElementById('k-action').value;
+            let pin = document.getElementById('k-pin').value.trim();
+            let msg = document.getElementById('status-msg');
+
+            msg.textContent = 'Processing...';
+
+            if (action === 'host') {
+                let device = document.getElementById('k-device').value;
+                window.CylonCommand(`krystals host ${device} ${pin}`).then(res => {
+                    msg.textContent = "Request sent to OS.";
+                    document.getElementById('k-pin').value = '';
+                });
+            } else {
+                let freq = document.getElementById('k-freq').value.trim().toLowerCase();
+                if (!freq) { msg.textContent = "Frequency required!"; return; }
+                window.CylonCommand(`krystals connect ${freq} ${pin}`).then(res => {
+                    msg.textContent = "Request sent to OS.";
+                    document.getElementById('k-freq').value = '';
+                    document.getElementById('k-pin').value = '';
+                });
+            }
+        }
+
+        function disconnect(freq) {
+            window.CylonCommand(`krystals disconnect ${freq}`);
+        }
+
+        function refreshUI() {
+            if (!window.parent || !window.parent.CylonKrystals) return;
+            
+            // Sync styling dynamically
+            if (window.parent.CylonColors) window.CylonSDK.applyColors(window.parent.CylonColors);
+
+            let ksys = window.parent.CylonKrystals;
+            let listDiv = document.getElementById('connection-list');
+            let html = '';
+            let count = 0;
+
+            // Render Hosted Devices
+            for (let freq in ksys.hosted) {
+                let d = ksys.hosted[freq].device;
+                html += `
+                <div class="list-row">
+                    <div>
+                        <span class="badge" style="background:#0066cc;">HOSTING</span> 
+                        <strong style="margin: 0 8px;">${freq}</strong> [${d}]
+                    </div>
+                    <div class="btn btn-danger" style="width: auto; padding: 4px 10px;" onclick="disconnect('${freq}')">STOP</div>
+                </div>`;
+                count++;
+            }
+
+            // Render Connected Devices
+            for (let freq in ksys.connected) {
+                let d = ksys.connected[freq].device;
+                html += `
+                <div class="list-row">
+                    <div>
+                        <span class="badge" style="background:#008000;">LINKED</span> 
+                        <strong style="margin: 0 8px;">${freq}</strong> [${d}]
+                    </div>
+                    <div class="btn btn-danger" style="width: auto; padding: 4px 10px;" onclick="disconnect('${freq}')">DROP</div>
+                </div>`;
+                count++;
+            }
+
+            if (count === 0) {
+                html = '<div id="empty-msg">No active connections.</div>';
+            }
+
+            // Only update DOM if changed to prevent flickering
+            if (listDiv.innerHTML !== html) {
+                listDiv.innerHTML = html;
+            }
+        }
+
+        // Poll the OS for Krystal network changes every 500ms
+        setInterval(refreshUI, 500);
+        window.onload = refreshUI;
+    </script>
+</body>
+</html>

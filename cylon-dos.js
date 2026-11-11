@@ -872,6 +872,7 @@
     await requireParent(m, path);
     await m.backend.commit({ put: [{
       path: path, type: 'file', content: value, size: size, timestamp: timestamp(),
+      timestamp: (metadata && metadata.timestamp) ? metadata.timestamp : timestamp(),
       owner: metadata && metadata.owner || '', session: metadata && metadata.session || '',
       readOnly: !!(metadata && metadata.readOnly)
     }] });
@@ -1037,7 +1038,27 @@
       if (!e) fail('directory not found');
       if (e.type !== 'directory') fail('not a directory');
     }
-    return m.backend.list(p);
+    
+    var entries = await m.backend.list(p);
+    
+    // --- LAZY GARBAGE COLLECTION (Ported from qandyland.js) ---
+    var now = timestamp();
+    var validEntries = [];
+    
+    for (var i = 0; i < entries.length; i++) {
+      var entry = entries[i];
+      
+      if (entry.timestamp && entry.timestamp.charAt(0) === 'X') {
+        var expTime = entry.timestamp.substring(1);
+        if (now >= expTime) {
+          // Delete it from the backend immediately
+          await m.backend.commit({ remove: [entry.path] });
+          continue; // Skip adding to the returned list
+        }
+      }
+      validEntries.push(entry);
+    }
+    return validEntries;
   }
 
   async function list(path) {

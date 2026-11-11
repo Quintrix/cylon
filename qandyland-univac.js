@@ -388,11 +388,25 @@ function UNIVAC(driveName, itemfile, objfile, sessionToken) {
             state.id = newId;
             loadconfig(driveName);
             state.playerid = tickOdometer(driveName);
-            if (register['W0']) state.sector = register['W0'];
-            if (register['W1']) {
+            
+            // Prefer a/gfxSpawn over legacy W0
+            var spawnSecLoad = _deps.fileLoad(driveName, '/', 'a/gfxSpawn', 'UNIVAC');
+            if (spawnSecLoad.success && spawnSecLoad.content && spawnSecLoad.content.trim().length === 2) {
+              state.sector = spawnSecLoad.content.trim();
+            } else if (register['W0']) {
+              state.sector = register['W0'];
+            }
+            
+            // Prefer a/gfxSpawnZ over legacy W1
+            var spawnZLoad = _deps.fileLoad(driveName, '/', 'a/gfxSpawnZ', 'UNIVAC');
+            if (spawnZLoad.success && spawnZLoad.content) {
+              state.zStr = spawnZLoad.content.trim().toUpperCase();
+              state.z = parseInt(state.zStr, zBase);
+            } else if (register['W1']) {
               state.zStr = register['W1'].toUpperCase();
               state.z = parseInt(state.zStr, zBase);
             }
+            
             state.avatar = '';   
             state.content = inventoryString;
             appliedXa = true;

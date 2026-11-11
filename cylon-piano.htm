@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cylon Studio Piano</title>
+    <style>
+        /* --- Cylon OS Theme Variable Defaults --- */
+        :root {
+            --bg-color: #000;
+            --fg-color: #0f0;
+            --menu-bg: #ccc;
+            --menu-fg: #000;
+            --sel-bg: #00c;
+            --sel-fg: #ccc;
+            --font-face: monospace;
+        }
+
+        html, body {
+            margin: 0; padding: 15px;
+            background-color: var(--bg-color);
+            color: var(--fg-color);
+            font-family: var(--font-face), monospace;
+            height: 100%; box-sizing: border-box;
+            display: flex; flex-direction: column;
+            
+            /* Prevent touch drag/highlighting to make it feel like a hardware instrument */
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: none; 
+        }
+
+        h2 { 
+            margin-top: 0; 
+            text-transform: uppercase; 
+            letter-spacing: 2px; 
+            border-bottom: 2px solid var(--fg-color); 
+            padding-bottom: 5px; 
+        }
+
+        /* --- Piano Layout --- */
+        .piano-container {
+            position: relative;
+            display: flex;
+            width: 100%;
+            height: 250px; /* Adapts nicely on a pocket device screen */
+            margin-bottom: 20px;
+            border: 2px solid var(--fg-color);
+            background: var(--bg-color);
+        }
+
+        .key {
+            cursor: pointer;
+            box-sizing: border-box;
+            transition: filter 0.05s;
+        }
+
+        .key:active, .key.sim-active {
+            filter: brightness(1.5) contrast(1.2);
+        }
+
+        .white {
+            flex: 1;
+            background-color: var(--menu-bg);
+            color: var(--menu-fg);
+            border-right: 1px solid var(--bg-color);
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
+            padding-bottom: 10px;
+            font-weight: bold;
+            font-size: 13px;
+        }
+        
+        .white:last-child { border-right: none; }
+
+        .black {
+            position: absolute;
+            height: 60%;
+            background-color: var(--sel-bg);
+            color: var(--sel-fg);
+            border: 1px solid var(--bg-color);
+            border-top: none;
+            border-radius: 0 0 6px 6px;
+            z-index: 2;
+            box-shadow: 2px 2px 5px rgba(0,0,0,0.7);
+        }
+
+        /* --- Controls Layout --- */
+        .controls {
+            display: flex; gap: 10px; margin-bottom: 15px;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            background: var(--sel-bg);
+            color: var(--sel-fg);
+            border: 1px solid var(--fg-color);
+            padding: 8px 16px;
+            font-family: inherit;
+            font-weight: bold;
+            font-size: 14px;
+            cursor: pointer;
+            border-radius: 3px;
+        }
+
+        .btn:active {
+            background: var(--fg-color);
+            color: var(--bg-color);
+        }
+
+        /* --- Sequence Output UI --- */
+        .output-container {
+            flex: 1;
+            display: flex; flex-direction: column;
+            min-height: 80px;
+        }
+
+        .output-label {
+            font-size: 14px; margin-bottom: 5px; font-weight: bold;
+        }
+
+        .output-box {
+            flex: 1;
+            background: var(--bg-color);
+            color: var(--fg-color);
+            border: 1px solid var(--fg-color);
+            padding: 10px;
+            font-family: inherit;
+            font-size: 16px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+    </style>
+</head>
+<body>
+
+    <h2>Studio Piano</h2>
+    
+    <div class="piano-container" id="piano"></div>
+
+    <div class="controls">
+        <button class="btn" onclick="addRest()">+ REST</button>
+        <button class="btn" onclick="playback()">▶ PLAY</button>
+        <button class="btn" onclick="copyRec()">COPY MML</button>
+        <button class="btn" onclick="clearRec()" style="margin-left: auto;">CLEAR</button>
+    </div>
+
+    <div class="output-container">
+        <div class="output-label">RECORDED MML SEQUENCE:</div>
+        <div class="output-box" id="outText"></div>
+    </div>
+
+    <script>
+        // 1. Listen for global OS theme color changes
+        window.addEventListener('message', function(e) {
+            if (e.data.type === 'QANDY_UPDATE_COLORS' && e.data.colors) {
+                let vars = e.data.colors;
+                let root = document.documentElement;
+                if(vars.BackgroundColor) root.style.setProperty('--bg-color', vars.BackgroundColor);
+                if(vars.ForegroundColor) root.style.setProperty('--fg-color', vars.ForegroundColor);
+                if(vars.Font) root.style.setProperty('--font-face', vars.Font);
+                if(vars.MenuBgColor) root.style.setProperty('--menu-bg', vars.MenuBgColor);
+                if(vars.MenuFgColor) root.style.setProperty('--menu-fg', vars.MenuFgColor);
+                if(vars.SelectBgColor) root.style.setProperty('--sel-bg', vars.SelectBgColor);
+                if(vars.SelectFgColor) root.style.setProperty('--sel-fg', vars.SelectFgColor);
+            }
+        });
+
+        // 2. Define standard two-octave setup
+        const keyList = [
+            { n: 'C4', w: true }, { n: 'C#4', w: false }, { n: 'D4', w: true }, { n: 'D#4', w: false }, { n: 'E4', w: true },
+            { n: 'F4', w: true }, { n: 'F#4', w: false }, { n: 'G4', w: true }, { n: 'G#4', w: false }, { n: 'A4', w: true }, { n: 'A#4', w: false }, { n: 'B4', w: true },
+            { n: 'C5', w: true }, { n: 'C#5', w: false }, { n: 'D5', w: true }, { n: 'D#5', w: false }, { n: 'E5', w: true },
+            { n: 'F5', w: true }, { n: 'F#5', w: false }, { n: 'G5', w: true }, { n: 'G#5', w: false }, { n: 'A5', w: true }, { n: 'A#5', w: false }, { n: 'B5', w: true },
+            { n: 'C6', w: true }
+        ];
+
+        let recording = [];
+        const piano = document.getElementById('piano');
+        const outText = document.getElementById('outText');
+
+        // Dynamically build the keys to ensure precision overlay mapping
+        function renderPiano() {
+            let whiteHTML = '';
+            let blackHTML = '';
+            let wCount = keyList.filter(k => k.w).length; // Total white keys (15)
+            let wIndex = 0;
+
+            keyList.forEach(k => {
+                if (k.w) {
+                    // Extract letter for label without cluttering small screens with octave numbers
+                    let display = k.n.replace(/\d/g, ''); 
+                    whiteHTML += `<div class="key white" data-note="${k.n}" onpointerdown="playK('${k.n}', this)" oncontextmenu="event.preventDefault()"><span>${display}</span></div>`;
+                    wIndex++;
+                } else {
+                    let leftPct = (wIndex * 100 / wCount);
+                    // Standard black key overlaps the split: width 4%, offset -2%
+                    blackHTML += `<div class="key black" data-note="${k.n}" style="left: calc(${leftPct}% - 2%); width: 4%;" onpointerdown="playK('${k.n}', this)" oncontextmenu="event.preventDefault()"></div>`;
+                }
+            });
+            piano.innerHTML = whiteHTML + blackHTML;
+        }
+
+        // Bridge to cylon-sound.js on the OS parent layer
+        function playK(note, el) {
+            // Trigger multi-voice audio immediately
+            if (window.parent && window.parent.QandySound && window.parent.QandySound.note) {
+                window.parent.QandySound.note(note, 300);
+            } else if (window.parent && window.parent.playNote) {
+                window.parent.playNote(note, 300);
+            }
+            
+            // Visual active state bump (so PC keyboard mapped hits blink the UI too)
+            if (el) {
+                let origBg = el.style.backgroundColor;
+                el.style.backgroundColor = 'var(--fg-color)';
+                el.classList.add('sim-active');
+                setTimeout(() => {
+                    el.style.backgroundColor = '';
+                    el.classList.remove('sim-active');
+                }, 150);
+            }
+
+            recording.push(note);
+            updateOutput();
+        }
+
+        function addRest() {
+            recording.push('R'); // 'R' standard pause block in MML string 
+            updateOutput();
+        }
+
+        function clearRec() {
+            recording = [];
+            updateOutput();
+        }
+
+        function updateOutput() {
+            outText.innerText = recording.join(' ');
+            outText.scrollTop = outText.scrollHeight;
+        }
+
+        function playback() {
+            if (recording.length === 0) return;
+            let mml = recording.join(' ');
+            if (window.parent && window.parent.QandySound && window.parent.QandySound.play) {
+                window.parent.QandySound.play(mml);
+            } else if (window.parent && window.parent.playNotes) {
+                window.parent.playNotes(mml);
+            }
+        }
+
+        // PC Keyboard Tracker (A-S-D-F...) mapped to C4 and up
+        const keyMap = {
+            'a': 'C4', 'w': 'C#4', 's': 'D4', 'e': 'D#4', 'd': 'E4', 'f': 'F4', 't': 'F#4', 'g': 'G4', 'y': 'G#4', 'h': 'A4', 'u': 'A#4', 'j': 'B4',
+            'k': 'C5', 'o': 'C#5', 'l': 'D5', 'p': 'D#5', ';': 'E5', '\'': 'F5'
+        };
+
+        window.addEventListener('keydown', function(e) {
+            let note = keyMap[e.key.toLowerCase()];
+            if (note) {
+                let el = document.querySelector(`[data-note="${note}"]`);
+                playK(note, el);
+            }
+        });
+
+        // Safe Clipboard Execution Route
+        function copyRec() {
+            if (recording.length === 0) return;
+            let mml = recording.join(' ');
+            
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(mml).then(() => {
+                    alertUser("Copied to OS Clipboard!");
+                }).catch(err => {
+                    alertUser("Copy failed: " + err);
+                });
+            } else {
+                // Legacy fallback for embedded iframes
+                let textArea = document.createElement("textarea");
+                textArea.value = mml;
+                document.body.appendChild(textArea);
+                textArea.focus();
+                textArea.select();
+                try {
+                    document.execCommand('copy');
+                    alertUser("Copied to OS Clipboard!");
+                } catch (err) {
+                    alertUser("Copy failed.");
+                }
+                document.body.removeChild(textArea);
+            }
+        }
+
+        function alertUser(msg) {
+            if (window.parent && window.parent.popHtm) {
+                // Leverage Cylon SDK theming naturally for the pop-up notification
+                window.parent.popHtm(`<div style="padding: 15px; border: 2px solid var(--fg-color); background: var(--bg-color); color: var(--fg-color); font-family: var(--font-face, monospace); font-weight: bold;">${msg}</div>`, 'center');
+            } else {
+                alert(msg);
+            }
+        }
+
+        window.onload = renderPiano;
+    </script>
+</body>
+</html>

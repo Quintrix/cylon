@@ -1,0 +1,99 @@
+
+         _____________________________________________________________
+                  
+                  Qandy 2029 Cylon JSON Disk Operating System
+         _____________________________________________________________      
+
+
+Cylon DOS manages drives and paritions to create a virtual drive system with it's own command terminal interdace. It can mount .json and .gfx files as virtual drives in your browser's indexDB, localStorage, or in your computer's RAM:
+
+     mount filename dest name — Mounts a drive. Sources can be 'idb', 'ls', 'ram', or 'rom'
+                                Example: mount cylon.json idb
+                                
+                      umount  — Unmounts a drive (also: eject)
+
+                       fdisk  — Manage partitions (list, new, resize, delete, boot)
+                              — Use 'fdisk -l' to view disk information
+                      format  — Erases a partition and starts clean (use -y to confirm)
+                     <drive>: — Switch the current drive (e.g. ram:, cylon:, desktop:)
+                         pwd  — Show the current drive and directory path
+
+     FILES & DIRECTORIES:
+     
+               dir [path|pat] — Detailed directory listing (e.g. dir *.txt).
+                ls [path|pat] — List names in a directory (also: list).
+                    cd [path] — Change directory. Use '..' for up, '/' for root.
+                 mkdir <name> — Create a directory (also: md).
+                 rmdir <name> — Remove an empty directory (also: rd).
+            save <file> <txt> — Save raw text to a file.
+                  load <file> — Smart launch/execute a file based on its extension.
+                  type <file> — Dump raw text of a file to the terminal.
+             copy <src> <dst> — Copy a file/dir (across drives too). (also: cp)
+                                * Use <c> as src/dst to copy to/from system clipboard.
+             rename <s1> <s2> — Rename or move within a drive (also: ren, mv).
+         delete <path|pat> -y — Delete a file/pattern (use -y to skip confirm) (also: del, rm).
+               exists <path>  — Test whether a path exists.
+
+     SYSTEM & APPS:
+
+                alpha [path]  — List variables and their contents in a directory.
+            export [drv] [fn] — Export a drive as a JSON archive. Use <c> for clipboard.
+           import <fn> [t] [d]— Import JSON archive (creates/mounts drive if type given).
+            install [profile] — Install Cylon OS (w/ desktop profile) to IndexedDB.
+              uninstall [-y]  — Wipe Cylon DOS from IndexedDB and localStorage.
+                update <pat>  — Update files on IndexedDB with newer remote versions.
+                        echo  — Print text to the console.
+                         pop  — Show popup at pos (center, click, cursor, hex) <html>.
+                         cls  — Clear the terminal screen.
+                      reboot  — Reboot Cylon DOS.
+                        help  — Show help (e.g. "help mount").
+
+     —————————————————————————————————————————————————————————————————————————————————————
+                                SPECIFICATIONS & RULES:
+     —————————————————————————————————————————————————————————————————————————————————————
+
+              Paths — Use DOS-style paths: 'drive:/docs/file.txt' or 'drive:file.txt'
+               Name — Maximum length 255 bytes. 
+                      Allowed characters: A-Z, a-z, 0-9, space, -_.()+=!%,:;[]^{}@
+               Size — Maximum file size is 512 KB. Default partition quota is 32 MB.
+       Hidden Files — Files beginning with an underscore '_' are hidden from 'ls'.
+   Write Protection — Files can be write-protected using metadata (no longer by '!').
+
+     ————————————————————————————————————————————————————————————————————————————————————— 
+                 Advanced DOS API Function Calls - (Asynchronous / Promise based)
+     —————————————————————————————————————————————————————————————————————————————————————
+
+     The Cylon OS exposes its storage engine globally via the `window.CylonDOS` object.
+     All methods are asynchronous and must be called with `await`.
+     
+     CORE FILE OPERATIONS:
+     await CylonDOS.save(path, content, meta) — Save content. meta: {readOnly: bool}
+     await CylonDOS.load(path)                — Returns file contents as a string.
+     await CylonDOS.delete(path)              — Deletes a file or files (supports wildcards).
+     await CylonDOS.copy(src, dest, opts)     — Copies file/directory. opts: {keepFlags: bool}
+     await CylonDOS.rename(src, dest)         — Renames/moves a file within a drive.
+     await CylonDOS.exists(path)              — Returns true if file/dir exists.
+     await CylonDOS.mkdir(path)               — Creates a directory.
+     await CylonDOS.rmdir(path)               — Removes an empty directory.
+     await CylonDOS.dir(path)                 — Returns array of detailed file objects.
+     await CylonDOS.list(path)                — Returns a string list of filenames.
+
+     DRIVE & PARTITION MANAGEMENT:
+     await CylonDOS.mount(src, name, opts)    — Mounts a drive (opts: type 'idb'|'ls'|'ram'|'rom')
+     await CylonDOS.umount(name)              — Unmounts a drive.
+     await CylonDOS.partitions()              — Returns an array of partition objects.
+     await CylonDOS.createPartition(name, sz) — Creates a thin-provisioned IndexedDB partition.
+     await CylonDOS.deletePartition(name)     — Destroys a partition and its data.
+     await CylonDOS.formatPartition(name)     — Wipes all data from a partition.
+     
+     STATE & BACKUPS:
+     CylonDOS.setDrive(name)                  — Sets the active working drive.
+     CylonDOS.pwd()                           — Returns current working directory path.
+     await CylonDOS.exportDrive(name)         — Returns a JSON string archive of the drive.
+     await CylonDOS.importDrive(json, opts)   — Flashes a JSON archive to a drive.
+
+     * Note: Legacy `dosStash` and `dosRetrieve` are obsolete. To stash data to the host 
+       browser securely, mount a localStorage drive: `await CylonDOS.mount('ls:myStash')` 
+       and use standard CylonDOS file operations to write to it.
+
+```

@@ -1,32 +1,10 @@
+We are working on the 'krystals' command in the cylon-command.js part of the cylon.htm operating system. I have tested the 'krystals host keyboard 1234' command, and was able to use my computer's keyboard to type on my cellphone, it works.
 
- Qandy
+Okay, so now when the user sets the Qandy to be a keyboard, it should display the keyboard and lock it in place on the screen, that Qandy should now be a full-time keyboard until the user de-activates the keyboard, which I think we can use the cylon-krystals.htm page to do.
 
-The first radios were powered by crystals,
-Qandy uses Krystals to talk to other Qandys:
+So when the user activates the host keyboard, cylon-krystals.htm should be opened (if not already open) and it should have a way to stop hosting the keyboard, the very top of the screen is visible when the keyboard is open so we have room for a 'krystals HUD' of some sort there using the cylon-theme colors schemes.
+
+In writing this new cylon-krystals.htm, we need to be mindful that we will be expanding it in the future for more than just keyboards, the user will be able to use host the device as a display next, and then we'll start thinking about sharing cameras, speakers, mouse, printers, etc. 
+
+I'm thinking this cylon-krystals.htm should start off as a way to host the keyboard, a graphical windows style method to bypass the terminal command. Then we can add another option to host the display, etc. Your thoughts?
  
- Krystals:
- 
-Quintrix Qandy (cylon)     (passcode)
-Quintrix  A32  (keyboard)  (passcode)
-Quintrix  iOS  (display)   (passcode)
-  Joe    Qandy (cylon)     (passcode)
- 
-
-
-My thinking is qandyland.js should assign each Qandy it serves cylon.htm to
-a unique ID and passcode, half should be assigned by the client and the other
-half by the server. This is much like tracking Blue Tooth devices, we are
-tracking which devices are available for connections.
-
-We'll need a cylon-krystal.htm for the client, we can either patch into cylon-sdk.js
-or start a new cylon-krystal.js if needed. This page should do two things:
-
-1. Display a list of available devices
-2. Provide options to offer this device as a keyboard or display for another device.
-
-Now my thinking so far has been we set-up a wifi hotspot and serve the cylon.htm when
-someone connects, I'm wondering if we should use Blue Tooth instead? Or offer both?
-The idea is, we should be able to connect a Qandy running cylon.htm to a Blue Tooth
-speaker, yes? It would be nice to have all these features packaged together.
-
-Your thoughts?

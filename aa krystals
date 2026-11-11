@@ -1,0 +1,6 @@
+We are working on cylon-krystals.htm which runs on the cylon.htm operating system that connects to the node qandyland.js server. I have tested the new 'krystals', I was able to use my computer's keyboard to type on my cellphone, it works!
+
+One issue we need to fix: the 'cylon' icon to the left of the virtual keyboard is no longer opening and closing the virtual keyboard, it should now be on some type of variable that gets locked if it is hosting a keyboard, something must be wrong in that logic that is locking the keyboard when it is not being hosted.
+
+I need to fix that before we can start hunting bugs in the 'krystals' as I'm unable to see the command terminal. How do I fix this?
+ 

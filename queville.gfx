@@ -2,7 +2,7 @@
   "format": "qandy-ramdrive",
   "version": 2,
   "drive": "queville",
-  "created": "2026-11-07T04:10:11.879Z",
+  "created": "2026-11-11T04:09:04.967Z",
   "entries": [
     {
       "name": "a",
@@ -44,6 +44,16 @@
       "readOnly": false
     },
     {
+      "name": "a/gfxLowerBound",
+      "type": "file",
+      "content": "Kj",
+      "size": 2,
+      "timestamp": "20261107000239",
+      "owner": "",
+      "session": "",
+      "readOnly": false
+    },
+    {
       "name": "a/gfxRoundWorld",
       "type": "file",
       "content": "true",
@@ -54,11 +64,21 @@
       "readOnly": false
     },
     {
-      "name": "a/gfxSector",
+      "name": "a/gfxSpawn",
       "type": "file",
       "content": "Bc",
       "size": 2,
-      "timestamp": "20261106230957",
+      "timestamp": "20261110221803",
+      "owner": "",
+      "session": "",
+      "readOnly": false
+    },
+    {
+      "name": "a/gfxSpawnZ",
+      "type": "file",
+      "content": "65",
+      "size": 2,
+      "timestamp": "20261110222000",
       "owner": "",
       "session": "",
       "readOnly": false
@@ -76,9 +96,9 @@
     {
       "name": "a/playerZ",
       "type": "file",
-      "content": "76",
-      "size": 2,
-      "timestamp": "20261106230958",
+      "content": "101",
+      "size": 3,
+      "timestamp": "20261110221946",
       "owner": "",
       "session": "",
       "readOnly": false

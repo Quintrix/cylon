@@ -196,7 +196,12 @@ async function startEditor() {
     let dos = window.parent && window.parent.CylonDOS ? window.parent.CylonDOS : window.CylonDOS;
     try {
         let loaded = await dos.load(`${driveName}:/a/gfxSector`);
-        if (loaded && loaded.trim().length === 2) startSector = loaded.trim();
+        if (loaded && loaded.trim().length === 2) {
+            startSector = loaded.trim();
+        } else {
+            let spawnLoaded = await dos.load(`${driveName}:/a/gfxSpawn`);
+            if (spawnLoaded && spawnLoaded.trim().length === 2) startSector = spawnLoaded.trim();
+        }
     } catch(e) {}
     
     // Initialize the engine locally in this iframe
@@ -283,6 +288,56 @@ window.CylonGFX.showTargetMenu = async function(z, clientX, clientY) {
     });
 
     let items = [];
+    let parts = this.currentPath.split('/');
+    let currentSector = parts[parts.length - 1];
+    
+    const groundChars = "abcdefghijklmnopqrstuvwxyz";
+    const extChars    = "0123456789_()[]{}^,:;+-=%@";
+    let secondChar = currentSector.charAt(1);
+
+    // Header Info & Export Tool
+    let zHex = Number(z).toString(this.gfxZBase || 10).padStart(2, '0');
+    items.push({ label: `Sector ${currentSector} Z ${zHex} Tile ${currentTile}`, action: () => {
+        showGfxSubMenu(clientX, clientY);
+    }});
+
+    // Extended Map Navigation
+    if (extChars.includes(secondChar)) {
+        let idx = extChars.indexOf(secondChar);
+        let groundSector = currentSector.charAt(0) + groundChars[idx];
+        items.push({ label: `Exit Extended City ${groundSector}`, action: async () => {
+            await window.CylonCommand(`gfx tele ${groundSector}`);
+        }});
+    } else if (groundChars.includes(secondChar)) {
+        let idx = groundChars.indexOf(secondChar);
+        let extSector = currentSector.charAt(0) + extChars[idx];
+        items.push({ label: `Enter Extended Map ${extSector}`, action: async () => {
+            await window.CylonCommand(`gfx tele ${extSector}`);
+        }});
+    }
+
+    // Edit existing objects if present
+    if (existingItems.length > 0) {
+        existingItems.forEach(item => {
+            items.push({ label: `Edit ${item.labelText}`, action: async () => {
+                //
+                // need to figure out best way to edit files
+                //
+                //await window.CylonCommand(`delete ${item.path}`);
+                //setTimeout(() => window.CylonGFX.renderScreen(), 100);
+            }});
+        });
+    }
+    
+    // Delete existing objects if present
+    if (existingItems.length > 0) {
+        existingItems.forEach(item => {
+            items.push({ label: `Delete ${item.labelText}`, action: async () => {
+                await window.CylonCommand(`delete ${item.path}`);
+                setTimeout(() => window.CylonGFX.renderScreen(), 100);
+            }});
+        });
+    }
 
     // Core Map Painting Tools
     items.push({ label: `Get Tile [${currentTile}]`, action: () => { 
@@ -298,62 +353,25 @@ window.CylonGFX.showTargetMenu = async function(z, clientX, clientY) {
         await window.CylonCommand(`gfx fill ${window.isFillMode ? window.currentBrush : ''}`);
     }});
 
-    // Extended Map Navigation
-    let parts = this.currentPath.split('/');
-    let currentSector = parts[parts.length - 1];
-    
-    const groundChars = "abcdefghijklmnopqrstuvwxyz";
-    const extChars    = "0123456789_()[]{}^,:;+-=%@";
-    let secondChar = currentSector.charAt(1);
-
-    if (extChars.includes(secondChar)) {
-        let idx = extChars.indexOf(secondChar);
-        let groundSector = currentSector.charAt(0) + groundChars[idx];
-        
-        items.push({ label: `Edit Ground Sector ${groundSector}`, action: async () => {
-            await window.CylonCommand(`gfx tele ${groundSector}`);
-        }});
-        
-    } else if (groundChars.includes(secondChar)) {
-        let idx = groundChars.indexOf(secondChar);
-        let extSector = currentSector.charAt(0) + extChars[idx];
-        
-        items.push({ label: `Edit Extended Map ${extSector}`, action: async () => {
-            await window.CylonCommand(`gfx tele ${extSector}`);
-        }});
-    }
-    
-    // Delete existing objects if present
-    if (existingItems.length > 0) {
-        existingItems.forEach(item => {
-            items.push({ label: `Remove ${item.labelText}`, action: async () => {
-                await window.CylonCommand(`delete ${item.path}`);
-                setTimeout(() => window.CylonGFX.renderScreen(), 100);
-            }});
-        });
-    }
-
-    // Footer Info & Export Tool
-    let zHex = Number(z).toString(this.gfxZBase || 10).padStart(2, '0');
-    items.push({ label: `Map ${currentSector} Z ${zHex} Tile ${currentTile}`, action: () => {
-        showGfxSubMenu(clientX, clientY);
-    }});
+    // FIX: Dynamically find the index of the Paint Tile option
+    let paintIdx = items.findIndex(i => i.label.startsWith('Paint Tile ['));
 
     // Execute the popup
     let mockEvent = { clientX, clientY, view: window };
     window.parent.CylonPopManager.showContextMenu(mockEvent, items);
     
-    // Inject Tile Visuals into the Context Menu DOM dynamically
-    setTimeout(() => {
-        try {
-            let menuEls = window.parent.CylonPopManager.menuElements;
-            if (menuEls && menuEls.length > 0) {
-                // Paint Tile (Index 1)
-                let paintEl = menuEls[1];
-                paintEl.innerHTML = `<img src="${window.CylonGFX.gfxTileDir}${window.currentBrush}.png" style="width:16px;height:16px;vertical-align:middle;image-rendering:pixelated;margin-right:6px;border:1px solid #555;"> Paint Tile [${window.currentBrush}]`;
-            }
-        } catch(e) {}
-    }, 10);
+    // Inject Tile Visuals into the Context Menu DOM dynamically using the correct index
+    if (paintIdx > -1) {
+        setTimeout(() => {
+            try {
+                let menuEls = window.parent.CylonPopManager.menuElements;
+                if (menuEls && menuEls.length > paintIdx) {
+                    let paintEl = menuEls[paintIdx];
+                    paintEl.innerHTML = `<img src="${window.CylonGFX.gfxTileDir}${window.currentBrush}.png" style="width:16px;height:16px;vertical-align:middle;image-rendering:pixelated;margin-right:6px;border:1px solid #555;"> Paint Tile [${window.currentBrush}]`;
+                }
+            } catch(e) {}
+        }, 10);
+    }
 };
 
 // ----------------------------------------------------------------------------
@@ -385,7 +403,7 @@ window.showGfxSubMenu = async function(clientX, clientY) {
     let dos = window.parent && window.parent.CylonDOS ? window.parent.CylonDOS : window.CylonDOS;
     let drive = window.activeDrive;
     let alphaDir = drive + ':/a';
-    
+
     let items = [
         {
             label: `Save Drive to File`,
@@ -397,32 +415,97 @@ window.showGfxSubMenu = async function(clientX, clientY) {
         }
     ];
 
+    // Dictionary of known variables and their descriptions
+    const knownVars = {
+        gfxCharDir: "character image directory",
+        gfxIconDir: "icon image directory",
+        gfxTileDir: "tile image directory",
+        gfxMapsDir: "map image directory",
+        gfxIconSize: "size of icons (32, 48, 64, etc)",
+        gfxGridTall: "sector height in number of tiles",
+        gfxGridWide: "sector width in number of tiles",
+        gfxLowerBound: "lower bounds of map (ie: Hh, Zz)",
+        gfxGridStretch: "if true, stretch grid to fill full screen",
+        gfxRoundWorld: "if true, world is round and can scroll A <-> Z",
+        gfxAirLock: "if true, automatic scrolling on edge tiles",
+        gfxCommandLog: "if true, commands sent via CylonCommand() as if the user had typed them",
+        gfxCycle: "speed player moves from tile to tile",
+        gfxSector: "current map sector being rendered",
+        gfxTickRate: "How often client pings the server, 0 = single player, capflag = 1 second",
+        gfxSpawn: "The first map sector players start on",
+        gfxSpawnZ: "The z-location of the player item for gfxSpawn"
+    };
+
+    // Use a Set to merge known variables and any dynamically discovered files
+    let allVars = new Set(Object.keys(knownVars));
+    
     try {
         let alphaFiles = await dos.dir(alphaDir);
         if (alphaFiles && alphaFiles.length > 0) {
             for (let file of alphaFiles) {
-                // Skip internal SYS files and non-files
                 if (file.type === 'file' && !file.name.includes('_dir.sys!')) {
                     let varName = file.name.substring(file.name.lastIndexOf('/') + 1);
-                    items.push({
-                        label: `Var: ${varName}`,
-                        action: async () => {
-                            let val = await dos.load(alphaDir + '/' + varName);
-                            let safeVal = String(val == null ? '' : val).trim().replace(/\n/g, '\\n');
-                            window.CylonCommand(`save ${alphaDir}/${varName} ${safeVal}`);
-                        }
-                    });
+                    allVars.add(varName); // Adds dynamically discovered files
                 }
             }
         }
     } catch (e) {
-        // '/a/' directory might not exist yet
+        // '/a/' directory might not exist yet, we will just use the knownVars list
+    }
+
+    // Sort alphabetically so the menu is easy to read
+    let sortedVars = Array.from(allVars).sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
+
+    for (let varName of sortedVars) {
+        let desc = knownVars[varName] || "unknown";
+        let val = ''; // Default value if the file does not exist
+        
+        try {
+            if (await dos.exists(alphaDir + '/' + varName)) {
+                let rawVal = await dos.load(alphaDir + '/' + varName);
+                val = String(rawVal == null ? '' : rawVal).trim().replace(/\n/g, '\\n');
+            }
+        } catch (e) {
+            // Keep default 'false' on error
+        }
+
+        // Create a clean display string for the menu label (e.g. "gfxRoundWorld = true")
+        let displayCmd = `save ${varName} ${val}`;
+        if (displayCmd.length > 32) displayCmd = displayCmd.substring(0, 29) + '...';
+
+        items.push({
+            label: displayCmd,
+            action: async () => {
+                let actualCmd = `save ${alphaDir}/${varName} ${val}`;
+                
+                if (window.CylonPrefill) {
+                    // Prefill the command line buffer safely
+                    window.CylonPrefill(actualCmd);
+                    
+                    // Pop instructions dynamically positioned at the TOP of the screen 
+                    // using inline CSS so it doesn't get covered by the virtual keyboard
+                    if (window.pop) {
+                        let html = `
+                            <div style="position:fixed; top:10px; left:50%; transform:translateX(-50%); text-align:center; padding:15px; background:var(--menu-bg,#111); border:2px solid var(--fg-color,#0f0); box-shadow:0 6px 20px rgba(0,0,0,0.9); border-radius:4px; min-width:260px; z-index:100000;">
+                                <div style="font-weight:bold; font-size:16px; margin-bottom:5px; color:var(--fg-color,#0f0);">${varName}</div>
+                                <div style="font-size:12px; color:var(--menu-fg,#aaa); margin-bottom:15px;">${desc}</div>
+                                <div style="font-size:14px; line-height: 1.4;">Edit value on command line<br>and press <b>ENTER</b> to save.</div>
+                            </div>
+                        `;
+                        // "center" is used as the alignment parameter, but the CSS override inside handles the fixed top positioning
+                        window.pop(html, "center");
+                    }
+                } else {
+                    // Graceful fallback if sdk isn't updated yet
+                    window.CylonCommand(actualCmd);
+                }
+            }
+        });
     }
 
     let mockEvent = { clientX, clientY, view: window };
     window.parent.CylonPopManager.showContextMenu(mockEvent, items);
 };
-
 
 // ----------------------------------------------------------------------------
 // ADD ITEM / OBJECT DIALOG (Native OS Popups)

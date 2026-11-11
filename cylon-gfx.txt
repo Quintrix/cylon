@@ -11,14 +11,22 @@ is always an upper-case letter and the second character is either a lower-case l
 a numeral, or a symbol. This gives the Qandy 1,352 unique ID codes. 
 
 The /t/ directory has the .png images of the 2d background tiles.
+The /i/ directory has the .png images of the 'items' (and objects).
+The /m/ directory has the .png images of the background tiles at 4x4 pixels for world maps.
+The /c/ directory has the .png images of the player avatars.
 
-The /i/ directory has the .png images of the 'items' (and objects), the cylon-gfx-itemid.js
-file is the master list of the name of every item code in the game. 
+The cylon-gfx-itemid.js file is the master list of the name of every item code in the game. 
 
 
 
-The terminal command 'gfx' is the bridge to the Qandy's gfx co-processor that renders the
-world maps:
+________________________________________________________________________________________
+
+                GFX Terminal Command - The Graphics Co-Processor
+________________________________________________________________________________________
+
+
+The 'gfx' terminal command is the bridge to the Qandy's gfx co-processor that renders
+the world maps:
 
            gfx refresh - refresh the current displayed sector
 
@@ -73,8 +81,7 @@ gfxGridStretch if true, stretch grid to fill full screen
       gfxCycle speed player moves from tile to tile   
      gfxSector current map sector being rendered
    gfxRickRate How often client pings the server, 0 = single player, capflag = 1 second
-        
 
-
-
-
+      gfxSpawn The first map sector player's start on
+     gfxLobbyZ The z-location of the player item for gfxSpawn
+     

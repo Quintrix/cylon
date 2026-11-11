@@ -95,6 +95,7 @@
     '  delete <file|pattern> [-y]     Delete a file or files (use -y to skip confirm)',
     '  exists <path>                  Test whether a path exists',
     '  alpha [path]                   List variables and their contents',
+    '  krystals [action] [opts]       Manage WebSocket hardware (type "help krystals")',
     '  export [drive] [filename]      Export a drive as JSON',
     '  import <file> [type] [drive]   Import JSON (creates/mounts drive if type given)',
     '  install [desktop file] [-y]    Install Cylon OS with selected desktop',
@@ -105,6 +106,15 @@
     '  cls                            Clear the terminal screen',
     '  reboot [-y]                    Reboot Cylon DOS', 
     '  help [command]                 Show help (e.g. "help mount" or "help fdisk")\n'
+  ].join('\n');
+
+  var HELP_KRYSTALS = [
+    'Krystals Command Help:\n',
+    '  krystals                       List devices currently hosted by this unit',
+    '  krystals list                  List devices transmitting on the public network',
+    '  krystals host <device> [pin]   Host a virtual device (e.g. keyboard) with optional PIN',
+    '  krystals connect <freq> [pin]  Connect to a hosted device frequency',
+    '  krystals disconnect <freq>     Disconnect from or stop hosting a frequency\n'
   ].join('\n');
 
   var HELP_MOUNT = [
@@ -436,6 +446,7 @@ async function handleCylonCommand(line) {
         case 'doshelp':
           if (args[0] === 'mount') return { handled: true, output: HELP_MOUNT };
           if (args[0] === 'fdisk') return { handled: true, output: HELP_FDISK };
+          if (args[0] === 'krystals') return { handled: true, output: HELP_KRYSTALS };
           return { handled: true, output: HELP_MAIN };
 
         case 'mount':
@@ -638,7 +649,69 @@ async function handleCylonCommand(line) {
             }, (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
             
             return { handled: true, output: 'GFX Engine: ' + gfxCmd + (gfxData ? ' ' + gfxData : '') };
-                  
+
+        case 'krystals':
+        case 'krystal':
+            if (!args[0]) {
+                if (!global.CylonKrystals || Object.keys(global.CylonKrystals.hosted).length === 0) {
+                    return { handled: true, output: 'No devices currently hosted.' };
+                }
+                var outLines = [['Frequency', 'Device']];
+                for (var f in global.CylonKrystals.hosted) {
+                    outLines.push([f, global.CylonKrystals.hosted[f].device]);
+                }
+                return { handled: true, output: 'Hosted Devices:\n' + table(outLines) };
+            }
+            
+            var ksub = args[0].toLowerCase();
+            
+            if (ksub === 'list') {
+                try {
+                    var baseUrl = global.cylonHostOrigin || '';
+                    var kRes = await fetch(baseUrl + '/qandyland.js', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: 'c=SYS:KRYSTALS_LIST'
+                    });
+                    var kList = await kRes.json();
+                    if (!kList || kList.length === 0) return { handled: true, output: 'No krystals transmitting on the public network.' };
+                    var kOut = [['Frequency', 'Device', 'Secure']];
+                    kList.forEach(function(k) { kOut.push([k.frequency, k.device, k.secure ? 'YES' : 'NO']); });
+                    return { handled: true, output: table(kOut) };
+                } catch (e) {
+                    return { handled: true, output: 'Error fetching network list: ' + e.message };
+                }
+                
+            } else if (ksub === 'host') {
+                if (!args[1]) return { handled: true, output: usage('krystals host <device> [pin]') };
+                try {
+                    var newFreq = await global.CylonKrystals.host(args[1].toLowerCase(), args[2] || '');
+                    setTimeout(function() { global.PageOpen('cylon-krystals.htm', 'Krystals'); }, 100);
+                    return { handled: true, output: 'Hosting ' + args[1] + ' on frequency: [.4]' + newFreq + '[.]\nShare this frequency with clients to connect.' };
+                } catch(e) {
+                    return { handled: true, output: 'Host error: ' + String(e) };
+                }
+                
+            } else if (ksub === 'connect') {
+                if (!args[1]) return { handled: true, output: usage('krystals connect <frequency> [pin]') };
+                try {
+                    var devName = await global.CylonKrystals.connect(args[1].toLowerCase(), args[2] || '');
+                    return { handled: true, output: 'Connected to ' + devName + ' on frequency ' + args[1].toLowerCase() + '.' };
+                } catch(e) {
+                    return { handled: true, output: 'Connect error: ' + String(e) };
+                }
+                
+            } else if (ksub === 'disconnect') {
+                if (!args[1]) return { handled: true, output: usage('krystals disconnect <frequency>') };
+                try {
+                    var dMsg = await global.CylonKrystals.disconnect(args[1].toLowerCase());
+                    return { handled: true, output: dMsg };
+                } catch(e) {
+                    return { handled: true, output: 'Disconnect error: ' + String(e) };
+                }
+            }
+            return { handled: true, output: 'Unknown krystals subcommand.' };                  
+
         case 'pop':
                   var popMatch = line.match(/^\s*pop\s+(\S+)\s+(.*)$/i);
                   if (popMatch) {

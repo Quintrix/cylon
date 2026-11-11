@@ -1,0 +1,63 @@
+'use strict';
+const WebSocket = require('ws');
+
+// Rooms structure: { "PASSCODE": Set(websocket_clients) }
+const sessions = new Map();
+
+function init(server) {
+    // Attach a WebSocket server to Qandyland's existing HTTP server
+    const wss = new WebSocket.Server({ server });
+
+    wss.on('connection', (ws, req) => {
+        let currentRoom = null;
+        let deviceRole = 'UNKNOWN'; // e.g., 'KEYBOARD', 'DISPLAY', 'HOST'
+
+        ws.on('message', (messageAsString) => {
+            try {
+                const data = JSON.parse(messageAsString);
+
+                // 1. Authentication / Joining a Krystal Frequency
+                if (data.type === 'JOIN') {
+                    currentRoom = data.passcode;
+                    deviceRole = data.role;
+                    
+                    if (!sessions.has(currentRoom)) {
+                        sessions.set(currentRoom, new Set());
+                    }
+                    sessions.get(currentRoom).add(ws);
+                    
+                    ws.send(JSON.stringify({ type: 'SYS', msg: `Joined Frequency ${currentRoom} as ${deviceRole}` }));
+                    return;
+                }
+
+                // SECURITY CHECK: Must be in a room to broadcast
+                if (!currentRoom || !sessions.has(currentRoom)) return;
+
+                // 2. Routing peripheral data (Keystrokes, Mouse, etc)
+                // We broadcast this message to everyone ELSE in the same room
+                const roomClients = sessions.get(currentRoom);
+                roomClients.forEach(client => {
+                    if (client !== ws && client.readyState === WebSocket.OPEN) {
+                        client.send(messageAsString); // Forward the exact JSON payload
+                    }
+                });
+
+            } catch (err) {
+                console.error("Krystals Parsing Error:", err);
+            }
+        });
+
+        ws.on('close', () => {
+            if (currentRoom && sessions.has(currentRoom)) {
+                sessions.get(currentRoom).delete(ws);
+                if (sessions.get(currentRoom).size === 0) {
+                    sessions.delete(currentRoom); // Clean up empty rooms
+                }
+            }
+        });
+    });
+
+    console.log("Krystals WebSockets Subsystem Initialized.");
+}
+
+module.exports = { init };
