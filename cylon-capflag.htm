@@ -201,7 +201,6 @@ window.onload = async function() {
  
    // ========================================================================
    // STARTUP UI BOOTLOADER
-   // Uses terminal macros to boot GFX engine cleanly
    // ========================================================================
    
    let ts = 5000;
@@ -259,7 +258,6 @@ window.onload = async function() {
  
        await window.CylonGFX.init(`${world}:/w/${startSector}`);
        
-       // Start explicit 1-second server network polling loop!
        window.CylonGFX.gfxTickRate = 1000;
        window.CylonGFX.startNetworkTick();
        
@@ -389,7 +387,6 @@ window.onload = async function() {
            }
        });
  
-       // Native Scroll Edge Options
        let x = z % this.gridWide;
        let y = Math.floor(z / this.gridWide);
        let parts = this.currentPath.split('/');
@@ -417,7 +414,6 @@ window.onload = async function() {
            });
        }
  
-       // Render native Cylon OS menu
        if (items.length > 0) {
            let mockEvent = { clientX, clientY, view: window };
            if (window.parent && window.parent.CylonPopManager) {
@@ -440,7 +436,7 @@ window.objdown = function(code) {
    let itemid = code.substring(0, 2);
    let itemzStr = code.substring(2, 4);
    let base = window.CylonGFX ? window.CylonGFX.gfxZBase : 10;
-   let itemz = parseInt(itemzStr, base) || parseInt(itemzStr, 10);
+   let itemz = window.CylonGFX ? window.CylonGFX.decodeZ(itemzStr, base) : (parseInt(itemzStr, base) || parseInt(itemzStr, 10));
    let uniqueid = code.length >= 8 ? code.substring(4, 8) : "";
    
    let cmd = "OD" + itemid + itemzStr;
@@ -459,10 +455,10 @@ window.objdown = function(code) {
  
        if (itemid === window.playerItem && (uniqueid === window.playerId || !window.playerId)) {
            if (window.gfxDo === "RF") window.gfxDo = "";
-           window.gfxDo += "Vi"; // request inventory
+           window.gfxDo += "Vi"; 
        } else {
            if (window.gfxDo === "RF") window.gfxDo = "";
-           window.gfxDo += "Xt" + uniqueid; // Tag Player
+           window.gfxDo += "Xt" + uniqueid; 
        }
        return;
    }
@@ -480,7 +476,7 @@ window.itemdown = function(code) {
    let itemid = code.substring(0, 2);
    let itemzStr = code.substring(2, 4);
    let base = window.CylonGFX ? window.CylonGFX.gfxZBase : 10;
-   let itemz = parseInt(itemzStr, base) || parseInt(itemzStr, 10);
+   let itemz = window.CylonGFX ? window.CylonGFX.decodeZ(itemzStr, base) : (parseInt(itemzStr, base) || parseInt(itemzStr, 10));
    let uniqueid = code.length >= 8 ? code.substring(4, 8) : "";
  
    if (itemid === "VA") return;

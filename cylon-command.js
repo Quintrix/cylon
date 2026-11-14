@@ -1049,6 +1049,7 @@ function updateTaskbar() {
         } else {
             if (global.CylonPopManager && typeof global.CylonPopManager.showContextMenu === 'function') {
                 global.CylonPopManager.showContextMenu(e, [
+                    { label: 'Switch to ' + frame.dataset.title, action: () => { if (typeof window.hpop === 'function') window.hpop(); } },
                     { label: 'Close ' + frame.dataset.title, action: () => global.PageClose(filename) }
                 ]);
             } else {
@@ -1145,6 +1146,7 @@ global.showTerminal = function () {
     frame.className = 'page-frame';
     frame.tabIndex = 0; // NEW: Ensure the frame is naturally Tab-focusable
     frame.dataset.title = pageTitle(filename, title);
+    frame.dataset.filename = filename;
     frame.srcdoc = html;
 
     pageContainer().appendChild(frame);
@@ -1324,19 +1326,25 @@ window.cycleActivePage = function() {
             this.menuActions = [];
             this.selectedIndex = 0;
 
-            let absX = e.clientX || 0;
-            let absY = e.clientY || 0;
+            let posOrCoords;
+            if (e === 'topleft' || (e && e.pos === 'topleft')) {
+                posOrCoords = 'topleft';
+            } else {
+                let absX = (e && e.clientX) || 0;
+                let absY = (e && e.clientY) || 0;
 
-            if (e.view && e.view !== window && e.view !== window.parent) {
-                let frames = document.querySelectorAll('iframe');
-                for (let i = 0; i < frames.length; i++) {
-                    if (frames[i].contentWindow === e.view) {
-                        let rect = frames[i].getBoundingClientRect();
-                        absX += rect.left;
-                        absY += rect.top;
-                        break;
+                if (e && e.view && e.view !== window && e.view !== window.parent) {
+                    let frames = document.querySelectorAll('iframe');
+                    for (let i = 0; i < frames.length; i++) {
+                        if (frames[i].contentWindow === e.view) {
+                            let rect = frames[i].getBoundingClientRect();
+                            absX += rect.left;
+                            absY += rect.top;
+                            break;
+                        }
                     }
                 }
+                posOrCoords = { x: absX, y: absY };
             }
 
             let menuFrag = document.createDocumentFragment();
@@ -1377,7 +1385,7 @@ window.cycleActivePage = function() {
 
             menuFrag.appendChild(menuContainer);
 
-            this.createSimplePop(menuFrag, { x: absX, y: absY });
+            this.createSimplePop(menuFrag, posOrCoords);
             
             // Force highlighting on the first index immediately
             this.applyMenuHighlight();
@@ -1488,7 +1496,12 @@ window.cycleActivePage = function() {
                 targetZ = parseInt(pos, 16);
             }
 
-            if (typeof pos === 'object' && pos.x !== undefined && pos.y !== undefined) {
+            if (pos === 'topleft') {
+                popEl.style.position = 'absolute';
+                popEl.style.margin = '0';
+                popEl.style.left = '0px';
+                popEl.style.top = '0px';
+            } else if (typeof pos === 'object' && pos.x !== undefined && pos.y !== undefined) {
                 popEl.style.position = 'absolute';
                 popEl.style.margin = '0';
                 popEl.style.left = Math.max(0, pos.x - 12) + 'px';

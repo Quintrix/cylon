@@ -1,0 +1,109 @@
+
+**Important bug to fix during this refactor:** In `qandyland-univac.js`, `_global.register` is a **single shared object for the entire Node process**, and `loadconfig(driveName)` only runs `if (!register['W4'])`. That means `cylon-capflag.gfx`, `cylon-queville.gfx`, and `cylon-desktop.gfx` currently share the same `W0`–`W9` (and even `Wa`–`Wz` briefly during execution) in memory! Keying `W0`–`W9` per drive (`registers[driveName]`) will prevent worlds from leaking config into each other on the same server.
+
+* Also note: **`base 52` mismatch!** Right now `qandyland.js` and `cylon-gfx.js` have `encodeZ`/`decodeZ` supporting `gfxZBase = 52` (up to 1352 tiles), whereas `qandyland-univac.js` still uses `parseInt(zRaw, zBase)` with `b >= 2 && b <= 36` and `toString(zBase)`. Unifying `encodeZ`/`decodeZ` into `UNIVAC` will be essential if any map/desktop uses base-52.
+
+
+
+
+
+Okay, from reading your thoughts on the UNIVAC's W* registers I'm of the opinion we should move all the UNIVAC config variables into the /a/ directory for one simple reason: a script should not be able to edit those values, they should be the hard coded physics of that particular world. 
+
+For backwads compatibility, I'm thinking the bigbang() can read the W* registers and set the /a/ directory to match. 
+
+
+
+
+This is a great point to pause and take stock. Looking across `qandyland.js`, `qandyland-univac.js`, `cylon-gfx.js`, `cylon-desktop.htm`, and `cylon-gfx-itemid.js`, the core punch-card architecture is surprisingly clean, and a lot of the recent 2029 upgrades (`/a/` variables, `cylon-gfx-create.htm`, `cylon-gfx-edit.htm`, `.qpc` tapes) are already in place. 
+
+At the same time, reviewing the code reveals a few places where 1984 assumptions and 2029 upgrades are currently stepping on each other—plus some very natural refactor opportunities before you start authoring full games. Here is how everything looks right now.
+
+---
+
+### 1. Register Audit (`W0`–`W9`): What’s Freed & What’s Tangled
+In `qandyland-univac.js`, `w/a` currently stores `W0`–`W9`:
+* **`W0` (Spawn Sector) & `W1` (Spawn Z):** Already superseded by `/a/gfxSpawn` and `/a/gfxSpawnZ` in `Xa` (with `W0`/`W1` kept as fallbacks). For 2029 worlds, these two registers are **free**.
+* **`W4` (Map Lower Bounds):** `cylon-gfx.js` already reads `/a/gfxLowerBound`, while `UNIVAC` still reads `register['W4']` (defaulting to `"Dd"`). Moving `UNIVAC` to check `/a/gfxLowerBound` first (falling back to `W4`) frees up **`W4`** as well.
+* **`W2` & `W3` (Player ID Odometer):** Still actively used by `tickOdometer()` to mint 4-char player IDs (`Aa`..`Zz`). Since `/p/` already tracks active players, this can stay as-is unless you want to move the odometer out of `W` registers entirely (e.g., to an `/a/` file or server-only counter).
+* **`W5` (Boots Enabled), `W6` (Move Points Register), `W7` (PvP Tag Register):** Actively used for game rules.
+* **`W8` & `W9`:** Completely unused and open.
+
+
+---
+
+### 2. Movement Commands (`Vn/Vs/Ve/Vw` vs `Vz`) & World Types
+Your observation about the three different movement styles (`desktop.gfx`, `queville.gfx`, `capflag.gfx`) hits a really clean distinction:
+
+1. **Free-cursor worlds (`desktop.gfx`):** Click anywhere, jump straight to Z, no path/boot/point validation.
+2. **Tile-validated worlds (`queville.gfx`):** Must walk tile-by-tile (`W5` terrain/boots check), no movement point pool (`W6` off).
+3. **Turn/Point-controlled worlds (`capflag.gfx`):** Tile validation + movement point cost (`W5` + `W6`).
+
+Interestingly, **`Vz` already exists inside `UNIVAC`** (`Vz[zz]` moves the player to Z without cost or terrain checks, and `XnVz[W?]` saves current Z to a register), **but `plugboard()` in `qandyland.js` doesn’t accept `Vz` from clients yet** (it only switches on `Vn, Vs, Ve, Vw, Vd, OD, ID, Xt, Vl, ST, VA, OO`).
+
+A clean way to handle this without breaking 1984 clients:
+* **Keep `Vn/Vs/Ve/Vw` in `plugboard`** for 1984 clients and for any 2029 world that enforces step-by-step physics (`W5` or `W6` active).
+* **Expose `Vz[zz]` in `plugboard` (or via a permission check):**
+  * If a world is in "free-cursor / desktop" mode (e.g., via an `/a/` flag like `gfxFreeMove` or a register), `plugboard` accepts `Vz[zz]` directly from the 2029 client—no 10-step `VnVe...` tape needed when clicking across the desktop.
+  * In strict worlds (`capflag`, `queville`), `plugboard` rejects client-sent `Vz` (so players can’t cheat by jumping over walls/lava), while **server punch code** can still use `Vz` internally for teleporters/traps, and **`XnVz`** could remain privileged or behave differently as you described.
+* Also note: **`base 52` mismatch!** Right now `qandyland.js` and `cylon-gfx.js` have `encodeZ`/`decodeZ` supporting `gfxZBase = 52` (up to 1352 tiles), whereas `qandyland-univac.js` still uses `parseInt(zRaw, zBase)` with `b >= 2 && b <= 36` and `toString(zBase)`. Unifying `encodeZ`/`decodeZ` into `UNIVAC` will be essential if any map/desktop uses base-52.
+
+---
+
+### 3. The `'e'` Exit File & `Xn` Bypass
+Right now `'e'` acts as an explicit **allow-list** of 2-char sector exits on every border crossing (`Vn/Vs/Ve/Vw`) and on `Vt` (unless `XnVt` is used).
+
+The pain point is boilerplate: in an open grid world (or `desktop.gfx`), having to populate `e` on every single sector just to allow normal N/S/E/W scrolling is tedious. Two clean ways to simplify `'e'` while keeping 1984 compatibility:
+* **Presence-based or flag-based `'e'`:** Keep `'e'` strictly enforced when `w/<sector>/e` exists and is non-empty (or when `/a/gfxStrictExits` / a `W` flag is on). If a sector has no `'e'` file—or in open-world mode—allow normal boundary scrolling (`calculateTargetSector`) automatically, and still use `'e'` where you want walls/locked borders or special `Vt` destinations.
+* **`XnVt` bypass:** This is already great for sysop/power-up teleports. Just note there is currently a small bug in `UNIVAC`’s `Vt` handler: it checks `if (!ifnot)`, **but never resets `ifnot = false` afterward**, so `XnVt` leaves `ifnot` turned on for the next command on the tape!
+
+---
+
+### 4. Sector Lifecycle Hooks: `a` (Enter) and `z` (Exit)
+First, a quick terminology check from the current code so nothing collides:
+* Currently, **`w/a` is NOT a punch-code script**—it is the flat `W0xxW1yy...` config string read/written by `loadconfig`/`saveconfig`.
+* The global punch-code scripts that actually execute on every `plugboard` call are **`w/b`** (before the client command) and **`w/c`** (after the client command), plus **`w/f`** (fire `Zj`) and **`w/t`** (PvP tag).
+
+Adding optional **`w/<sector>/a`** (on-enter) and **`w/<sector>/z`** (on-exit) punch-code scripts fits the 1-character system-file convention (`m`, `e`, `a`, `z`) really cleanly and gives each room/sector its own setup/teardown logic (welcome popups, weather, sector buffs, resetting room switches, locking doors, etc.).
+
+Three design details to decide before implementing `a` and `z`:
+1. **Mid-tape transitions vs end-of-request:** If a player sends `VeVeVe` and crosses from `Aa` to `Ab` on step 2, should `Aa/z` and `Ab/a` run immediately when `state.sector` changes (so step 3 sees `Ab/a`'s effects), or once at the end of `plugboard`? Running `z` on the old sector and `a` on the new sector **at the moment `state.sector` changes** (whether via `Vn/Vs/Ve/Vw`, `Vt`, or `Vc`) is the most predictable.
+2. **Preventing infinite loops:** What if `Ab/a` itself runs `VtAc00`? You’ll want either a recursion depth guard or a rule that `a`/`z` scripts don't recursively re-trigger `a`/`z` (or only loop up to e.g. 2–3 hops).
+3. **Client sync filtering:** In `cylon-gfx.js` `networkTick()`, the DOS sync currently skips `m`, `e`, `t`. Remember to also skip `a` and `z` there so clients don't try to sync/treat them as items.
+
+---
+
+### 5. Mounting `desktop.gfx` on `UNIVAC` (Multi-User Desktop)
+Looking at `cylon-desktop.htm` right now, there’s an interesting split-brain state that explains what you’re noticing:
+* `cylon-desktop.htm` connects to `qandyland.js` (`gfx connect ${url} desktop`), so `networkTick()` polls `qandyland.js` every `gfxTickRate` ms.
+* Meanwhile, clicking an icon on `desktop` runs `ObjDown()` or `CylonGFX.executeScript()`, which executes **`window.CylonScript`** (Cylon OS terminal commands like `cylon-files.htm` or `save ...`), **not** `UNIVAC` punch code.
+* And because `cylon-desktop.htm` moves the cursor locally (`setCursorZ`) without sending `Vn`/`Vz` to `qandyland.js`, if `gfxTickRate !== 0`, `networkTick()`’s `PI` handler will actually snap `window.playerZ` back to the server's `player.z`!
+
+If you mount `desktop.gfx` on `UNIVAC` for **multi-user shared desktops**, you actually get a neat hybrid model:
+* **Movement & shared state (`UNIVAC`):** Users see each other's cursors (`Sa`–`Sd` / `Si`), move with `Vz` (click-to-jump), and trigger `OD` / `ID` on shared desktop objects.
+* **Client-side OS actions (`S^...^S`):** An object on `desktop.gfx` can hold punch code that checks permissions/locks on the server (e.g. `Xi` key check, or `Vx` toggle) and emits `S^...^S` back to `cylon-desktop.htm` (`window.serverdown`) to launch a CylonOS app or run a `CylonScript` macro on the client!
+* Note that `cylon-desktop.htm` currently doesn't define `window.serverdown` or send `OD`/`ID` clicks—that's the bridge you'd add when ready for multiplayer desktops.
+
+---
+
+### 6. Quick Punch-Code Cleanup Checklist (From Reading `qandyland-univac.js`)
+Before writing a lot of game scripts in the new map editor, there are a few small quirks in `qandyland-univac.js` worth ironing out so your punch code behaves consistently:
+
+1. **Inconsistent `ifnot` (`Xn`) reset:** `Xi`, `Xl`, `Xe`, `Xm`, `Vc`, `Xt`, `Vx`, `Vy`, `Vz` all reset `ifnot = false;` after executing, whereas **`Vm`, `Vd`, and `Vt` do not**. That means `XnVdCa` or `XnVtA100` currently leaves `Xn` armed for the next command.
+2. **Single-player (`gfxTickRate = 0`) vs Server `UNIVAC`:** Right now `cylon-gfx.js` doesn't run `UNIVAC` locally when offline/single-player—it runs `CylonScript`. Since `qandyland-univac.js` already has `window.UNIVAC` browser exports at the bottom, you have the option later to run the *exact same* punch-code engine client-side when `gfxTickRate === 0`!
+3. **Small opcode rough edges:**
+   * `Xr` has a comment saying it should support `W` registers (`// if this is a 'W' it should use the value in the register`), which isn't wired up yet.
+   * `XnVz` checks `LOWER_NUM.indexOf(zToken.charAt(1)) !== -1`—if someone passes `W@` (`@` is in `LOWER_NUM`, wait—`@` *is* in `LOWER_NUM` in `UNIVAC`, good, though `^W[a-z@]$` is cleaner and matches `Xs`).
+   * `Vx` creates its `futureTimestamp(1)` marker without the `'X'` lazy-GC prefix (`var tsMarker = _deps.futureTimestamp(1);`), whereas `Vy`, `Vm`, `Vd`, `Xt` use `'X' + _deps.futureTimestamp(1)` (or wait—`Vy` and `Xz` also omit `'X'` on the marker!). Worth standardizing whether markers expire after 1 minute or persist.
+   * `case 'Xx':` only has `break;` inside `if (!switchopen)`, so if `switchopen` is true it silently falls through into `case 'S^':`!
+   * `W` register values in `cylon-gfx-itemid.js` vs `qandyland-univac.js`: `cylon-gfx-itemid.js` is super helpful as the living reference for the punch-code decompiler, and a few implemented opcodes (`Vc`, `Vx`, `Vy`, `Vz`, `W5`, `W6`, `W7`) are ready to be finalized alongside whatever new ones you add for `desktop` / `2029` games.
+
+---
+
+### Summary of the Cleanest Path Forward
+If I were prioritizing what to settle before writing the first games in the new editor:
+1. **Fix the shared `register` per-drive scoping, base-52 `encodeZ`/`decodeZ`, `Xx` fallthrough, and `ifnot` resets** in `UNIVAC` so punch code has zero silent traps.
+2. **Repurpose `W0`/`W1` (and `W4` once moved to `/a/gfxLowerBound`)**—that gives you 5 free system registers (`W0, W1, W4, W8, W9`), one of which could control **movement mode** (e.g., `00` = step-by-step strict, `01` = free `Vz` click-to-move, `02` = open exits without `'e'`).
+3. **Add `Vz` to `plugboard`** gated by that world mode (so `desktop.gfx` gets instant click-to-Z while `capflag` stays tamper-proof).
+4. **Add sector `a` and `z` hooks** cleanly on sector transitions (and filter them in `cylon-gfx.js` `networkTick`).
+
+Which part do you want to zoom in on first—designing the movement/exit rules for `desktop` vs `queville` vs `capflag`, or locking down the `W0`–`W9` and `V`/`X` opcode spec?

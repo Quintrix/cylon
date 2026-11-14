@@ -108,6 +108,7 @@ window.proxyInputMaxLen = null; // NEW
 const PAGES = Object.freeze(new Set([
     'cylon.htm',
     'cylon.cfg',
+    'cylon-theme.htm',
     'cylon-command.htm',
     'cylon-krystals.htm',
     'cylon-files.htm',
@@ -115,15 +116,16 @@ const PAGES = Object.freeze(new Set([
     'cylon-desktop.gfx',
     'cylon-desktop-pc.gfx',
     'cylon-desktop-tv.gfx',
-    'cylon-theme.htm',
     'cylon-calc.htm',
+    'cylon-piano.htm',
     'cylon-gfx.js',
     'cylon-gfx-itemid.js',
     'cylon-gfx-create.htm',
+    'cylon-gfx-edit.htm',
     'cylon-gfx-compiler.htm',
     'cylon-capflag.htm',
     'cylon-capflag.gfx',
-    'cylon-piano.htm',
+    'cylon-qandy.gfx',
     'qandyland.js',
     'qandyland-univac.js',
     'gfx-tileset.htm',
@@ -332,8 +334,8 @@ window.setOSMode = function(mode, promptText) {
         if (window.updatePrompt) window.updatePrompt();
     } else if (mode === 'app') {
         var activeFrame = document.querySelector('.page-frame.active');
-        var title = activeFrame ? activeFrame.dataset.title : 'App';
-        promptEl.textContent = `[ ${title} ]`;
+        var fname = activeFrame && activeFrame.dataset.filename ? activeFrame.dataset.filename : 'App';
+        promptEl.textContent = fname;
     } else if (mode === 'app-edit' || mode === 'app-textarea') {
         if (promptText) promptEl.textContent = promptText;
     }
@@ -342,13 +344,25 @@ window.setOSMode = function(mode, promptText) {
 };
 
 window.toggleAppFocus = function() {
-    if (osMode !== 'app' && osMode !== 'app-cli') return;
+    if (osMode !== 'app' && osMode !== 'app-cli' && osMode !== 'app-edit' && osMode !== 'app-textarea') return;
     var activeFrame = document.querySelector('.page-frame.active');
     
-    if (osMode === 'app') {
+    if (osMode === 'app' || osMode === 'app-edit' || osMode === 'app-textarea') {
+        // Automatically commit changes to the iframe when switching focus
+        if (osMode === 'app-edit' || osMode === 'app-textarea') {
+            if (activeFrame) {
+                activeFrame.contentWindow.postMessage({
+                    type: 'QANDY_COMMIT_INPUT',
+                    id: proxyInputId,
+                    value: inputBuffer
+                }, (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
+            }
+        }
+        
         window.setOSMode('app-cli');
         if (activeFrame) activeFrame.blur();
         window.focus(); // Pull focus back to OS terminal
+        if (typeof window.hideFullKeyboard === 'function') window.hideFullKeyboard();
     } else {
         window.setOSMode('app');
         if (activeFrame) activeFrame.focus(); // Push focus to iframe
@@ -455,20 +469,25 @@ window.addEventListener('message', function(e) {
         if (window.pasteText) window.pasteText(e.data.text);
     } else if (e.data.type === 'QANDY_APP_CLICKED') {
         // If the user clicks the app's visual layer, abort the hybrid CLI mode
-        if (osMode === 'app-cli') {
-            window.setOSMode('app');
-            if (typeof window.hideFullKeyboard === 'function') window.hideFullKeyboard();
-        }
-    } else if (e.data.type === 'QANDY_PASTE') {
-        if (window.pasteText) window.pasteText(e.data.text);
-    } else if (e.data.type === 'QANDY_APP_CLICKED') {
-        // If the user clicks the app's visual layer, abort the hybrid CLI mode
-        if (osMode === 'app-cli') {
+        if (osMode === 'app-cli' || osMode === 'app-edit' || osMode === 'app-textarea') {
+            
+            // Automatically commit data back to the iframe on click-away
+            if (osMode === 'app-edit' || osMode === 'app-textarea') {
+                var activeFrame = document.querySelector('.page-frame.active');
+                if (activeFrame) {
+                    activeFrame.contentWindow.postMessage({
+                        type: 'QANDY_COMMIT_INPUT',
+                        id: proxyInputId,
+                        value: inputBuffer
+                    }, (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
+                }
+            }
+            
             window.setOSMode('app');
             if (typeof window.hideFullKeyboard === 'function') window.hideFullKeyboard();
         }
     } else if (e.data.type === 'QANDY_PREFILL') {
-        // NEW: Route SDK prefill requests to the terminal
+        // Route SDK prefill requests to the terminal
         if (window.prefillTerminal) window.prefillTerminal(e.data.cmd);
     }
 });

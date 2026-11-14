@@ -24,6 +24,10 @@ if (typeof UNIVAC !== 'undefined' && window.GfxSyncFS) {
     UNIVAC.inject(window.GfxSyncFS);
 }
 
+const QANDY_UPPER = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const QANDY_LOWER = "abcdefghijklmnopqrstuvwxyz";
+const QANDY_SYM   = "0123456789_()[]{}^,:;+-=%@";
+
 window.CylonGFX = {
     // --- GFX Configuration Defaults ---
     gfxTileSize: 32,
@@ -62,6 +66,38 @@ window.CylonGFX = {
     gfxGrid: false, 
     lastRenderedItems: "",
     isSyncing: false,
+
+    // --- NEW: Z-Coordinate Encoders ---
+    encodeZ: function(z, base) {
+        if (base === 52) {
+            if (z < 0 || z >= 1352) return "Aa"; 
+            if (z < 676) {
+                return QANDY_UPPER[Math.floor(z / 26)] + QANDY_LOWER[z % 26];
+            } else {
+                let z2 = z - 676;
+                return QANDY_UPPER[Math.floor(z2 / 26)] + QANDY_SYM[z2 % 26];
+            }
+        }
+        return z.toString(base).toUpperCase().padStart(2, '0');
+    },
+
+    decodeZ: function(zStr, base) {
+        if (base === 52) {
+            if (!zStr || zStr.length !== 2) return 0;
+            let first = QANDY_UPPER.indexOf(zStr.charAt(0));
+            if (first === -1) return 0;
+            
+            let secondLower = QANDY_LOWER.indexOf(zStr.charAt(1));
+            if (secondLower !== -1) return (first * 26) + secondLower;
+            
+            let secondSym = QANDY_SYM.indexOf(zStr.charAt(1));
+            if (secondSym !== -1) return 676 + (first * 26) + secondSym;
+            
+            return 0;
+        }
+        let val = parseInt(zStr, base);
+        return isNaN(val) ? 0 : val;
+    },
 
     persistState: async function(path, data) {
         let safeData = String(data || "\\n");
@@ -151,8 +187,7 @@ window.CylonGFX = {
         if (lBound) this.gfxLowerBound = lBound.trim();
         if (aLock) this.gfxAirLock = (aLock.trim().toLowerCase() === 'true');
         if (cLog) this.gfxCommandLog = (cLog.trim().toLowerCase() === 'true');
-        // Zero means one explicit connection/update only; positive values are
-        // the periodic network poll interval in milliseconds.
+
         this.gfxTickRate = tickRate !== null && tickRate !== undefined && tickRate.trim() !== ''
             ? Math.max(0, parseInt(tickRate, 10) || 0)
             : 250;
@@ -164,8 +199,7 @@ window.CylonGFX = {
         }
 
         if (pItem) window.playerItem = pItem.trim();
-        window.playerZ = cz ? parseInt(cz, this.gfxZBase) : 0;
-        if (isNaN(window.playerZ)) window.playerZ = 0;
+        window.playerZ = cz ? this.decodeZ(cz, this.gfxZBase) : 0;
         
         this.startCursorTick();
         window.dispatchEvent(new Event('resize'));
@@ -274,14 +308,9 @@ window.CylonGFX = {
         }
     },
 
-    // ------------------------------------------------------------------------
-    // MULTIPLAYER PHYSICS ENGINE NETWORKING LOOP 
-    // ------------------------------------------------------------------------
     startNetworkTick: function() {
         if (this.networkInterval) clearInterval(this.networkInterval);
         this.networkInterval = null;
-        // Always do one explicit handshake/update. A tick rate of zero disables
-        // only the recurring poll, so initial session setup still takes place.
         this.networkTick();
         const rate = Number.isFinite(this.gfxTickRate) ? this.gfxTickRate : 250;
         if (rate > 0) this.networkInterval = setInterval(() => this.networkTick(), rate);
@@ -323,8 +352,7 @@ window.CylonGFX = {
                     if (this.gfxTickRate !== 0) {
                         window.playerItem = response.substring(col + 2, col + 4);
                         let zStr = response.substring(col + 4, col + 6);
-                        let parsedZ = parseInt(zStr, this.gfxZBase);
-                        // Stop server ticks overriding player walk routines when stepping
+                        let parsedZ = this.decodeZ(zStr, this.gfxZBase);
                         if (window.playerWalk === -1) {
                             window.playerZ = parsedZ;
                         }
@@ -343,8 +371,6 @@ window.CylonGFX = {
                             pathChanged = true;
                         }
                     }
-                    // RF consumes the remainder of the response in both modes;
-                    // in desktop mode do not reconcile or overwrite local files.
                     col = response.length;
                 }
                 else if (cmd === 'S^') {
@@ -364,7 +390,6 @@ window.CylonGFX = {
             
             this.setCursorZ(window.playerZ);
             
-            // Sync items safely to DOS mirroring Unix files as objects so they can be interacted with natively
             if (pathChanged || newItems !== this.lastRenderedItems) {
                 this.lastRenderedItems = newItems;
                 
@@ -527,7 +552,7 @@ window.CylonGFX = {
                     }
                     
                     if (id && id.length === 2) {
-                        let zHex = window.playerZ.toString(this.gfxZBase).padStart(2, '0');
+                        let zHex = this.encodeZ(window.playerZ, this.gfxZBase);
                         dataField = dataField.substring(0, 2).padEnd(2, 'a');
                         
                         let filename = id + zHex + dataField;
@@ -552,7 +577,7 @@ window.CylonGFX = {
                     
                     if (id && id.length >= 2) {
                         id = id.substring(0, 2);
-                        let zHex = window.playerZ.toString(this.gfxZBase).padStart(2, '0');
+                        let zHex = this.encodeZ(window.playerZ, this.gfxZBase);
                         
                         let filename = id + zHex;
                         let pathPrefix = this.currentPath.endsWith('/') ? this.currentPath : this.currentPath + '/';
@@ -672,7 +697,7 @@ window.CylonGFX = {
             `;
             container.appendChild(meterEl);
         }
-        return null; // Return null so outer wrapper understands image hasn't triggered single-tile onload mapping
+        return null;
     },
 
     renderScreen: async function() {
@@ -706,7 +731,6 @@ window.CylonGFX = {
         try { tData = await dos.load(`${this.currentPath}/m`); } catch (e) { }
 
         if (tData) {
-            // FIX 2: Strip newlines/spaces so visually formatted 'm' files parse correctly
             tData = tData.replace(/\s+/g, ''); 
 
             let expectedLen = this.gridWide * this.gridTall * 2;
@@ -756,7 +780,6 @@ window.CylonGFX = {
                 let pubId = filename.length >= 8 ? filename.substring(4, 8) : "";
                 let avatarStr = filename.length > 8 ? filename.substring(8) : "";
 
-                // Intercept our actual local player instance and capture their avatar metadata
                 let isLocalPlayer = (iconId === window.playerItem && (pubId === window.playerId || !window.playerId));
                 if (isLocalPlayer) {
                     window.playerAvatar = avatarStr;
@@ -765,7 +788,7 @@ window.CylonGFX = {
 
                 let labelText = typeof window.gfxItemID === 'function' ? window.gfxItemID(iconId) : iconId;
                 
-                let z = parseInt(zHex, this.gfxZBase);
+                let z = this.decodeZ(zHex, this.gfxZBase);
                 if (isNaN(z)) continue; 
 
                 let x = z % this.gridWide;
@@ -815,7 +838,6 @@ window.CylonGFX = {
         lbl.className = 'icon-label';
         lbl.textContent = labelText;
         
-        // Large Item Adjustment (T and U rows anchor their bottom-right to the visual layout)
         if (img && (iconId.charAt(0) === 'T' || iconId.charAt(0) === 'U')) {
             img.onload = function() {
                 let tilesX = Math.round(this.naturalWidth / 32);
@@ -883,7 +905,7 @@ window.CylonGFX = {
         this.renderCursor(); 
         
         let drive = this.currentPath.split(':')[0] || 'ram';
-        this.persistState(`${drive}:/a/playerZ`, window.playerZ.toString());
+        this.persistState(`${drive}:/a/playerZ`, this.encodeZ(window.playerZ, this.gfxZBase));
     },
 
     calculateTargetSector: function(currentSector, dirChar, maxMapBounds, roundWorld) {
@@ -1006,8 +1028,6 @@ window.CylonGFX = {
         if (ny >= this.gridTall) ny = this.gridTall - 1;
         
         let targetZ = ny * this.gridWide + nx;
-
-        // Let UNIVAC or the server handle the filesystem update
         
         this.setCursorZ(targetZ);
 
@@ -1170,7 +1190,7 @@ window.CylonGFX = {
         const slash = filePath.lastIndexOf('/');
         const basename = filePath.substring(slash + 1);
         if (basename.length < 4) return false;
-        const zText = Number(z).toString(this.gfxZBase || 10).padStart(2, '0');
+        const zText = this.encodeZ(z, this.gfxZBase || 10);
         const newName = basename.substring(0, 2) + zText + basename.substring(4);
         if (newName === basename) {
             await this.renderScreen();
@@ -1216,9 +1236,7 @@ window.CylonGFX = {
         let tData = "";
         try { tData = await dos.load(tPath); } catch (e) {}
         if (!tData) tData = "";
-        // FIX: Strip spaces from existing data so we don't accidentally corrupt it
         tData = tData.replace(/\s+/g, '');
-
 
         let expectedLen = this.gridWide * this.gridTall * 2;
         if (tData.length < expectedLen) {

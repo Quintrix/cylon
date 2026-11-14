@@ -2,7 +2,7 @@
   "format": "qandy-ramdrive",
   "version": 2,
   "drive": "queville",
-  "created": "2026-11-11T04:09:04.967Z",
+  "created": "2026-11-14T01:34:16.086Z",
   "entries": [
     {
       "name": "a",
@@ -64,6 +64,16 @@
       "readOnly": false
     },
     {
+      "name": "a/gfxSector",
+      "type": "file",
+      "content": "Cg",
+      "size": 2,
+      "timestamp": "20261113203302",
+      "owner": "",
+      "session": "",
+      "readOnly": false
+    },
+    {
       "name": "a/gfxSpawn",
       "type": "file",
       "content": "Bc",
@@ -96,9 +106,9 @@
     {
       "name": "a/playerZ",
       "type": "file",
-      "content": "101",
-      "size": 3,
-      "timestamp": "20261110221946",
+      "content": "32",
+      "size": 2,
+      "timestamp": "20261113203304",
       "owner": "",
       "session": "",
       "readOnly": false
@@ -625,11 +635,21 @@
       "readOnly": false
     },
     {
+      "name": "w/Bc/Ze65Za",
+      "type": "file",
+      "content": "VtCgZe",
+      "size": 6,
+      "timestamp": "20261113203225",
+      "owner": "",
+      "session": "",
+      "readOnly": false
+    },
+    {
       "name": "w/Bc/Zm21Za",
       "type": "file",
-      "content": "\\n",
+      "content": "Vc",
       "size": 2,
-      "timestamp": "20261106230150",
+      "timestamp": "20261113202945",
       "owner": "",
       "session": "",
       "readOnly": false
@@ -1050,6 +1070,16 @@
       "timestamp": "20261106201710",
       "owner": "system",
       "session": "system",
+      "readOnly": false
+    },
+    {
+      "name": "w/Cg/Ze2FZa",
+      "type": "file",
+      "content": "VtBcZe",
+      "size": 6,
+      "timestamp": "20261113203243",
+      "owner": "",
+      "session": "",
       "readOnly": false
     },
     {

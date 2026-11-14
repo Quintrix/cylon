@@ -1,3 +1,4 @@
+
 /* --- POWER ON / BOOT OVERLAY --- */
         #power-overlay {
             position: fixed;
@@ -170,24 +171,27 @@
         }
 
         #kb-input-lines {
+            position: relative;
             flex: 1 1 auto;
             min-width: 0;
             display: flex;
             flex-direction: column;
+            align-self: stretch;
+            justify-content: center;
         }
 
         /* --- TEXTAREA MULTI-LINE OVERLAY --- */
         #kb-textarea-view {
             display: none;
             position: absolute;
-            bottom: 0; 
+            bottom: 100%; 
             left: 0; 
             right: 0;
             height: 160px; /* ~5 Rows of text overlay */
             background: rgba(8, 12, 8, 0.98);
             border: 1px solid #0a0;
-            border-bottom: none;
             border-radius: 4px 4px 0 0;
+
             padding: 8px 10px;
             box-sizing: border-box;
             overflow-y: auto;
@@ -209,9 +213,10 @@
             font-family: var(--font-face, monospace);
         }
 
-        body.textarea-mode #kb-line1,
+        /* UPDATED: Only hide the text content on line 1, allow the prompt itself to remain visible! */
+        body.textarea-mode #kb-input-render1,
         body.textarea-mode #kb-line2 {
-            display: none; /* Hide single-line interface */
+            display: none; 
         }
 
         body.textarea-mode #kb-textarea-view {
@@ -360,16 +365,20 @@ body.app-mode #app-taskbar {
 }
 
 .taskbar-sys-btn {
-    background: var(--menu-bg, #0a220a);
-    color: var(--fg-color, #0f0);
-    border: 1px solid var(--fg-color, #0f0);
+    background: var(--menu-bg, #222);
+    color: var(--menu-fg, #aaa);
+    border: 1px solid var(--sel-bg, #333);
     padding: 6px 12px;
     cursor: pointer;
     font-weight: bold;
     border-radius: 4px;
     flex: 0 0 auto;
 }
-.taskbar-sys-btn:active { background: var(--fg-color, #0f0); color: var(--bg-color, #000); }
+.taskbar-sys-btn:active { 
+    background: var(--sel-bg, #111); 
+    color: var(--sel-fg, #0f0); 
+    border-color: var(--sel-fg, #0f0);
+}
 
 #taskbar-app-list {
     display: flex;
@@ -424,4 +433,4 @@ body.app-mode #input-bar {
 /* Hide app tabs while typing to give the input bar full width 
 body.app-mode.kb-open #app-taskbar {
     display: none !important;
-} 
+}

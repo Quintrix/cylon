@@ -18,9 +18,9 @@ window.print = function(text) {
 // ========================================================================
 
 // 1. Popup Management (Routes to CylonPopManager in command.js)
-window.pop = window.popHtm = function(html) {
+window.pop = window.popHtm = function(html, pos) {
     if (window.parent !== window) {
-        window.parent.postMessage({ type: 'CYLON_POP_HTM', html: html }, (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
+        window.parent.postMessage({ type: 'CYLON_POP_HTM', html: html, position: pos }, (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
     }
 };
 

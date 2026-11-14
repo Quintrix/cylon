@@ -3,627 +3,315 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Cylon GFX Map Editor</title>
+<title>Punch Code Compiler</title>
 <script src="cylon-sdk.js"></script>
 <script src="cylon-gfx-itemid.js"></script>
-<script src="cylon-gfx.js"></script>
 <style>
-/* Core OS Styles */
-body, html {
-    margin: 0;
-    padding: 0;
-    width: 100%;
-    height: 100%;
-    background-color: var(--bg-color, #000);
-    color: var(--fg-color, #0f0);
-    font-family: var(--font-face, monospace);
-    display: flex;
-    align-items: flex-start;
-    justify-content: center;
-    overflow: hidden;
-    user-select: none;
-    -webkit-user-select: none;
-}
- 
-#desktop-wrapper {
-   position: relative;
-   background-color: #000;
-   border: 2px solid var(--sel-bg, #333);
-   box-shadow: 0px 10px 30px rgba(0, 0, 0, 0.8);
-   overflow: hidden;
-   box-sizing: border-box; 
-}
- 
-#bg-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; image-rendering: pixelated; }
-#tiles-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 5; }
-#icons-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; }
+    body { background: var(--bg-color, #000); color: var(--fg-color, #0f0); font-family: var(--font-face, monospace); margin: 0; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+    
+    #toolbar {
+        background: var(--bg-color, #111);
+        padding: 10px; 
+        display: flex;
+        justify-content: left;
+        align-items: center; 
+        gap: 10px;
+        flex-wrap: wrap; 
+        border-bottom: 2px solid var(--sel-bg, #333);
+    }
+    
+    .toolbar-actions { display: flex; gap: 8px; align-items: right; }
+    
+    #main-editor {
+        display: flex;
+        flex-direction: column;
+        flex: 1; 
+        padding: 15px; 
+        overflow-y: auto;
+    }
+    
+    .target-label { 
+        font-weight: bold; 
+        background: var(--bg-color, #000); 
+        color: var(--fg-color, #0f0); 
+        font-size: 1.1em; 
+        padding: 6px 12px;
+        border: 1px solid var(--fg-color, #0f0);
+        border-radius: 4px;
+    }
+    
+    textarea { width: 100%; height: 100px; background: var(--input-bg, #000); color: var(--input-fg, #0f0); border: 1px solid var(--fg-color, #0f0); padding: 10px; font-family: monospace; font-size: 16px; resize: none; box-sizing: border-box; margin-top: 15px; }
+    
+    button { padding: 8px 16px; cursor: pointer; background: var(--sel-bg, #333); color: var(--sel-fg, #0f0); border: 1px solid var(--sel-fg, #0f0); font-weight: bold; font-family: inherit; border-radius: 4px; }
+    button:hover { filter: brightness(1.2); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
 
-.icon-wrap {
-   position: absolute;
-   cursor: pointer;
-   display: flex;
-   flex-direction: column;
-   align-items: center;
-   justify-content: center;
-   transition: background-color 0.1s;
-}
+    /* Visual Decompiler Styles */
+    #decompiler-view { 
+        background: var(--case-bg, #080808); 
+        border: 1px solid var(--case-fg, #333);
+        min-height: 60%; 
+        padding: 10px;
+        border-radius: 4px;
+        flex: 1;
+        overflow-y: auto; 
+    }
+    
+    .punchcode-space { width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; background: transparent; }
+    .punchcode-text { display: inline-flex; align-items: center; justify-content: center; background-color: var(--sel-bg, #006600); color: var(--sel-fg, #FFF); font-family: monospace; font-size: 16px; font-weight: bold; border-radius: 4px; width: 32px; height: 32px; vertical-align: middle; margin: 1px; }
+    .punchcode-img { width: 32px; height: 32px; display: inline-block; vertical-align: middle; margin: 1px; background-size: cover; }
+    .punchcode-img img { width: 32px; height: 32px; display: block; image-rendering: pixelated; }
 
-.icon-wrap:hover { 
-    background-color: rgba(255, 255, 255, 0.2); 
-    z-index: 20; 
-}
+    #tooltip { position: absolute; background: var(--menu-bg, #111); color: var(--menu-fg, #aaa); padding: 6px 10px; font-size: 14px; font-weight: bold; pointer-events: none; border: 1px solid var(--menu-fg, #aaa); display: none; z-index: 100; border-radius: 4px; box-shadow: 2px 2px 10px rgba(0,0,0,0.8); }
 
-/* Map Editor Override: Show item name cleanly on hover */
-.icon-wrap:hover::after {
-    content: attr(data-label);
-    position: absolute;
-    bottom: 100%;
-    left: 50%;
-    transform: translateX(-50%);
-    background: var(--menu-bg, #111);
-    color: var(--fg-color, #0f0);
-    border: 1px solid var(--fg-color, #0f0);
-    padding: 2px 6px;
-    font-size: 12px;
-    font-family: var(--font-face, monospace);
-    z-index: 100;
-    pointer-events: none;
-    white-space: nowrap;
-    box-shadow: 2px 2px 5px rgba(0,0,0,0.8);
-}
-
-.icon-img {
-   /* Map Editor Override: Make icons and cursor stretch to fill the 32x32 tile */
-   max-width: 100% !important; 
-   max-height: 100% !important; 
-   width: 100% !important;
-   height: 100% !important;
-   object-fit: fill !important; 
-   image-rendering: pixelated;
-   filter: none !important;
-}
-
-.icon-label {
-   /* Map Editor Override: Hide desktop-style text labels under objects */
-   display: none !important;
-}
-
-/* Editor Specific UI */
-#startup-dialog {
-    position: absolute;
-    top: 50%; left: 50%;
-    transform: translate(-50%, -50%);
-    background: var(--menu-bg, #111);
-    color: var(--menu-fg, #eee);
-    border: 2px solid var(--fg-color, #0f0);
-    padding: 20px;
-    border-radius: 4px;
-    z-index: 2000;
-    box-shadow: 0px 10px 30px rgba(0, 0, 0, 0.9);
-    min-width: 300px;
-}
-.btn {
-    background: var(--sel-bg, #333);
-    color: var(--sel-fg, #0f0);
-    border: 1px solid var(--fg-color, #0f0);
-    padding: 8px 12px;
-    cursor: pointer;
-    font-family: inherit;
-    font-weight: bold;
-    width: 100%;
-    margin-top: 10px;
-}
-.btn:hover { filter: brightness(1.2); }
 </style>
 </head>
 <body>
 
-<div id="startup-dialog">
-    <h2 style="margin-top:0; border-bottom:1px solid var(--fg-color); padding-bottom:10px;">GFX Map Editor</h2>
-    <p>Select a mounted world to edit:</p>
-    <select id="drive-selector" style="width:100%; padding:8px; background:#000; color:var(--fg-color); border:1px solid var(--fg-color); font-family:inherit; margin-bottom:10px; font-weight:bold;">
-        <option value="">Loading drives...</option>
-    </select>
-    <button class="btn" onclick="startEditor()">MOUNT & EDIT</button>
+<div id="toolbar">
+    <div class="target-label">Sector <span id="target-file">None Selected</span></div>
+    <button id="cancel-btn" onclick="cancelEdit()">CANCEL</button>
+    <button id="save-btn" onclick="saveLogic()" disabled>SAVE TO DISK</button>
 </div>
 
-<div id="desktop-wrapper">
-   <canvas id="bg-canvas"></canvas>
-   <div id="tiles-layer"></div>
-   <div id="icons-layer"></div>
+<div id="main-editor">
+    <div id="decompiler-view"></div>
+    <textarea id="punchcodeInput" placeholder="Enter Punch Code logic here..." oninput="onCodeChange()"></textarea>
 </div>
+<div id="tooltip"></div>
 
 <script>
-// ============================================================================
-// GFX EDITOR CLIENT (Unified Map Editing Interface)
-// ============================================================================
+let currentTargetPath = null;
+let originalCode = "";
 
-window.currentBrush = 'Ga';
-window.isFillMode = false;
-window.activeDrive = null;
-
-window.onload = async function() {
+window.onload = function() {
     if (window.CylonSDK && window.CylonSDK.injectDesktopStyles) {
         window.CylonSDK.applyColors(window.parent.CylonColors);
     }
-
-    // Populate Drive Selector
-    let dos = window.parent && window.parent.CylonDOS ? window.parent.CylonDOS : window.CylonDOS;
-    let selector = document.getElementById('drive-selector');
-    
-    if (dos) {
-        let mounts = await dos.mounts();
-        let gfxDrives = mounts.filter(m => m.name.endsWith('.gfx') || m.name === 'capflag' || m.name === 'queville' || m.name === 'desktop');
-        
-        selector.innerHTML = '';
-        if (gfxDrives.length === 0) {
-            selector.innerHTML = '<option value="">(No GFX drives mounted)</option>';
-        } else {
-            gfxDrives.forEach(m => {
-                let opt = document.createElement('option');
-                opt.value = m.name;
-                opt.textContent = `${m.name} [${m.type}]`;
-                selector.appendChild(opt);
-            });
-        }
-    }
-    
-    // Connect Screen Scaling Observer
-    window.addEventListener('resize', fitDesktopToScreen);
-    if (window.ResizeObserver) new ResizeObserver(fitDesktopToScreen).observe(document.body);
+    loadTarget();
 };
 
-async function startEditor() {
-    let driveName = document.getElementById('drive-selector').value;
-    if (!driveName) {
-        alert("Please select a valid GFX drive.");
-        return;
+// Listen for focus/activation from the OS
+window.addEventListener('message', async (e) => {
+    if (e.data.type === 'QANDY_PAGE_ACTIVATED') {
+        await loadTarget();
     }
-    
-    window.activeDrive = driveName;
-    document.getElementById('startup-dialog').style.display = 'none';
-    
-    // Setup Engine Context
-    window.desktopDrive = driveName;
-    window.playerItem = 'Si'; // System cursor icon
-    window.gfxDo = 'RF';
-    
-    // We leave clickMovesCursor false so the override logic can selectively move or open menus
-    window.CylonGFX.clickMovesCursor = false;
-    
-    // Find starting sector (default Aa)
-    let startSector = 'Aa';
-    let dos = window.parent && window.parent.CylonDOS ? window.parent.CylonDOS : window.CylonDOS;
-    try {
-        let loaded = await dos.load(`${driveName}:/a/gfxSector`);
-        if (loaded && loaded.trim().length === 2) {
-            startSector = loaded.trim();
-        } else {
-            let spawnLoaded = await dos.load(`${driveName}:/a/gfxSpawn`);
-            if (spawnLoaded && spawnLoaded.trim().length === 2) startSector = spawnLoaded.trim();
-        }
-    } catch(e) {}
-    
-    // Initialize the engine locally in this iframe
-    await window.CylonGFX.init(`${driveName}:/w/${startSector}`);
-    
-    // Fix asset URLs dynamically like the desktop does
-    let baseUrl = window.cylonHostOrigin || '';
-    if (baseUrl) {
-        if (!window.CylonGFX.gfxTileDir.match(/^https?:\/\//i)) window.CylonGFX.gfxTileDir = baseUrl + window.CylonGFX.gfxTileDir.replace(/^\/+/, '');
-        if (!window.CylonGFX.gfxIconDir.match(/^https?:\/\//i)) window.CylonGFX.gfxIconDir = baseUrl + window.CylonGFX.gfxIconDir.replace(/^\/+/, '');
+});
+
+function formatTargetHeadline(targetPath) {
+    let parts = targetPath.split('/');
+    let filename = parts[parts.length - 1] || '';
+    let sector = parts.length >= 2 ? parts[parts.length - 2] : '';
+
+    if (filename.length >= 4 && sector) {
+        let iconId = filename.substring(0, 2);
+        let zCode = filename.substring(2, 4);
+        let itemLabel = typeof gfxItemID === 'function' ? gfxItemID(iconId) : iconId;
+        return `${sector} ${zCode} "${itemLabel}":`;
     }
-    
-    // Force grid on by default for mappers
-    window.CylonGFX.gfxGrid = true;
-    
-    await window.CylonGFX.renderScreen();
+    return targetPath;
 }
 
-// ----------------------------------------------------------------------------
-// OVERRIDE: GFX CONTEXT MENU
-// ----------------------------------------------------------------------------
-window.CylonGFX.showTargetMenu = async function(z, clientX, clientY) {
-    let x = z % this.gridWide;
-    let y = Math.floor(z / this.gridWide);
-
-    // Single Click: Snap Cursor, Double Click: Open Menu
-    if (window.playerZ !== z) {
-        this.setCursorZ(z);
-
-        // If Fill Mode is active, paint the tile immediately
-        if (this.fillTileCode) {
-            await this.setTileAtCursor(this.fillTileCode);
-        }
-
-        // Handle AirLock edge scrolling logic for map editors testing scroll-based games
-        if (this.gfxAirLock) {
-            let dirChar = null;
-            if (y === 0) dirChar = 'N';
-            else if (y === this.gridTall - 1) dirChar = 'S';
-            else if (x === this.gridWide - 1) dirChar = 'E';
-            else if (x === 0) dirChar = 'W';
-
-            if (dirChar) {
-                let parts = this.currentPath.split('/');
-                let currentSector = parts[parts.length - 1];
-                let nextSector = this.calculateTargetSector(currentSector, dirChar, this.gfxLowerBound, this.gfxRoundWorld);
-                
-                if (nextSector) {
-                    let targetZ = z;
-                    // Place cursor on the opposite edge to simulate a continuous walk
-                    if (dirChar === 'E') targetZ = (y * this.gridWide) + 0;
-                    if (dirChar === 'W') targetZ = (y * this.gridWide) + (this.gridWide - 1);
-                    if (dirChar === 'S') targetZ = (0 * this.gridWide) + x;
-                    if (dirChar === 'N') targetZ = ((this.gridTall - 1) * this.gridWide) + x;
-                    
-                    this.setCursorZ(targetZ);
-                    await window.CylonCommand(`gfx tele ${nextSector}`);
-                }
-            }
-        }
-        return;
-    }
-
-    if (!window.parent || !window.parent.CylonPopManager) return;
-    
+async function loadTarget() {
     let dos = window.parent.CylonDOS;
-    let mPath = this.currentPath + '/m';
-    
-    // Read the actual tile data safely to see what tile the cursor is hovering
-    let tData = "";
-    try { tData = await dos.load(mPath); } catch (e) {}
-    tData = tData.replace(/\s+/g, '');
-    let currentTile = tData.substring(z * 2, z * 2 + 2) || 'Za';
-
-    // Scan for existing items/objects on this exact Z tile
-    let existingItems = [];
-    let iconWraps = document.querySelectorAll(`.icon-wrap[data-z="${z}"]`);
-    iconWraps.forEach(wrap => {
-        let labelText = wrap.getAttribute('data-label');
-        let path = wrap.getAttribute('data-path');
-        if (path) {
-            existingItems.push({ labelText, path });
-        }
-    });
-
-    let items = [];
-    let parts = this.currentPath.split('/');
-    let currentSector = parts[parts.length - 1];
-    
-    const groundChars = "abcdefghijklmnopqrstuvwxyz";
-    const extChars    = "0123456789_()[]{}^,:;+-=%@";
-    let secondChar = currentSector.charAt(1);
-
-    // Header Info & Export Tool
-    let zHex = Number(z).toString(this.gfxZBase || 10).padStart(2, '0');
-    items.push({ label: `Sector ${currentSector} Z ${zHex} Tile ${currentTile}`, action: () => {
-        showGfxSubMenu(clientX, clientY);
-    }});
-
-    // Extended Map Navigation
-    if (extChars.includes(secondChar)) {
-        let idx = extChars.indexOf(secondChar);
-        let groundSector = currentSector.charAt(0) + groundChars[idx];
-        items.push({ label: `Exit Extended City ${groundSector}`, action: async () => {
-            await window.CylonCommand(`gfx tele ${groundSector}`);
-        }});
-    } else if (groundChars.includes(secondChar)) {
-        let idx = groundChars.indexOf(secondChar);
-        let extSector = currentSector.charAt(0) + extChars[idx];
-        items.push({ label: `Enter Extended Map ${extSector}`, action: async () => {
-            await window.CylonCommand(`gfx tele ${extSector}`);
-        }});
-    }
-
-    // Edit existing objects if present
-    if (existingItems.length > 0) {
-        existingItems.forEach(item => {
-            items.push({ label: `Edit ${item.labelText}`, action: async () => {
-                //
-                // need to figure out best way to edit files
-                //
-                //await window.CylonCommand(`delete ${item.path}`);
-                //setTimeout(() => window.CylonGFX.renderScreen(), 100);
-            }});
-        });
-    }
-    
-    // Delete existing objects if present
-    if (existingItems.length > 0) {
-        existingItems.forEach(item => {
-            items.push({ label: `Delete ${item.labelText}`, action: async () => {
-                await window.CylonCommand(`delete ${item.path}`);
-                setTimeout(() => window.CylonGFX.renderScreen(), 100);
-            }});
-        });
-    }
-
-    // Core Map Painting Tools
-    items.push({ label: `Get Tile [${currentTile}]`, action: () => { 
-        window.currentBrush = currentTile; 
-    }});
-    
-    items.push({ label: `Paint Tile [${window.currentBrush}]`, action: async () => { 
-        await window.CylonCommand(`gfx tile ${window.currentBrush}`);
-    }});
-    
-    items.push({ label: window.isFillMode ? 'Disable Fill Mode' : `Tile Fill Mode [${window.currentBrush}]`, action: async () => {
-        window.isFillMode = !window.isFillMode;
-        await window.CylonCommand(`gfx fill ${window.isFillMode ? window.currentBrush : ''}`);
-    }});
-
-    // FIX: Dynamically find the index of the Paint Tile option
-    let paintIdx = items.findIndex(i => i.label.startsWith('Paint Tile ['));
-
-    // Execute the popup
-    let mockEvent = { clientX, clientY, view: window };
-    window.parent.CylonPopManager.showContextMenu(mockEvent, items);
-    
-    // Inject Tile Visuals into the Context Menu DOM dynamically using the correct index
-    if (paintIdx > -1) {
-        setTimeout(() => {
-            try {
-                let menuEls = window.parent.CylonPopManager.menuElements;
-                if (menuEls && menuEls.length > paintIdx) {
-                    let paintEl = menuEls[paintIdx];
-                    paintEl.innerHTML = `<img src="${window.CylonGFX.gfxTileDir}${window.currentBrush}.png" style="width:16px;height:16px;vertical-align:middle;image-rendering:pixelated;margin-right:6px;border:1px solid #555;"> Paint Tile [${window.currentBrush}]`;
-                }
-            } catch(e) {}
-        }, 10);
-    }
-};
-
-// ----------------------------------------------------------------------------
-// OVERRIDE: SCROLL INTERCEPT (Return to Ground Level from Extended Maps)
-// ----------------------------------------------------------------------------
-const _origCalculateTargetSector = window.CylonGFX.calculateTargetSector;
-
-window.CylonGFX.calculateTargetSector = function(currentSector, dirChar, maxMapBounds, roundWorld) {
-    const groundChars = "abcdefghijklmnopqrstuvwxyz";
-    const extChars    = "0123456789_()[]{}^,:;+-=%@";
-    
-    if (currentSector && currentSector.length >= 2) {
-        let secondChar = currentSector.charAt(1);
-        
-        // If the user tries to scroll off the edge of an extended map...
-        if (extChars.includes(secondChar)) {
-            let idx = extChars.indexOf(secondChar);
-            
-            // ...intercept the scroll and drop them on the matching ground map instead!
-            return currentSector.charAt(0) + groundChars[idx];
-        }
-    }
-
-    // Otherwise, proceed with the standard N/S/E/W map bounds calculation
-    return _origCalculateTargetSector.call(this, currentSector, dirChar, maxMapBounds, roundWorld);
-};
-
-window.showGfxSubMenu = async function(clientX, clientY) {
-    let dos = window.parent && window.parent.CylonDOS ? window.parent.CylonDOS : window.CylonDOS;
-    let drive = window.activeDrive;
-    let alphaDir = drive + ':/a';
-
-    let items = [
-        {
-            label: `Save Drive to File`,
-            action: () => window.CylonCommand(`export ${drive} ${drive}.gfx`)
-        },
-        {
-            label: `Copy Drive to Clipboard`,
-            action: () => window.CylonCommand(`export ${drive} <c>`)
-        }
-    ];
-
-    // Dictionary of known variables and their descriptions
-    const knownVars = {
-        gfxCharDir: "character image directory",
-        gfxIconDir: "icon image directory",
-        gfxTileDir: "tile image directory",
-        gfxMapsDir: "map image directory",
-        gfxIconSize: "size of icons (32, 48, 64, etc)",
-        gfxGridTall: "sector height in number of tiles",
-        gfxGridWide: "sector width in number of tiles",
-        gfxLowerBound: "lower bounds of map (ie: Hh, Zz)",
-        gfxGridStretch: "if true, stretch grid to fill full screen",
-        gfxRoundWorld: "if true, world is round and can scroll A <-> Z",
-        gfxAirLock: "if true, automatic scrolling on edge tiles",
-        gfxCommandLog: "if true, commands sent via CylonCommand() as if the user had typed them",
-        gfxCycle: "speed player moves from tile to tile",
-        gfxSector: "current map sector being rendered",
-        gfxTickRate: "How often client pings the server, 0 = single player, capflag = 1 second",
-        gfxSpawn: "The first map sector players start on",
-        gfxSpawnZ: "The z-location of the player item for gfxSpawn"
-    };
-
-    // Use a Set to merge known variables and any dynamically discovered files
-    let allVars = new Set(Object.keys(knownVars));
+    if (!dos) return;
     
     try {
-        let alphaFiles = await dos.dir(alphaDir);
-        if (alphaFiles && alphaFiles.length > 0) {
-            for (let file of alphaFiles) {
-                if (file.type === 'file' && !file.name.includes('_dir.sys!')) {
-                    let varName = file.name.substring(file.name.lastIndexOf('/') + 1);
-                    allVars.add(varName); // Adds dynamically discovered files
-                }
-            }
-        }
-    } catch (e) {
-        // '/a/' directory might not exist yet, we will just use the knownVars list
-    }
-
-    // Sort alphabetically so the menu is easy to read
-    let sortedVars = Array.from(allVars).sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
-
-    for (let varName of sortedVars) {
-        let desc = knownVars[varName] || "unknown";
-        let val = ''; // Default value if the file does not exist
+        let targetPath = await dos.load('cylon:/a/gfxEditTarget');
+        if (targetPath) targetPath = targetPath.trim();
         
-        try {
-            if (await dos.exists(alphaDir + '/' + varName)) {
-                let rawVal = await dos.load(alphaDir + '/' + varName);
-                val = String(rawVal == null ? '' : rawVal).trim().replace(/\n/g, '\\n');
-            }
-        } catch (e) {
-            // Keep default 'false' on error
+        if (targetPath && targetPath !== currentTargetPath) {
+            currentTargetPath = targetPath;
+            document.getElementById('target-file').innerText = formatTargetHeadline(currentTargetPath);
+            
+            let logic = await dos.load(currentTargetPath);
+            if (logic === null) logic = ""; // Handle empty/new files
+            logic = logic.replace(/\\n/g, '\n'); // Expand escaped newlines
+            
+            originalCode = logic;
+            document.getElementById('punchcodeInput').value = logic;
+            document.getElementById('save-btn').disabled = true;
+            
+            decompilepunchcode(logic);
         }
+    } catch(e) {
+        console.warn("Could not read edit target", e);
+    }
+}
 
-        // Create a clean display string for the menu label (e.g. "gfxRoundWorld = true")
-        let displayCmd = `save ${varName} ${val}`;
-        if (displayCmd.length > 32) displayCmd = displayCmd.substring(0, 29) + '...';
+function cancelEdit() {
+    currentTargetPath = null;
+    originalCode = "";
+    document.getElementById('target-file').innerText = "None Selected";
+    document.getElementById('punchcodeInput').value = "";
+    document.getElementById('save-btn').disabled = true;
+    document.getElementById('decompiler-view').innerHTML = "";
 
-        items.push({
-            label: displayCmd,
-            action: async () => {
-                let actualCmd = `save ${alphaDir}/${varName} ${val}`;
-                
-                if (window.CylonPrefill) {
-                    // Prefill the command line buffer safely
-                    window.CylonPrefill(actualCmd);
-                    
-                    // Pop instructions dynamically positioned at the TOP of the screen 
-                    // using inline CSS so it doesn't get covered by the virtual keyboard
-                    if (window.pop) {
-                        let html = `
-                            <div style="position:fixed; top:10px; left:50%; transform:translateX(-50%); text-align:center; padding:15px; background:var(--menu-bg,#111); border:2px solid var(--fg-color,#0f0); box-shadow:0 6px 20px rgba(0,0,0,0.9); border-radius:4px; min-width:260px; z-index:100000;">
-                                <div style="font-weight:bold; font-size:16px; margin-bottom:5px; color:var(--fg-color,#0f0);">${varName}</div>
-                                <div style="font-size:12px; color:var(--menu-fg,#aaa); margin-bottom:15px;">${desc}</div>
-                                <div style="font-size:14px; line-height: 1.4;">Edit value on command line<br>and press <b>ENTER</b> to save.</div>
-                            </div>
-                        `;
-                        // "center" is used as the alignment parameter, but the CSS override inside handles the fixed top positioning
-                        window.pop(html, "center");
-                    }
-                } else {
-                    // Graceful fallback if sdk isn't updated yet
-                    window.CylonCommand(actualCmd);
-                }
-            }
+    if (window.parent && typeof window.parent.PageOpen === 'function') {
+        window.parent.PageOpen('cylon-gfx-create.htm');
+    } else if (window.parent && typeof window.parent.showPage === 'function') {
+        window.parent.showPage('cylon-gfx-create.htm');
+    } else if (typeof window.CylonCommand === 'function') {
+        window.CylonCommand('cylon-gfx-create.htm');
+    }
+}
+
+function onCodeChange() {
+    let currentCode = document.getElementById('punchcodeInput').value;
+    document.getElementById('save-btn').disabled = (currentCode === originalCode);
+    decompilepunchcode(currentCode);
+}
+
+async function saveLogic() {
+    if (!currentTargetPath) return;
+    
+    let currentCode = document.getElementById('punchcodeInput').value;
+    // Condense for file storage
+    let safeCode = currentCode.replace(/\n/g, '\\n');
+    if (safeCode.trim() === '') safeCode = '\\n'; 
+    
+    // Save via terminal command so it registers in history and triggers GFX hooks
+    await window.CylonCommand(`save ${currentTargetPath} ${safeCode}`);
+    
+    originalCode = currentCode;
+    document.getElementById('save-btn').disabled = true;
+    
+    // Quick popup notification
+    if (window.popHtm) {
+        window.PopAlign = "center";
+        window.popHtm(`<div style="padding:15px; background:var(--menu-bg); border:1px solid var(--menu-fg); color:var(--menu-fg); text-align:center;"><b>Saved successfully!</b></div>`);
+        setTimeout(() => { if(window.hpop) window.hpop(); }, 1000);
+    }
+}
+
+// ---------------------------------------------------------
+// Visual Decompiler Engine (Stripped Down)
+// ---------------------------------------------------------
+
+function getCodeDescription(code) {
+    if (code === "Za") return "nothing (null)";
+    let itemText = typeof gfxItemID === "function" ? gfxItemID(code) : "Unknown";
+    if (itemText !== "Item " + code && itemText !== "Unknown") return itemText;
+    return `code "${code}"`;
+}
+
+function decompilepunchcode(initialCode) {
+    const container = document.getElementById('decompiler-view');
+    container.innerHTML = "";
+    if (!initialCode) return;
+    
+    let hostOrigin = window.cylonHostOrigin || '';
+    let iconBase = (window.parent.CylonGFX && window.parent.CylonGFX.gfxIconDir) ? window.parent.CylonGFX.gfxIconDir : (hostOrigin + 'i/');
+    let tileBase = (window.parent.CylonGFX && window.parent.CylonGFX.gfxTileDir) ? window.parent.CylonGFX.gfxTileDir : (hostOrigin + 't/');
+
+    function bindHover(element, desc, startIdx, endIdx) {
+        element.style.cursor = "pointer";
+        element.addEventListener('mousemove', (e) => {
+            const ta = document.getElementById('punchcodeInput');
+            ta.focus({ preventScroll: true });
+            ta.setSelectionRange(startIdx, endIdx);
+
+            const tooltip = document.getElementById('tooltip');
+            tooltip.style.display = 'block';
+            tooltip.innerText = desc;
+            tooltip.style.left = (e.pageX + 15) + 'px';
+            tooltip.style.top = (e.pageY + 15) + 'px';
+        });
+        element.addEventListener('mouseleave', () => {
+            document.getElementById('tooltip').style.display = 'none';
         });
     }
 
-    let mockEvent = { clientX, clientY, view: window };
-    window.parent.CylonPopManager.showContextMenu(mockEvent, items);
-};
+    let col = 0;
+    let ifnot = false;
+    let ifnotStartIdx = null;
+    let srcString = initialCode;
 
-// ----------------------------------------------------------------------------
-// ADD ITEM / OBJECT DIALOG (Native OS Popups)
-// ----------------------------------------------------------------------------
-window.showAddDialog = function(type, z) {
-    let title = type === 'item' ? 'Add Item' : 'Add Object';
-    
-    let html = `
-        <div style="padding: 15px; background: var(--menu-bg, #111); color: var(--menu-fg, #eee); border: 2px solid var(--fg-color, #0f0); font-family: var(--font-face, monospace); box-shadow: 4px 4px 15px rgba(0,0,0,0.8);">
-            <h3 style="margin-top:0; border-bottom: 2px solid var(--menu-fg); padding-bottom: 5px;">${title} @ Z:${z}</h3>
-            <div style="margin-bottom: 12px;">
-                <label style="font-size: 14px;">ID Code (2 chars):</label><br>
-                <input type="text" id="add-id-input" maxlength="2" placeholder="e.g. Ca" style="width: 80px; background: var(--input-bg, #000); color: var(--input-fg, #0f0); border: 1px solid var(--fg-color, #0f0); font-family: inherit; font-size: 16px; padding: 4px;">
-            </div>
-            ${type === 'obj' ? `
-            <div style="margin-bottom: 12px;">
-                <label style="font-size: 14px;">Data (Optional 2 chars):</label><br>
-                <input type="text" id="add-data-input" maxlength="2" placeholder="00" style="width: 80px; background: var(--input-bg, #000); color: var(--input-fg, #0f0); border: 1px solid var(--fg-color, #0f0); font-family: inherit; font-size: 16px; padding: 4px;">
-            </div>
-            ` : ''}
-            <div style="display: flex; gap: 8px; margin-top: 15px;">
-                <button onclick="var f=document.querySelector('.page-frame.active'); if(f) f.contentWindow.submitAdd('${type}'); else if(window.submitAdd) window.submitAdd('${type}');" style="flex: 1; background: var(--sel-bg, #333); color: var(--sel-fg, #0f0); border: 1px solid var(--fg-color, #0f0); padding: 8px; cursor: pointer; font-weight: bold; font-family: inherit;">ADD</button>
-                <button onclick="if(window.hpop) window.hpop();" style="flex: 1; background: var(--menu-bg, #333); color: var(--menu-fg, #aaa); border: 1px solid var(--menu-fg, #555); padding: 8px; cursor: pointer; font-weight: bold; font-family: inherit;">CANCEL</button>
-            </div>
-        </div>
-    `;
-    
-    if (window.parent && window.parent.popHtm) {
-        window.parent.PopAlign = "center";
-        window.parent.popHtm(html);
-    }
-};
+    while (col < srcString.length) {
+        let startIdx = col;
+        let char = srcString.charAt(col);
 
-window.submitAdd = async function(type) {
-    let idInput = document.getElementById('add-id-input');
-    if (!idInput) return;
-    
-    let id = idInput.value.padEnd(2, 'a').substring(0, 2);
-    let data = type === 'obj' ? (document.getElementById('add-data-input').value || '') : '';
-    
-    if (id.trim() === '') {
-        if (window.hpop) window.hpop();
-        return;
-    }
-
-    let cmd = type === 'item' ? `gfx item ${id}` : `gfx obj ${id} ${data}`;
-    await window.CylonCommand(cmd);
-    
-    if (window.hpop) window.hpop();
-};
-
-// ----------------------------------------------------------------------------
-// KEYBOARD HANDLING
-// ----------------------------------------------------------------------------
-window.keydown = function(key, e) {
-    const gfx = window.CylonGFX;
-    if (!gfx) return;
-    
-    if (window.parent && window.parent.CylonPopManager && window.parent.CylonPopManager.isMenuOpen) {
-        if (window.parent.CylonPopManager.handleMenuKey(key)) {
-            if (e) e.preventDefault();
-            return;
+        if (char === ' ' || char === '\t') {
+            const spacer = document.createElement('div');
+            spacer.className = 'punchcode-space';
+            container.appendChild(spacer);
+            col++; continue;
+        } else if (char === '\n' || char === '\r') {
+            const br = document.createElement('div');
+            br.style.flexBasis = '100%'; br.style.height = '0';
+            container.appendChild(br);
+            if (char === '\r' && srcString.charAt(col + 1) === '\n') col++;
+            col++; continue;
         }
-    }
-    
-    let dx = 0, dy = 0;
-    if (key === 'ArrowUp' || key === 'w' || key === 'W') dy = -1;
-    else if (key === 'ArrowDown' || key === 's' || key === 'S') dy = 1;
-    else if (key === 'ArrowLeft' || key === 'a' || key === 'A') dx = -1;
-    else if (key === 'ArrowRight' || key === 'd' || key === 'D') dx = 1;
-    else if (key === 'Enter') { 
-        gfx.executeCursor(); 
-        if (e) e.preventDefault(); 
-        return; 
-    }
-    else return;
-    
-    gfx.moveCursor(dx, dy);
-    if (e) e.preventDefault();
-};
 
-// ----------------------------------------------------------------------------
-// VIEWPORT SIZING
-// ----------------------------------------------------------------------------
-function fitDesktopToScreen() {
-   if (!window.CylonGFX || !window.CylonGFX.gridWide) return;
- 
-   const wrapper = document.getElementById('desktop-wrapper');
-   const screenW = window.innerWidth;
-   const screenH = window.innerHeight;
- 
-   const cols = window.CylonGFX.gridWide;
-   const rows = window.CylonGFX.gridTall;
- 
-   if (!cols || !rows || screenW === 0 || screenH === 0) return;
- 
-   let w, h;
- 
-   if (window.CylonGFX.gfxGridStretch) {
-       const aspect = cols / rows;
-       w = screenW;
-       h = screenW / aspect;
- 
-       if (h > screenH) {
-           h = screenH;
-           w = screenH * aspect;
-       }
- 
-       w = Math.floor(w * 0.98);
-       h = Math.floor(h * 0.98); 
-   } else {
-       w = cols * window.CylonGFX.gfxTileSize;
-       h = rows * window.CylonGFX.gfxTileSize;
-   }
- 
-   wrapper.style.width = w + 'px';
-   wrapper.style.height = h + 'px';
-   wrapper.style.margin = '0 auto';
+        let endIdx = col;
+        let len = Math.min(2, srcString.length - col);
+        let text = srcString.substring(col, col + len);
+        endIdx = col + len;
+        col = endIdx;
+
+        let item = text;
+        let rawDesc = getCodeDescription(item);
+
+        if (item === "Xn") {
+            ifnot = true;
+            ifnotStartIdx = startIdx;
+            continue;
+        }
+
+        let blockEl = document.createElement('div');
+        blockEl.className = 'punchcode-img';
+        blockEl.style.backgroundImage = `url('${tileBase}Za.png')`; // default background
+
+        let img = document.createElement('img');
+        
+        if (item === "Xc") {
+            img.src = `${iconBase}Xc.png`;
+            bindHover(blockEl, rawDesc, startIdx, endIdx);
+        } else if (item.startsWith("##") || item.startsWith("%%") || item.startsWith("$$")) {
+            // Unhandled raw parameter fallback visually
+            blockEl.className = 'punchcode-text';
+            blockEl.textContent = item;
+            bindHover(blockEl, "Parameter Marker", startIdx, endIdx);
+        } else {
+            img.src = ifnot ? `${iconBase}${item}n.png` : `${iconBase}${item}.png`;
+            
+            let tooltipDesc = ifnot ? ("If Not: " + rawDesc) : rawDesc;
+            let finalStart = ifnot ? ifnotStartIdx : startIdx;
+            bindHover(blockEl, tooltipDesc || item, finalStart, endIdx);
+        }
+
+        if(blockEl.className === 'punchcode-img') blockEl.appendChild(img);
+        container.appendChild(blockEl);
+        
+        // Handle parameters (##, %%, $$) directly attached
+        while (col < srcString.length && (srcString.substring(col, col+2) === "%%" || srcString.substring(col, col+2) === "$$" || srcString.substring(col, col+2) === "##")) {
+            let prefix = srcString.substring(col, col+2);
+            col += 2;
+            let paramText = srcString.substring(col, col+2);
+            col += 2;
+            
+            let paramBlock = document.createElement('div');
+            let paramDesc = "";
+            
+            if (prefix === "##") {
+                paramBlock.className = 'punchcode-text';
+                paramBlock.textContent = paramText;
+                paramDesc = "Number: " + paramText;
+            } else {
+                paramBlock.className = 'punchcode-img';
+                paramBlock.style.backgroundImage = `url('${tileBase}Za.png')`;
+                let pImg = document.createElement('img');
+                pImg.src = `${iconBase}${paramText}.png`;
+                paramBlock.appendChild(pImg);
+                paramDesc = (prefix === "%%" ? "Param: " : "Item: ") + getCodeDescription(paramText);
+            }
+            container.appendChild(paramBlock);
+            bindHover(paramBlock, paramDesc, col-4, col);
+        }
+        
+        ifnot = false;
+    }
 }
 </script>
 </body>

@@ -265,6 +265,7 @@ function keyboard() {
         var render1 = document.getElementById('kb-input-render1');
         var render2 = document.getElementById('kb-input-render2');
         var indent = document.getElementById('kb-line2-indent');
+        var taView = document.getElementById('kb-textarea-view');
         if (!render1 || !render2) return;
 
         var text = inputBuffer;
@@ -274,16 +275,6 @@ function keyboard() {
             document.body.classList.add('textarea-mode');
             if (taView) {
                 taView.innerHTML = '';
-                
-                // Add the Prompt Label back in visually
-                var promptEl = document.getElementById('kb-prompt');
-                if (promptEl && promptEl.textContent) {
-                    var pSpan = document.createElement('span');
-                    pSpan.textContent = promptEl.textContent;
-                    pSpan.style.color = '#0a0'; 
-                    taView.appendChild(pSpan);
-                }
-                
                 taView.appendChild(buildLineSpans(text, true, cursorPos, 0));
                 
                 // Ensure scroll tracks cursor exactly
@@ -295,7 +286,7 @@ function keyboard() {
                     }
                 }
             }
-            return; // Skip drawing single lines 1 and 2
+            return; // Skip drawing single lines 1 and 2 text output (but leave line 1's prompt visually intact!)
         } else {
             document.body.classList.remove('textarea-mode');
         }

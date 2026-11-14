@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Cylon GFX Map Creator</title>
+<title>GFX Creator</title>
 <script src="cylon-sdk.js"></script>
 <script src="cylon-gfx-itemid.js"></script>
 <script src="cylon-gfx.js"></script>
@@ -87,45 +87,9 @@ body, html {
    /* Map Editor Override: Hide desktop-style text labels under objects */
    display: none !important;
 }
-
-/* Editor Specific UI */
-#startup-dialog {
-    position: absolute;
-    top: 50%; left: 50%;
-    transform: translate(-50%, -50%);
-    background: var(--menu-bg, #111);
-    color: var(--menu-fg, #eee);
-    border: 2px solid var(--fg-color, #0f0);
-    padding: 20px;
-    border-radius: 4px;
-    z-index: 2000;
-    box-shadow: 0px 10px 30px rgba(0, 0, 0, 0.9);
-    min-width: 300px;
-}
-.btn {
-    background: var(--sel-bg, #333);
-    color: var(--sel-fg, #0f0);
-    border: 1px solid var(--fg-color, #0f0);
-    padding: 8px 12px;
-    cursor: pointer;
-    font-family: inherit;
-    font-weight: bold;
-    width: 100%;
-    margin-top: 10px;
-}
-.btn:hover { filter: brightness(1.2); }
 </style>
 </head>
 <body>
-
-<div id="startup-dialog">
-    <h2 style="margin-top:0; border-bottom:1px solid var(--fg-color); padding-bottom:10px;">GFX Map Creator</h2>
-    <p>Select a mounted world to edit:</p>
-    <select id="drive-selector" style="width:100%; padding:8px; background:#000; color:var(--fg-color); border:1px solid var(--fg-color); font-family:inherit; margin-bottom:10px; font-weight:bold;">
-        <option value="">Loading drives...</option>
-    </select>
-    <button class="btn" onclick="startEditor()">MOUNT & EDIT</button>
-</div>
 
 <div id="desktop-wrapper">
    <canvas id="bg-canvas"></canvas>
@@ -147,42 +111,56 @@ window.onload = async function() {
         window.CylonSDK.applyColors(window.parent.CylonColors);
     }
 
-    // Populate Drive Selector
-    let dos = window.parent && window.parent.CylonDOS ? window.parent.CylonDOS : window.CylonDOS;
-    let selector = document.getElementById('drive-selector');
-    
-    if (dos) {
-        let mounts = await dos.mounts();
-        let gfxDrives = mounts.filter(m => m.name.endsWith('.gfx') || m.name === 'capflag' || m.name === 'queville' || m.name === 'desktop');
-        
-        selector.innerHTML = '';
-        if (gfxDrives.length === 0) {
-            selector.innerHTML = '<option value="">(No GFX drives mounted)</option>';
-        } else {
-            gfxDrives.forEach(m => {
-                let opt = document.createElement('option');
-                opt.value = m.name;
-                opt.textContent = `${m.name} [${m.type}]`;
-                selector.appendChild(opt);
-            });
-        }
-    }
-    
     // Connect Screen Scaling Observer
     window.addEventListener('resize', fitDesktopToScreen);
     if (window.ResizeObserver) new ResizeObserver(fitDesktopToScreen).observe(document.body);
+
+    // If the user dismisses the startup menu before picking a drive, tapping anywhere re-opens it
+    document.body.addEventListener('pointerup', () => {
+        if (!window.activeDrive) showDriveMenu();
+    });
+
+    await showDriveMenu();
 };
 
-async function startEditor() {
-    let driveName = document.getElementById('drive-selector').value;
-    if (!driveName) {
-        alert("Please select a valid GFX drive.");
-        return;
+async function showDriveMenu() {
+    let dos = window.parent && window.parent.CylonDOS ? window.parent.CylonDOS : window.CylonDOS;
+    if (!dos || !window.parent || !window.parent.CylonPopManager) return;
+
+    let mounts = await dos.mounts();
+    let gfxDrives = mounts.filter(m => {
+        let src = (m.source || '').toLowerCase();
+        let name = (m.name || '').toLowerCase();
+        return src.endsWith('.gfx') || name.endsWith('.gfx') || name === 'desktop';
+    });
+
+    let items = [];
+    if (gfxDrives.length === 0) {
+        items.push({
+            label: '(No .gfx drives mounted)',
+            action: () => {
+                if (window.parent && window.parent.printDOS) {
+                    window.parent.printDOS('[.2]Mount a .gfx drive first, e.g.: mount cylon-desktop.gfx ram[.]\n');
+                }
+            }
+        });
+    } else {
+        gfxDrives.forEach(m => {
+            items.push({
+                label: `${m.name} [${m.type}]`,
+                action: () => startEditor(m.name)
+            });
+        });
     }
-    
+
+    window.parent.CylonPopManager.showContextMenu('topleft', items);
+}
+
+async function startEditor(driveName) {
+    if (!driveName) return;
+
     window.activeDrive = driveName;
-    document.getElementById('startup-dialog').style.display = 'none';
-    
+
     // Setup Engine Context
     window.desktopDrive = driveName;
     window.playerItem = 'Si'; // System cursor icon
@@ -224,6 +202,8 @@ async function startEditor() {
 // OVERRIDE: GFX CONTEXT MENU
 // ----------------------------------------------------------------------------
 window.CylonGFX.showTargetMenu = async function(z, clientX, clientY) {
+    if (!window.activeDrive) { showDriveMenu(); return; }
+    
     let x = z % this.gridWide;
     let y = Math.floor(z / this.gridWide);
 
@@ -296,7 +276,7 @@ window.CylonGFX.showTargetMenu = async function(z, clientX, clientY) {
     let secondChar = currentSector.charAt(1);
 
     // Header Info & Export Tool
-    let zHex = Number(z).toString(this.gfxZBase || 10).padStart(2, '0');
+    let zHex = this.encodeZ(z, this.gfxZBase || 10);
     items.push({ label: `Sector ${currentSector} Z ${zHex} Tile ${currentTile}`, action: () => {
         showGfxSubMenu(clientX, clientY);
     }});
@@ -319,12 +299,23 @@ window.CylonGFX.showTargetMenu = async function(z, clientX, clientY) {
     // Edit existing objects if present
     if (existingItems.length > 0) {
         existingItems.forEach(item => {
+
             items.push({ label: `Edit ${item.labelText}`, action: async () => {
-                //
-                // need to figure out best way to edit files
-                //
-                //await window.CylonCommand(`delete ${item.path}`);
-                //setTimeout(() => window.CylonGFX.renderScreen(), 100);
+                let dos = window.parent.CylonDOS;
+                if (!dos) return;
+
+                // 1. Save the target path to RAM so the compiler knows what to load
+                let parts = item.path.split('/');
+                let drive = parts[0];
+
+                await dos.save('cylon:/a/gfxEditTarget', item.path);
+
+                // 2. Launch (or focus) the compiler
+                await window.CylonCommand('cylon-gfx-compiler.htm');
+
+                // Close the context menu
+                if (window.hpop) window.hpop();
+
             }});
         });
     }
@@ -353,7 +344,7 @@ window.CylonGFX.showTargetMenu = async function(z, clientX, clientY) {
         await window.CylonCommand(`gfx fill ${window.isFillMode ? window.currentBrush : ''}`);
     }});
 
-    // FIX: Dynamically find the index of the Paint Tile option
+    // Dynamically find the index of the Paint Tile option
     let paintIdx = items.findIndex(i => i.label.startsWith('Paint Tile ['));
 
     // Execute the popup
@@ -386,16 +377,12 @@ window.CylonGFX.calculateTargetSector = function(currentSector, dirChar, maxMapB
     if (currentSector && currentSector.length >= 2) {
         let secondChar = currentSector.charAt(1);
         
-        // If the user tries to scroll off the edge of an extended map...
         if (extChars.includes(secondChar)) {
             let idx = extChars.indexOf(secondChar);
-            
-            // ...intercept the scroll and drop them on the matching ground map instead!
             return currentSector.charAt(0) + groundChars[idx];
         }
     }
 
-    // Otherwise, proceed with the standard N/S/E/W map bounds calculation
     return _origCalculateTargetSector.call(this, currentSector, dirChar, maxMapBounds, roundWorld);
 };
 
@@ -415,7 +402,6 @@ window.showGfxSubMenu = async function(clientX, clientY) {
         }
     ];
 
-    // Dictionary of known variables and their descriptions
     const knownVars = {
         gfxCharDir: "character image directory",
         gfxIconDir: "icon image directory",
@@ -436,7 +422,6 @@ window.showGfxSubMenu = async function(clientX, clientY) {
         gfxSpawnZ: "The z-location of the player item for gfxSpawn"
     };
 
-    // Use a Set to merge known variables and any dynamically discovered files
     let allVars = new Set(Object.keys(knownVars));
     
     try {
@@ -445,31 +430,25 @@ window.showGfxSubMenu = async function(clientX, clientY) {
             for (let file of alphaFiles) {
                 if (file.type === 'file' && !file.name.includes('_dir.sys!')) {
                     let varName = file.name.substring(file.name.lastIndexOf('/') + 1);
-                    allVars.add(varName); // Adds dynamically discovered files
+                    allVars.add(varName); 
                 }
             }
         }
-    } catch (e) {
-        // '/a/' directory might not exist yet, we will just use the knownVars list
-    }
+    } catch (e) {}
 
-    // Sort alphabetically so the menu is easy to read
     let sortedVars = Array.from(allVars).sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
 
     for (let varName of sortedVars) {
         let desc = knownVars[varName] || "unknown";
-        let val = ''; // Default value if the file does not exist
+        let val = ''; 
         
         try {
             if (await dos.exists(alphaDir + '/' + varName)) {
                 let rawVal = await dos.load(alphaDir + '/' + varName);
                 val = String(rawVal == null ? '' : rawVal).trim().replace(/\n/g, '\\n');
             }
-        } catch (e) {
-            // Keep default 'false' on error
-        }
+        } catch (e) {}
 
-        // Create a clean display string for the menu label (e.g. "gfxRoundWorld = true")
         let displayCmd = `save ${varName} ${val}`;
         if (displayCmd.length > 32) displayCmd = displayCmd.substring(0, 29) + '...';
 
@@ -479,11 +458,8 @@ window.showGfxSubMenu = async function(clientX, clientY) {
                 let actualCmd = `save ${alphaDir}/${varName} ${val}`;
                 
                 if (window.CylonPrefill) {
-                    // Prefill the command line buffer safely
                     window.CylonPrefill(actualCmd);
                     
-                    // Pop instructions dynamically positioned at the TOP of the screen 
-                    // using inline CSS so it doesn't get covered by the virtual keyboard
                     if (window.pop) {
                         let html = `
                             <div style="position:fixed; top:10px; left:50%; transform:translateX(-50%); text-align:center; padding:15px; background:var(--menu-bg,#111); border:2px solid var(--fg-color,#0f0); box-shadow:0 6px 20px rgba(0,0,0,0.9); border-radius:4px; min-width:260px; z-index:100000;">
@@ -492,11 +468,9 @@ window.showGfxSubMenu = async function(clientX, clientY) {
                                 <div style="font-size:14px; line-height: 1.4;">Edit value on command line<br>and press <b>ENTER</b> to save.</div>
                             </div>
                         `;
-                        // "center" is used as the alignment parameter, but the CSS override inside handles the fixed top positioning
                         window.pop(html, "center");
                     }
                 } else {
-                    // Graceful fallback if sdk isn't updated yet
                     window.CylonCommand(actualCmd);
                 }
             }
@@ -561,6 +535,11 @@ window.submitAdd = async function(type) {
 // KEYBOARD HANDLING
 // ----------------------------------------------------------------------------
 window.keydown = function(key, e) {
+    if (!window.activeDrive) {
+        if (key === 'Enter') { showDriveMenu(); if (e) e.preventDefault(); }
+        return;
+    }
+    
     const gfx = window.CylonGFX;
     if (!gfx) return;
     

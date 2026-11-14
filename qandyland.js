@@ -1,3 +1,4 @@
+
 //
 //
 // ──── Qandyland Server v2 ────────────────────────────────────────────────────
@@ -44,6 +45,42 @@ var MAX_DRIVE_FILES = 20000;
 var SESSION_COOKIE = 'q';
 var TYPE_MAX_BYTES = 65536; // 64 KB display limit
 var VALID_NAME_RE = /^(?!\.)(?!.*[\\/])[A-Za-z0-9 \-_.()+=!%,:;\[\]\^_{}@]+$/;
+
+// ── Z-Coordinate Engine Encoders ──────────────────────────────────────────────
+const QANDY_UPPER = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+const QANDY_LOWER = "abcdefghijklmnopqrstuvwxyz";
+const QANDY_SYM   = "0123456789_()[]{}^,:;+-=%@";
+
+function encodeZ(z, base) {
+    if (base === 52) {
+        if (z < 0 || z >= 1352) return "Aa"; 
+        if (z < 676) {
+            return QANDY_UPPER[Math.floor(z / 26)] + QANDY_LOWER[z % 26];
+        } else {
+            let z2 = z - 676;
+            return QANDY_UPPER[Math.floor(z2 / 26)] + QANDY_SYM[z2 % 26];
+        }
+    }
+    return z.toString(base).toUpperCase().padStart(2, '0');
+}
+
+function decodeZ(zStr, base) {
+    if (base === 52) {
+        if (!zStr || zStr.length !== 2) return 0;
+        let first = QANDY_UPPER.indexOf(zStr.charAt(0));
+        if (first === -1) return 0;
+        
+        let secondLower = QANDY_LOWER.indexOf(zStr.charAt(1));
+        if (secondLower !== -1) return (first * 26) + secondLower;
+        
+        let secondSym = QANDY_SYM.indexOf(zStr.charAt(1));
+        if (secondSym !== -1) return 676 + (first * 26) + secondSym;
+        
+        return 0;
+    }
+    let val = parseInt(zStr, base);
+    return isNaN(val) ? 0 : val;
+}
 
 // ── Request logging ───────────────────────────────────────────────────────────
 
@@ -1344,7 +1381,7 @@ function plugboard(req, stacker, plugs, drive, session) {
   let zBaseLoad = fileLoad(drive, '/', 'a/gfxZBase', session);
   if (zBaseLoad.success && zBaseLoad.content) {
     let parsedBase = parseInt(zBaseLoad.content, 10);
-    if (!isNaN(parsedBase) && parsedBase >= 2 && parsedBase <= 36) gfxZBase = parsedBase;
+    if (!isNaN(parsedBase) && ((parsedBase >= 2 && parsedBase <= 36) || parsedBase === 52)) gfxZBase = parsedBase;
   }
   
   let output = "";
@@ -1444,11 +1481,11 @@ function plugboard(req, stacker, plugs, drive, session) {
         
         if (player.item === 'Za') {
         	 if (objid.charAt(0) === 'S') {
-        	 	player.z = parseInt(objz, gfxZBase) || 0;
+        	 	player.z = decodeZ(objz, gfxZBase);
         	 }
         }
 
-        let pZStr = player.z.toString(gfxZBase).toUpperCase().padStart(2, '0');
+        let pZStr = encodeZ(player.z, gfxZBase);
 
         let odSearchPattern = 'w/' + player.map + '/' + objid + pZStr + '??';
         let odFilesResponse = fileSearch(drive, odSearchPattern);
@@ -1639,7 +1676,7 @@ function plugboard(req, stacker, plugs, drive, session) {
 
         let pCSV = pCSVArr.join('~');
         let visibleSectorsStr = currentlyVisibleSectorsArr.join('');
-        let zStr = player.z.toString(gfxZBase).toUpperCase().padStart(2, '0');
+        let zStr = encodeZ(player.z, gfxZBase);
         
         output += "Vl" + player.map + zStr + pCSV + "|" + visibleSectorsStr + "|" + tsStr;
         break;
@@ -1753,7 +1790,7 @@ function plugboard(req, stacker, plugs, drive, session) {
     }
     
     let numericZ = parseInt(player.z, 10) || 0;
-    let z = numericZ < 0 ? "00" : numericZ.toString(gfxZBase).toUpperCase().padStart(2, '0');
+    let z = numericZ < 0 ? encodeZ(0, gfxZBase) : encodeZ(numericZ, gfxZBase);
 
     let pItemId = player.item ? player.item.substring(0, 2) : "Za";
     let pPubId = player.pubId ? player.pubId : "0000";

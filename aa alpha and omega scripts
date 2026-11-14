@@ -1,0 +1,60 @@
+The directory symmetry makes a lot of sense and actually fits the existing codebase better than the current `w/a` setup:
+
+* `/a/` is already partially acting as the system/alpha config directory (`a/gfxZBase`, `a/gfxSpawn`, `a/gfxSpawnZ`, `a/gfxGridWide`, `a/gfxGridTall`).
+* `plugboard()`'s `RF` response already filters with `if (f.length > 1)`, meaning 1-character files like `w/Aa/a` and `w/Aa/z` are automatically hidden from the client's sector item list just like `m` and `e`.
+* `bigbang()` already routes 1-char top-level keys (`a=...`, `b=...`, `c=...`, `z=...`) into `/w/<id>` and `~`-separated entries with `|` into `/w/<sector>/<meta>`.
+
+Here are the specific friction points and design details to watch out for when patching this in:
+
+---
+
+### 1. Moving `loadconfig` / `saveconfig` out of `w/a`
+Right now in `qandyland-univac.js`, `loadconfig()` and `saveconfig()` read and write `W0`–`W9` (including the odometer `W2`/`W3` in `tickOdometer()`, map bounds `W4`, terrain/boot flags `W5`/`W6`, and PvP `W7`) as a flat string in **`w/a`**.
+* **Patch:** Move that config string into `/a/` (for example `a/config` or `a/w`), and keep `w/a` strictly as a punch-code tape.
+* **Legacy `.gfx` note:** If any existing `.gfx` world files still define `a=W2AaW3AaW4Hh...`, either migrate those `.gfx` lines or have `loadconfig()` check `a/config` first and ignore `w/a` if it doesn't start with `W[0-9]`.
+
+---
+
+### 2. World Alpha (`/w/a`) vs. `Xa` and `ST`
+Currently in `qandyland.js`, when a new session hits `ST`:
+```js
+runtape("XaZa");
+player.item = 'Za';
+...
+output += "ST" + session;
+var refresh = false;
+```
+* **Don't delete `Xa`:** Even if `/w/a` initializes the player on login, `Xa` is also used by in-world team-claim objects (e.g. `XaSa...` when `state.id === 'Za'`). It's cleaner to keep `Xa` as the low-level opcode that allocates `playerid` / spawns the slot, and have `ST` run `w/a` if it exists—falling back to `RAM:XaZa` if `w/a` is missing. That lets `/w/a` do things like `XaZaXsWa10XsWb05...` without breaking older drives.
+* **`ST` output quirk:** Note that `ST` sets `refresh = false` and says the client can't process `UNIVAC` output before it receives `ST<session>`. Server-side state changes in `/w/a` (`Xa`, `Xs`, `Vt`, `Vz`) will work fine during `ST`, but any `S^...^S` client messages inside `/w/a` would need to either be appended after `ST<session>` (if the client supports that) or deferred to first command.
+
+---
+
+### 3. World Omega (`/w/z`) needs a Logout / Timeout mechanism
+Right now there is **no logout lifecycle** in `qandyland.js`:
+* Game traffic is stateless HTTP `POST /qandyland.js`, and `qandyland-krystals.js` only handles WebSockets on `/krystals` for device pairing.
+* `playerIndex` entries never expire, and player files in `w/<sec>/` and `p/<pubId>` are saved without the `X` expiration prefix used by lazy GC.
+
+To make `/w/z` actually execute, you'll need one or both of:
+1. **An explicit logout command** in `plugboard()` (e.g. `QT` or `LO`, which the client can also fire via `navigator.sendBeacon` on tab close).
+2. **An inactivity reaper** (`setInterval`) tracking `player.lastSeen` on each `plugboard()` call—when a session goes idle past a threshold, run `UNIVAC` on `w/z` for that player, then delete their `w/<sec>/<file>`, `p/<pubId>`, and `playerIndex` entry.
+
+---
+
+### 4. Sector Alpha (`/w/<sec>/a`) and Sector Omega (`/w/<sec>/z`)
+Handling these **inside `UNIVAC`** rather than `plugboard()` is the cleanest approach because a sector can change from multiple places—`Vn`/`Vs`/`Ve`/`Vw` border crossings, `Vt` teleports, `Vc`/`XnVc` city transitions, or even an object script (`OD`) or `w/b`/`w/c` hook.
+
+A few subtle edge cases to guard against inside `UNIVAC`:
+* **Execution order on transition:** When `state.sector` changes from `oldSector` to `newSector`:
+  1. Run `w/<oldSector>/z` (while `state.sector` is still `oldSector`, or passing context cleanly).
+  2. Switch `state.sector = newSector`.
+  3. Run `w/<newSector>/a`.
+  *(Decide whether initial login spawn via `Xa` should also fire `w/<spawnSector>/a`—usually yes, since the player is entering that sector for the first time.)*
+* **Quiet existence checks:** When a sector has no `a` or `z` file, skip silently instead of logging `UNIVAC: cannot load object file` (same applies to `w/b` and `w/c` in `plugboard()`, which currently log errors if omitted).
+* **State isolation:** If `w/<sec>/a` or `z` runs inline or via a recursive `UNIVAC` call, reset `switchopen = false` and `ifnot = false` for the hook so an open switch or `Xn` flag in the parent tape doesn't silently suppress the sector script.
+* **Redirect / bounce recursion:** If `w/Bb/a` contains `VtAa00` (e.g., kicking an unauthorized player back out of a restricted sector), it triggers another sector transition. Add a small recursion/depth limit (e.g. max 4–8 hops) so two sectors with `Vt` hooks pointing at each other can't infinite-loop the server.
+* **Multiple moves in one tape:** If a batched command like `RAM:VnVn` crosses a border on the first `Vn`, triggering the hook immediately at the moment `state.sector` changes ensures the second `Vn` runs with any state changes (or `Vt` bounce) applied by `w/<sec>/a`.
+
+If you'd like, I can go ahead and write the patch across `qandyland.js` and `qandyland-univac.js`—just let me know two preferences:
+1. Where in `/a/` you'd like the `W0`–`W9` config stored (e.g. `a/config`).
+2. Whether `Xa` initial spawn should trigger `/w/<spawnSector>/a`, and what idle timeout (if any) you want for `/w/z`.
+

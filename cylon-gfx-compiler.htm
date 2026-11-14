@@ -2,1320 +2,918 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>PUNCH CODE COMPILER</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cylon GFX Compiler</title>
 <script src="cylon-sdk.js"></script>
+<script src="cylon-gfx-itemid.js"></script>
 <style>
-body { background: #222; color: #eee; font-family: sans-serif; margin: 0; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
-#toolbar { background: #333; padding: 10px; display: flex; align-items: center; gap: 15px; border-bottom: 1px solid #444; }
-#main { display: flex; flex: 1; overflow: hidden; }
-#viewport { padding: 20px; background: #111; display: flex; flex-direction: column; align-items: center; border-right: 1px solid #444; flex-shrink: 0; position: relative; }
-canvas { background: #000; box-shadow: 0 0 20px rgba(0,0,0,0.5); cursor: crosshair; border: 2px solid #444; touch-action: none; }
-
-    #panel { flex: 1; background: #222; display: flex; flex-direction: column; padding: 15px; overflow-y: auto; }
-    .stack-header { font-weight: bold; color: #0af; margin-bottom: 10px; border-bottom: 1px solid #444; padding-bottom: 5px; display: flex; justify-content: space-between; align-items: center; }
-    
-    .tool-box { background: #2c3e50; padding: 10px; margin-bottom: 15px; border-radius: 4px; border: 1px solid #34495e; }
-    .tool-box label { font-size: 0.7em; color: #95a5a6; display: block; margin-bottom: 5px; }
-    
-    input[type="text"], select { background: #111; color: #fff; border: 1px solid #555; padding: 4px; text-align: center; font-family: monospace; font-weight: bold;}
-    
-    #tileBrushRow { display: flex; align-items: center; gap: 10px; }
-    #brushPreview { width: 32px; height: 32px; border: 1px solid #0af; background: #000; }
-
-    .object-entry { background: #333; padding: 8px; margin-bottom: 5px; border-radius: 4px; cursor: pointer; border: 1px solid #444; font-family: monospace; font-size: 0.85em; }
-    .object-entry:hover { border-color: #0af; }
-    .object-entry b { color: #f1c40f; }
-
-    textarea { width: 100%; height: 60px; background: #111; color: #2ecc71; border: 1px solid #555; padding: 10px; font-family: monospace; font-size: 1em; resize: none; box-sizing: border-box; }
-    
-    button { padding: 6px 12px; cursor: pointer; background: #068; color: white; border: none; border-radius: 4px; font-weight: bold; font-size: 0.75em; }
-    button:hover { background: #07a; }
-    button.reject { background: #7f8c8d; }
-    button.remove { background: #c0392b; }
-    
-    #decompiler {
-      background: #000; padding: 8px; font-family: monospace; color: #ddd;
-      font-size: 0.8em; margin-top: 5px; border: 1px solid #333; min-height: 20px; }
-
-    .punchcodeImages img, 
-    .punchcode-text {
-        width: 32px;
-        height: 32px;
-        vertical-align: middle;
-        margin: 1px;
-    }
-
-    .punchcode-space {
-        width: 32px;
-        height: 32px;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        background-color: transparent;
-        color: #CCFFFF;
-        font-family: monospace;
-        font-size: 16px;
-        font-weight: bold;
-        border-radius: 4px;
-        box-sizing: border-box;    
+    body, html {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        width: 100%;
+        background-color: var(--bg-color, #000);
+        color: var(--fg-color, #0f0);
+        font-family: var(--font-face, monospace);
+        box-sizing: border-box;
         overflow: hidden;
-    }        
+        display: flex;
+        flex-direction: column;
+    }
 
-    .punchcode-text {
-        display: inline-flex;
+    /* Top Toolbar */
+    .toolbar {
+        background-color: var(--bg-color, #111);
+        color: var(--menu-fg, #aaa);
+        border-bottom: 2px solid var(--fg-color, #0f0);
+        padding: 8px 12px;
+        display: flex;
         align-items: center;
-        justify-content: center;
-        background-color: #006600;
-        color: #FFFFFF;
-        font-family: monospace;
-        font-size: 16px;
+        gap: 10px;
+        flex-wrap: wrap;
+        user-select: none;
+        flex-shrink: 0;
+    }
+
+    .toolbar-title {
         font-weight: bold;
-        border-radius: 4px;
-        box-sizing: border-box;    
+        color: var(--fg-color, #0f0);
+        font-size: 15px;
+        margin-right: auto;
         overflow: hidden;
-        background-size: cover;
-        background-position: center;
-        background-repeat: no-repeat;
+        text-overflow: ellipsis;
+        white-space: nowrap;
     }
 
-    .punchcode-num {
-        width: 32px;
-        height: 32px;
-        display: inline-block;
-        vertical-align: middle;
-        margin: 1px;
+    button {
+        padding: 6px 12px;
+        cursor: pointer;
+        background: var(--sel-bg, #333);
+        color: var(--sel-fg, #0f0);
+        border: 1px solid var(--fg-color, #0f0);
+        font-weight: bold;
+        font-family: inherit;
+        font-size: 13px;
+        border-radius: 3px;
+    }
+    button:hover { filter: brightness(1.2); }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    /* Views */
+    #tree-view, #editor-view {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+        width: 100%;
+    }
+    #editor-view { display: none; }
+
+    /* File Manager Tree Styles */
+    .fm-header {
+        display: grid;
+        grid-template-columns: minmax(180px, 4fr) 80px 140px;
+        gap: 10px;
+        padding: 6px 12px;
+        background-color: var(--menu-bg, #111);
+        color: var(--menu-fg, #aaa);
+        border-bottom: 1px solid var(--sel-bg, #333);
+        font-weight: bold;
+        font-size: 13px;
+        user-select: none;
         flex-shrink: 0;
-        position: relative;
-        background-size: cover;
-        background-position: center;
-        background-repeat: no-repeat;
     }
 
-    .punchcode-img {
-        width: 32px;
-        height: 32px;
-        display: inline-block;
-        vertical-align: middle;
-        margin: 1px;
-        flex-shrink: 0;
-        position: relative;
-        background-size: cover;
-        background-position: center;
-        background-repeat: no-repeat;
+    #fm-root {
+        flex: 1;
+        overflow-y: auto;
+        padding-bottom: 24px;
     }
-    
-    .punchcode-img img {
-        width: 32px;
-        height: 32px;
+
+    .fm-row {
+        display: grid;
+        grid-template-columns: minmax(180px, 4fr) 80px 140px;
+        gap: 10px;
+        padding: 6px 12px;
+        align-items: center;
+        border-bottom: 1px dashed var(--sel-bg, #333);
+        cursor: pointer;
+        transition: background 0.1s;
+    }
+    .fm-row:hover {
+        background-color: var(--sel-bg, #222);
+        color: var(--sel-fg, #0f0);
+    }
+
+    .fm-col-name {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        overflow: hidden;
+        white-space: nowrap;
+    }
+
+    .fm-toggle {
+        font-weight: bold;
+        width: 26px;
+        flex-shrink: 0;
+        user-select: none;
+        color: var(--fg-color, #0f0);
+    }
+
+    .fm-icon {
+        width: 20px;
+        height: 20px;
+        image-rendering: pixelated;
+        flex-shrink: 0;
+    }
+
+    .fm-label {
+        color: var(--html-link, var(--fg-color, #0f0));
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .fm-row:hover .fm-label {
+        color: var(--html-hover, var(--sel-fg, #0f0));
+        text-decoration: underline;
+    }
+    .fm-dir-label {
+        color: var(--fg-color, #0f0);
+        font-weight: bold;
+    }
+
+    .fm-meta {
+        font-size: 13px;
+        opacity: 0.8;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .fm-children {
+        display: none;
+        margin-left: 16px;
+        border-left: 1px dashed var(--sel-bg, #333);
+        padding-left: 4px;
+    }
+    .expanded > .fm-children {
         display: block;
     }
 
-    #tooltip { 
-        position: absolute; 
-        background: rgba(240, 230, 140, 0.9);
-        color: #000; 
-        padding: 6px 10px;
-        font-size: 16px;
-        font-weight: bold;
-        pointer-events: none; 
-        border: 1px solid #444; 
-        display: none;
-        width: 100%; 
-        z-index: 100; 
-        font-family: monospace; 
-        border-radius: 4px;
+    .loading-text {
+        padding: 6px 12px;
+        opacity: 0.6;
+        font-size: 13px;
+        font-style: italic;
     }
-    </style>
-<script src="gfx-itemid.js"></script>
+
+    /* Merged Editor & Decompiler Styles */
+    #main-editor {
+        display: flex;
+        flex-direction: column;
+        flex: 1;
+        padding: 12px;
+        overflow-y: auto;
+        gap: 12px;
+    }
+
+    #decompiler-view {
+        background: var(--case-bg, #080808);
+        border: 1px solid var(--case-fg, var(--sel-bg, #333));
+        min-height: 50%;
+        padding: 10px;
+        border-radius: 4px;
+        flex: 1;
+        overflow-y: auto;
+        display: flex;
+        flex-wrap: wrap;
+        align-content: flex-start;
+    }
+
+    textarea#punchcodeInput {
+        width: 100%;
+        height: 110px;
+        background: var(--input-bg, #000);
+        color: var(--input-fg, var(--fg-color, #0f0));
+        border: 1px solid var(--fg-color, #0f0);
+        padding: 10px;
+        font-family: monospace;
+        font-size: 16px;
+        resize: none;
+        box-sizing: border-box;
+        flex-shrink: 0;
+    }
+
+    .punchcode-space { width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; background: transparent; }
+    .punchcode-text { display: inline-flex; align-items: center; justify-content: center; background-color: var(--sel-bg, #006600); color: var(--sel-fg, #fff); font-family: monospace; font-size: 16px; font-weight: bold; border-radius: 4px; width: 32px; height: 32px; vertical-align: middle; margin: 1px; }
+    .punchcode-img { width: 32px; height: 32px; display: inline-block; vertical-align: middle; margin: 1px; background-size: cover; }
+    .punchcode-img img { width: 32px; height: 32px; display: block; image-rendering: pixelated; }
+
+    #tooltip {
+        position: fixed;
+        background: var(--menu-bg, #111);
+        color: var(--menu-fg, #aaa);
+        padding: 6px 10px;
+        font-size: 14px;
+        font-weight: bold;
+        pointer-events: none;
+        border: 1px solid var(--fg-color, #0f0);
+        display: none;
+        z-index: 1000;
+        border-radius: 4px;
+        box-shadow: 2px 2px 10px rgba(0,0,0,0.8);
+    }
+</style>
 </head>
 <body>
-<div id="main">
-<div id="viewport">
-<!-- Canvas dynamically scales based on mounted drive settings -->
-<canvas id="sectorCanvas" width="448" height="320"></canvas>
-<div id="tooltip">Z:00</div>
-    <div class="tool-box" id="brushBox">
-        <div id="tileBrushRow">
-            <input type="text" id="tileInput" size=2 maxlength="2" value="Ga" oninput="updateBrushPreview()">
-            <div id="brushPreview"></div>
-        </div>
+
+<!-- TREE / FILE MANAGER VIEW -->
+<div id="tree-view">
+    <div class="toolbar">
+        <div class="toolbar-title">GFX COMPILER: <span id="active-drive-label">(No Drive)</span></div>
+        <button onclick="showDriveMenu()">DRIVE</button>
+        <button onclick="refreshTree()">REFRESH</button>
+    </div>
+    <div class="fm-header">
+        <div>Name</div>
+        <div>Size</div>
+        <div>Modified</div>
+    </div>
+    <div id="fm-root">
+        <div class="loading-text">Select a .gfx drive to browse...</div>
     </div>
 </div>
 
-<div id="panel">
-
-    <div class="tool-box" id="toolbar">
-      <div style="font-weight: bold; color: #0af;"> &nbsp; COMPILER:</div>
-      <select id="driveSelect" onfocus="populateDrives()"><option value="">(No Drive)</option></select>
-      <button onclick="loadFromDrive()" style="background:#27ae60;">LOAD</button>
-      <button onclick="saveToDrive()" style="background:#8e44ad;">SAVE</button>
-      <button onclick="importLegacyGfx()" style="background:#444;">IMPORT LEGACY</button>
-      
-      <div style="width: 20px;"></div>
-      <select id="sectorNav" onchange="changeSector()"></select>
-      <button id="cityToggleBtn" onclick="toggleCity()">ENTER CITY</button>
+<!-- PUNCH CODE EDITOR VIEW -->
+<div id="editor-view">
+    <div class="toolbar">
+        <div class="toolbar-title" id="target-file">None Selected</div>
+        <button id="back-btn" onclick="showTreeView()">FILES</button>
+        <button id="cancel-btn" onclick="cancelEdit()">CANCEL</button>
+        <button id="save-btn" onclick="saveLogic()" disabled>SAVE TO DISK</button>
     </div>
-    
-    <div id="stackView">
-      <div class="tool-box" style="background: #1a252f;">
-        <div style="font-weight: bold; color: #0af;">OBJECT STACK: <span id="sectorLabel">A1</span>
-          <input type="text" id="newID" size=2 maxlength="2" placeholder="ID">
-          <input type="text" id="newZ" size=2 maxlength="2" placeholder="Z">
-          <input type="text" id="newDATA" size=2 maxlength="2" value="00">
-          <button onclick="addObject()">+ ADD</button>
-          <button onclick="editObject()">EDIT</button> 
-          <div id="listItems"></div>
-        </div>
-       </div>                
+    <div id="main-editor">
+        <div id="decompiler-view"></div>
+        <textarea id="punchcodeInput" placeholder="Enter Punch Code or text here..." oninput="onCodeChange()" onchange="onCodeChange()"></textarea>
     </div>
-
-    <div id="globalStackView">
-      <div class="tool-box" style="background: #1a252f;">
-        <div style="font-weight: bold; color: #0af; margin-bottom: 10px;">GLOBAL STACK:</div>
-        <div id="global-a"><div class="object-entry" onclick="openGlobalEditor('a')">[<b>a</b>] Alpha (Boot Script) <span id="global-lbl-a" style="color: #888;"></span></div></div>
-        <div id="global-b"><div class="object-entry" onclick="openGlobalEditor('b')">[<b>b</b>] Before (Pre-Tick) <span id="global-lbl-b" style="color: #888;"></span></div></div>
-        <div id="global-c"><div class="object-entry" onclick="openGlobalEditor('c')">[<b>c</b>] After (Post-Tick) <span id="global-lbl-c" style="color: #888;"></span></div></div>
-        <div id="global-f"><div class="object-entry" onclick="openGlobalEditor('f')">[<b>f</b>] Fire (Item Zj) <span id="global-lbl-f" style="color: #888;"></span></div></div>
-        <div id="global-t"><div class="object-entry" onclick="openGlobalEditor('t')">[<b>t</b>] Tag (PVP) <span id="global-lbl-t" style="color: #888;"></span></div></div>
-      </div>
-    </div>
-
-    <div id="qpcStackView">
-      <div class="tool-box" style="background: #1a252f;">
-        <div style="font-weight: bold; color: #0af; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;">
-            QPC SCRIPTS:
-            <div>
-                <button style="background: #0af;" onclick="importQpcLegacy()">IMPORT .QPC</button>
-                <button style="background: #0af;" onclick="exportQpcLegacy()">EXPORT .QPC</button>
-            </div>
-        </div>
-        <div style="margin-bottom: 10px; display: flex; gap: 5px;">
-            <input type="text" id="newQpcName" placeholder="tape name" style="flex: 2; ">
-            <button style="background: #0af;" onclick="addQpc()">+ ADD TAPE</button>
-        </div>
-        <div id="qpcListItems"></div>
-      </div>
-    </div>
-    
-    <div class="tool-box" id="logicBox" style="display: none;">
-    <div class="stack-header">
-        <div><span id="logicLabel">LOGIC</span>: <span id="editingObjID"></span>
-            <button onclick="LightMode()">Light</button>
-            <button onclick="DarkMode()">Dark</button>
-            &nbsp;
-            <button onclick="setPunchcodeBg('Ga')">Grass</button>
-            <button onclick="setPunchcodeBg('Ib')">Dungeon</button>
-            <button onclick="setPunchcodeBg('Ca')">Dirt</button>
-            <button onclick="setPunchcodeBg('Ua')">Water</button>
-            <input type="text" id="bgInput" size="2" maxlength="2" value="Ca" oninput="setCustomPunchcodeBg()">
-        </div>
-    </div>
-
-    <div id="pcinput"><textarea id="punchcodeInput" oninput="updateDecompiler()"></textarea></div>
-    <div id="punchcodeImages" class="punchcodeImages"></div>
-    
-    <div id="decompiler"></div>
-        <div class="btn-row" style="display:flex; gap:5px; margin-top:10px;">
-            <button class="reject" onclick="rejectLogic()">CLEAR</button>
-            <button class="remove" onclick="removeObject()">DELETE</button>
-        </div>
-    </div>
-    
 </div>
-</div>
+
+<div id="tooltip"></div>
+
 <script>
-// --- STATE ---
-let currentSector = "Aa";
-let mapSectors = {};
-let editingIndex = -1;
-let editingGlobalKey = null;
-let globalLogic = { a: "", b: "", c: "", f: "", t: "" };
-let punchcodeTextColor = "#FFFFFF";
+window.activeDrive = null;
+let hostOrigin = '';
+let driveIconDir = 'i/';
+let driveTileDir = 't/';
 
-// QPC Script Macros State
-let qpcData = {};
-let editingQpcKey = null;
+// Tracks expanded folder paths so refreshes preserve tree state
+const expandedPaths = new Set();
 
-// Map Bounds State
-let mapBounds = { maxX: 7, maxY: 7 }; // default Hh
-const UPPER = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-const LOWER = "abcdefghijklmnopqrstuvwxyz";
-const CITY_SYMBOLS = "0123456789%()+,-:;=@[]^_{}";
+// Editor state
+let currentTargetPath = null;
+let originalCode = '';
 
-// Mutable Tile Dimensions
-let COLS = 14;
-let ROWS = 10;
-let TOTAL_TILES = COLS * ROWS; 
-
-const tileCache = {}, itemCache = {};
-const canvas = document.getElementById('sectorCanvas');
-const ctx = canvas.getContext('2d');
-const tooltip = document.getElementById('tooltip');
-
-const punchcodeItemImageCache = {};
-const nav = document.getElementById('sectorNav');
-
-function getMapBounds() {
-    return mapBounds;
+function getDos() {
+    return (window.parent && window.parent.CylonDOS) ? window.parent.CylonDOS : window.CylonDOS;
 }
 
-// Helper: Synchronize canvas layout
-function updateCanvasDimensions() {
-    TOTAL_TILES = COLS * ROWS;
-    canvas.width = COLS * 32;
-    canvas.height = ROWS * 32;
+// Pull core + extended theme variables from parent OS and cylon:/a/
+async function applyExtendedTheme() {
+    if (window.CylonSDK && window.CylonSDK.injectDesktopStyles) {
+        window.CylonSDK.applyColors(window.parent ? window.parent.CylonColors : null);
+    }
+    const dos = getDos();
+    if (!dos) return;
+
+    const root = document.documentElement;
+    const extraVars = {
+        themeInputFG: '--input-fg',
+        themeInputBG: '--input-bg',
+        themeCaseBG: '--case-bg',
+        themeCaseFG: '--case-fg',
+        htmlLink: '--html-link',
+        htmlVisited: '--html-visited',
+        htmlHover: '--html-hover',
+        htmlActive: '--html-active'
+    };
+
+    for (const [fileKey, cssVar] of Object.entries(extraVars)) {
+        try {
+            if (await dos.exists('cylon:/a/' + fileKey)) {
+                const val = (await dos.load('cylon:/a/' + fileKey)).trim();
+                if (val) root.style.setProperty(cssVar, val);
+            }
+        } catch (e) {}
+    }
+
+    try {
+        if (window.parent && window.parent.cylonHostOrigin) {
+            hostOrigin = window.parent.cylonHostOrigin;
+        } else if (await dos.exists('cylon:/a/cylonHostOrigin')) {
+            hostOrigin = (await dos.load('cylon:/a/cylonHostOrigin')).trim();
+        }
+        if (hostOrigin && !hostOrigin.endsWith('/')) hostOrigin += '/';
+    } catch (e) {}
 }
 
-// Helper: Rebuild the Dropdown list based on map bounds
-function updateNavDropdown() {
-    nav.innerHTML = '';
-    var bounds = getMapBounds();
+window.onload = async function() {
+    await applyExtendedTheme();
 
-    // Append Standard Map Layer Options
-    for(let x = 0; x <= bounds.maxX; x++) {
-        for(let y = 0; y <= bounds.maxY; y++) {
-            let opt = document.createElement('option');
-            let sec = UPPER[x] + LOWER[y];
-            opt.value = opt.textContent = sec;
-            nav.appendChild(opt);
-        }
-    }
-
-    // Append City Maps Layer Options
-    for(let x = 0; x <= bounds.maxX; x++) {
-        for(let y = 0; y <= bounds.maxY; y++) {
-            let opt = document.createElement('option');
-            let sec = UPPER[x] + CITY_SYMBOLS[y];
-            opt.value = opt.textContent = sec;
-            nav.appendChild(opt);
-        }
-    }
-
-    // Force fallback if the map shrinks and player is out-of-bounds
-    if (nav.querySelector(`option[value="${currentSector}"]`)) {
-        nav.value = currentSector;
-    } else {
-        currentSector = "Aa";
-        nav.value = "Aa";
-        document.getElementById('sectorLabel').innerText = currentSector;
-        updateCityButton();
-        render();
-    }
-}
-
-function initBlank() {
-    globalLogic = { a: "", b: "", c: "", f: "", t: "" };
-    mapSectors = {};
-    qpcData = {};
-    
-    COLS = 14;
-    ROWS = 10;
-    mapBounds = { maxX: 7, maxY: 7 };
-
-    updateCanvasDimensions();
-
-    // Initialize ALL potential sectors
-    for(let x = 0; x < 26; x++) {
-        for(let y = 0; y < 26; y++) {
-            let sec = UPPER[x] + LOWER[y];
-            mapSectors[sec] = { tiles: "Ga".repeat(TOTAL_TILES), exits: "", objects: [] };
-
-            let citySec = UPPER[x] + CITY_SYMBOLS[y];
-            mapSectors[citySec] = { tiles: "Ga".repeat(TOTAL_TILES), exits: "", objects: [] };
-        }
-    }
-    currentSector = "Aa";
-    updateNavDropdown();
-    updateBrushPreview();
-    updateGlobalLabels();
-    updateQpcList();
-    updateCityButton();
-    render();
-}
-
-async function populateDrives() {
-    if (!window.parent || !window.parent.CylonDOS) return;
-    let select = document.getElementById('driveSelect');
-    let currentVal = select.value;
-    select.innerHTML = '<option value="">(Select Drive)</option>';
-    let mounts = await window.parent.CylonDOS.mounts();
-    mounts.forEach(m => {
-        if (m.name !== 'ram' && m.name !== 'host') {
-            let opt = document.createElement('option');
-            opt.value = m.name;
-            opt.textContent = m.name + ":/";
-            if (m.name === currentVal) opt.selected = true;
-            select.appendChild(opt);
-        }
+    // Tap anywhere if no drive is selected yet (in case menu was dismissed)
+    document.getElementById('fm-root').addEventListener('pointerup', () => {
+        if (!window.activeDrive) showDriveMenu();
     });
-}
 
-// ---------------------------------------------------------
-// VIRTUAL FILE SYSTEM INTEGRATION
-// ---------------------------------------------------------
-
-async function loadFromDrive() {
-    let dos = window.parent && window.parent.CylonDOS ? window.parent.CylonDOS : null;
-    let drive = document.getElementById('driveSelect').value;
-    if (!dos || !drive) return alert("Please select a valid drive to load from.");
-    
-    initBlank(); 
-    
-    try {
-        let wStr = await dos.load(drive + ':/a/gfxGridWide');
-        let hStr = await dos.load(drive + ':/a/gfxGridTall');
-        let lbStr = await dos.load(drive + ':/a/gfxLowerBound');
-        
-        if (wStr) COLS = parseInt(wStr, 10);
-        if (hStr) ROWS = parseInt(hStr, 10);
-        updateCanvasDimensions();
-        
-        if (lbStr && lbStr.length === 2) {
-            mapBounds.maxX = Math.max(0, UPPER.indexOf(lbStr[0]));
-            mapBounds.maxY = Math.max(0, LOWER.indexOf(lbStr[1]));
-        }
-
-        let gFiles = ['a', 'b', 'c', 'f', 't'];
-        for (let g of gFiles) {
-            let data = await dos.load(drive + ':/w/' + g).catch(e=>null);
-            if (data) globalLogic[g] = data;
-        }
-
-        let qpcText = await dos.load(drive + ':/world.qpc').catch(e=>null);
-        if (qpcText) parseQpcData(qpcText);
-
-        let wDirs = await dos.dir(drive + ':/w').catch(e=>[]);
-        for (let s of wDirs) {
-            if (s.type === 'directory') {
-                let secId = s.name.split('/').pop();
-                if (secId.length !== 2) continue;
-                
-                // Load terrain just for display purposes
-                let mData = await dos.load(drive + ':/w/' + secId + '/m').catch(e=>null);
-                if (mData) {
-                    if (mData.length < TOTAL_TILES * 2) mData += "Ga".repeat(TOTAL_TILES - (mData.length/2));
-                    mapSectors[secId].tiles = mData.substring(0, TOTAL_TILES * 2);
-                }
-
-                let files = await dos.dir(drive + ':/w/' + secId).catch(e=>[]);
-                for (let f of files) {
-                    let fname = f.name.split('/').pop();
-                    if (fname === 'm' || fname === 'e' || fname === 't' || f.type !== 'file') continue;
-                    
-                    if (fname.length >= 4) {
-                        let logic = await dos.load(drive + ':/w/' + secId + '/' + fname).catch(e=>null);
-                        let obj = {
-                            id: fname.substring(0, 2),
-                            z: fname.substring(2, 4),
-                            data: fname.length >= 6 ? fname.substring(4, 6) : "",
-                            logic: logic || ""
-                        };
-                        mapSectors[secId].objects.push(obj);
-                    }
-                }
-            }
-        }
-
-        updateNavDropdown();
-        changeSector();
-        alert("Compiler loaded logic from " + drive + ":/");
-    } catch(e) {
-        console.error(e);
-        alert("Failed to load: " + e.message);
+    const openedTarget = await checkEditTarget();
+    if (!openedTarget && !window.activeDrive) {
+        await showDriveMenu();
     }
-}
+};
 
-async function saveToDrive() {
-    let dos = window.parent && window.parent.CylonDOS ? window.parent.CylonDOS : null;
-    let drive = document.getElementById('driveSelect').value;
-    if (!dos || !drive) return alert("Please select a valid drive to save to.");
-    
-    saveCurrentEditor(); 
+// Re-check for incoming edit targets or refresh tree when switching tabs
+window.addEventListener('message', async (e) => {
+    if (window.location.origin !== "null" && e.origin !== window.location.origin) return;
+    if (e.source !== window && e.source !== window.parent) return;
+
+    if (e.data && e.data.type === 'QANDY_PAGE_ACTIVATED') {
+        const openedTarget = await checkEditTarget();
+        if (!openedTarget) {
+            if (!window.activeDrive) {
+                await showDriveMenu();
+            } else if (document.getElementById('tree-view').style.display !== 'none') {
+                await renderRootTree();
+            }
+        }
+    } else if (e.data && e.data.type === 'QANDY_UPDATE_COLORS') {
+        await applyExtendedTheme();
+    }
+});
+
+async function checkEditTarget() {
+    const dos = getDos();
+    if (!dos) return false;
 
     try {
-        let gFiles = ['a', 'b', 'c', 'f', 't'];
-        for (let g of gFiles) {
-            if (globalLogic[g]) {
-                await dos.save(drive + ':/w/' + g, globalLogic[g]);
-            } else {
-                await dos.delete(drive + ':/w/' + g).catch(e=>{});
+        if (!(await dos.exists('cylon:/a/gfxEditTarget'))) return false;
+        let targetPath = await dos.load('cylon:/a/gfxEditTarget');
+        targetPath = targetPath ? targetPath.trim() : '';
+        if (!targetPath) return false;
+
+        // Consume target so subsequent clicks on the same file still trigger
+        await dos.save('cylon:/a/gfxEditTarget', '');
+
+        const colonIdx = targetPath.indexOf(':');
+        if (colonIdx > 0) {
+            const driveName = targetPath.substring(0, colonIdx);
+            if (window.activeDrive !== driveName) {
+                await selectDrive(driveName, { skipRender: false });
             }
         }
 
-        let qpcOut = "";
-        for (const [name, code] of Object.entries(qpcData)) {
-            qpcOut += `[${name}]${(code||"").replace(/\\/g, "\\\\").replace(/\n/g, "\\n")}\n`;
-        }
-        if (qpcOut) await dos.save(drive + ':/world.qpc', qpcOut);
-
-        // Save Objects
-        // Clean out existing objects from /w/SEC directories to avoid ghost files
-        for (let secId in mapSectors) {
-            let sec = mapSectors[secId];
-            let exists = await dos.exists(drive + ':/w/' + secId).catch(e=>false);
-            if (exists) {
-                let files = await dos.dir(drive + ':/w/' + secId).catch(e=>[]);
-                for (let f of files) {
-                    let fname = f.name.split('/').pop();
-                    if (fname !== 'm' && fname !== 'e' && fname !== 't' && fname.length >= 4) {
-                        await dos.delete(drive + ':/w/' + secId + '/' + fname).catch(e=>{});
-                    }
-                }
-                
-                for (let obj of sec.objects) {
-                    let fname = obj.id + obj.z + (obj.data || "");
-                    await dos.save(drive + ':/w/' + secId + '/' + fname, obj.logic || "\\n");
-                }
-            }
-        }
-
-        alert("Punch Codes successfully synced to " + drive + ":/");
+        await openFileInEditor(targetPath);
+        return true;
     } catch (e) {
-        console.error(e);
-        alert("Save failed: " + e.message);
+        console.warn('Could not read gfxEditTarget', e);
+        return false;
     }
 }
 
-// ---------------------------------------------------------
-// LEGACY IMPORT LOGIC (Parses old .gfx flat strings to memory)
-// ---------------------------------------------------------
-async function importLegacyGfx() {
-    try {
-        const text = await navigator.clipboard.readText();
-        if(!text) return;
-        parseGfxData(text);
-        alert("Legacy map loaded into memory. Click SAVE to sync it to the selected drive.");
-    } catch (e) { console.error("Import failed", e); }
-}
+async function showDriveMenu() {
+    const dos = getDos();
+    if (!dos || !window.parent || !window.parent.CylonPopManager) return;
 
-function parseGfxData(text) {
-    initBlank(); 
-
-    const unescapeWhitespace = (str) => (str || "")
-        .replace(/_NL_/g, "\n")
-        .replace(/\\n/g, "\n")
-        .replace(/\\r/g, "\r")
-        .replace(/\\\\/g, "\\");
-
-    const lines = text.split('\n');
-
-    lines.forEach(line => {
-        const eqIdx = line.indexOf('=');
-        if (eqIdx === -1) return;
-        const label = line.substring(0, eqIdx);
-        if (label === 'd') {
-            const match = unescapeWhitespace(line.substring(eqIdx + 1)).match(/^(\d+)x(\d+)$/i);
-            if (match) { COLS = parseInt(match[1],10); ROWS = parseInt(match[2],10); }
-        }
-        if (label === 'a') {
-            const code = unescapeWhitespace(line.substring(eqIdx + 1));
-            globalLogic.a = code;
-            const match = code.match(/(?:Xs\s*)?W4\s*([A-Z][a-z])/);
-            if (match) {
-                mapBounds.maxX = Math.max(0, UPPER.indexOf(match[1].charAt(0)));
-                mapBounds.maxY = Math.max(0, LOWER.indexOf(match[1].charAt(1)));
-            }
-        }
+    const mounts = await dos.mounts();
+    const gfxDrives = mounts.filter(m => {
+        const src = (m.source || '').toLowerCase();
+        const name = (m.name || '').toLowerCase();
+        return src.endsWith('.gfx') || name.endsWith('.gfx') || name === 'desktop';
     });
 
-    updateCanvasDimensions();
-    TOTAL_TILES = COLS * ROWS;
-
-    lines.forEach(line => {
-        const eqIdx = line.indexOf('=');
-        if (eqIdx === -1) return;
-        const label = line.substring(0, eqIdx);
-        const content = line.substring(eqIdx + 1);
-
-        if (label === 'b' || label === 'c' || label === 'f' || label === 't') {
-            globalLogic[label] = unescapeWhitespace(content);
-            return;
-        }
-
-        if (label.length !== 2) return; 
-
-        let [map, items] = content.split('.');
-        let objs = [];
-        if(items) items.split('~').forEach(c => {
-            if(!c) return;
-            let [m, rawl] = c.split('|');
-            let l = unescapeWhitespace(rawl);
-            if (m) {
-                if (m.length >= 6) {
-                    objs.push({ id: m.substring(0,2), z: m.substring(2,4), data: m.substring(4,6), logic: l || "" });
-                } else if (m.length >= 4) {
-                    objs.push({ id: m.substring(0,2), z: m.substring(2,4), data: "", logic: l || "" });
+    const items = [];
+    if (gfxDrives.length === 0) {
+        items.push({
+            label: '(No .gfx drives mounted)',
+            action: () => {
+                if (window.parent && window.parent.printDOS) {
+                    window.parent.printDOS('[.2]Mount a .gfx drive first, e.g.: mount cylon-desktop.gfx ram[.]\n');
                 }
             }
         });
-        
-        const tilesLength = TOTAL_TILES * 2;
-        let tStr = map.substring(0, tilesLength);
-        if (tStr.length < tilesLength) tStr += "Ga".repeat((tilesLength - tStr.length)/2);
-        
-        mapSectors[label] = { tiles: tStr, exits: map.substring(tilesLength), objects: objs };
-    });
-    
-    updateGlobalLabels();
-    render();
-}
-
-// ---------------------------------------------------------
-// UI AND LOGIC
-// ---------------------------------------------------------
-function updateCityButton() {
-    const btn = document.getElementById('cityToggleBtn');
-    if (!btn) return;
-    const isCity = CITY_SYMBOLS.includes(currentSector[1]);
-    btn.innerText = isCity ? "EXIT CITY" : "ENTER CITY";
-    btn.style.background = isCity ? "#8e44ad" : ""; 
-}
-
-function toggleCity() {
-    let isCity = CITY_SYMBOLS.includes(currentSector[1]);
-    let xChar = currentSector[0];
-    let yIdx = isCity ? CITY_SYMBOLS.indexOf(currentSector[1]) : LOWER.indexOf(currentSector[1]);
-
-    if (yIdx !== -1) {
-        nav.value = isCity ? (xChar + LOWER[yIdx]) : (xChar + CITY_SYMBOLS[yIdx]);
-        changeSector();
-    }
-}
-
-// --- MOUSE AND TOUCH INTERACTION ---
-canvas.addEventListener('contextmenu', e => e.preventDefault());
-
-let longPressTimer = null;
-let isLongPress = false;
-let startPointerX = 0;
-let startPointerY = 0;
-
-function handlePointerDown(clientX, clientY, isRightClick) {
-    if (document.activeElement) { document.activeElement.blur(); }
-
-    const rect = canvas.getBoundingClientRect();
-    const x = Math.floor((clientX - rect.left) / 32);
-    const y = Math.floor((clientY - rect.top) / 32);
-    const tileIndex = y * COLS + x;
-
-    if (tileIndex < 0 || tileIndex >= TOTAL_TILES) return;
-
-    startPointerX = clientX;
-    startPointerY = clientY;
-
-    const sec = mapSectors[currentSector];
-    const originalTiles = sec.tiles;
-    const sampled = sec.tiles.substring(tileIndex * 2, tileIndex * 2 + 2);
-
-    if (isRightClick) {
-        document.getElementById('tileInput').value = sampled;
-        updateBrushPreview();
-        render();
-        return;
-    }
-}
-
-canvas.addEventListener('mousedown', (e) => {
-    if (e.button === 0) {
-        handlePointerDown(e.clientX, e.clientY, false);
-    } else if (e.button === 2) {
-        handlePointerDown(e.clientX, e.clientY, true);
-    }
-});
-
-canvas.addEventListener('mousemove', (e) => {
-    const rect = canvas.getBoundingClientRect();
-    const x = Math.floor((e.clientX - rect.left) / 32);
-    const y = Math.floor((e.clientY - rect.top) / 32);
-    const tileIndex = y * COLS + x;
-
-    if (tileIndex >= 0 && tileIndex < TOTAL_TILES) {
-        tooltip.style.display = 'block';
-        tooltip.style.left = (e.clientX - rect.left + 25) + 'px';
-        tooltip.style.top = (e.clientY - rect.top - 15) + 'px';
-        tooltip.innerText = `${tileIndex.toString(16).toUpperCase().padStart(2, '0')}`;
     } else {
-        tooltip.style.display = 'none';
-    }
-});
-
-canvas.addEventListener('mouseleave', () => {
-    tooltip.style.display = 'none';
-});
-
-// --- CORE LOGIC ---
-function updateBrushPreview() {
-    const code = document.getElementById('tileInput').value;
-    const preview = document.getElementById('brushPreview');
-    preview.style.background = `#000 url('t/${code}.png') no-repeat center`;
-    preview.style.backgroundSize = "cover";
-}
-
-function getImg(src, cache) {
-    if (cache[src] && cache[src].complete) return cache[src];
-    const img = new Image();
-    img.src = src;
-    img.onload = () => { cache[src] = img; render(); };
-    cache[src] = img;
-    return img;
-}
-
-function render() {
-    const sec = mapSectors[currentSector];
-    if(!sec) return;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    for(let i=0; i<TOTAL_TILES; i++) {
-        let code = sec.tiles.substring(i*2, i*2+2);
-        let img = getImg(`t/${code}.png`, tileCache);
-        if(img.complete) ctx.drawImage(img, (i%COLS)*32, Math.floor(i/COLS)*32, 32, 32);
+        gfxDrives.forEach(m => {
+            items.push({
+                label: `${m.name} [${m.type}]`,
+                action: () => selectDrive(m.name)
+            });
+        });
     }
 
-    sec.objects.forEach(obj => {
-        let img = getImg(`i/${obj.id}.png`, itemCache);
-        let z = parseInt(obj.z, 16); 
-        let targetX = (z % COLS) * 32;
-        let targetY = Math.floor(z / COLS) * 32;
+    window.parent.CylonPopManager.showContextMenu('topleft', items);
+}
 
-        if(img.complete) {
-            if (obj.id.startsWith('T') || obj.id.startsWith('U')) {
-                let drawX = targetX + 32 - img.width;
-                let drawY = targetY + 32 - img.height;
-                ctx.drawImage(img, drawX, drawY, img.width, img.height);
-            } else {
-                ctx.drawImage(img, targetX, targetY, 32, 32);
+async function selectDrive(driveName, opts) {
+    if (!driveName) return;
+    window.activeDrive = driveName;
+    document.getElementById('active-drive-label').textContent = driveName + ':/';
+
+    // Default /w/ to expanded on newly chosen drive
+    expandedPaths.clear();
+    expandedPaths.add(`${driveName}:/w`);
+
+    // Resolve drive-specific asset paths (with fallback to hostOrigin)
+    const dos = getDos();
+    driveIconDir = 'i/';
+    driveTileDir = 't/';
+    if (dos) {
+        try {
+            if (await dos.exists(`${driveName}:/a/gfxIconDir`)) {
+                const v = (await dos.load(`${driveName}:/a/gfxIconDir`)).trim();
+                if (v) driveIconDir = v;
             }
+            if (await dos.exists(`${driveName}:/a/gfxTileDir`)) {
+                const v = (await dos.load(`${driveName}:/a/gfxTileDir`)).trim();
+                if (v) driveTileDir = v;
+            }
+        } catch (e) {}
+    }
+
+    if (hostOrigin) {
+        if (!driveIconDir.match(/^https?:\/\//i) && !driveIconDir.startsWith('data:')) {
+            driveIconDir = hostOrigin + driveIconDir.replace(/^\/+/, '');
         }
-    });
-    updateObjectList();
-}
-
-function editObject() {
-    if (editingIndex === -1) {
-        alert("Please select an object from the list below to edit first.");
-        return;
-    }
-    const idStr = document.getElementById('newID').value.trim();
-    const zStr = document.getElementById('newZ').value.trim();
-    const dataStr = document.getElementById('newDATA').value.trim();
-    if (idStr.length !== 2 || zStr.length !== 2) {
-        alert("ID and Z must be exactly 2 characters (e.g., ID: 'Bd', Z: '0A')");
-        return;
-    }
-    const obj = mapSectors[currentSector].objects[editingIndex];
-    obj.id = idStr;
-    obj.z = zStr.toUpperCase();
-    obj.data = (dataStr.length === 2) ? dataStr : "";
-    document.getElementById('editingObjID').innerText = obj.id + "@" + obj.z;
-    const labelEl = document.getElementById('logicLabel');
-    if (obj.data && obj.data.length === 2) {
-        labelEl.innerText = "PUNCH CODE";
-    } else {
-        labelEl.innerText = "ITEM INVENTORY";
-    }
-    render();
-}
-
-// --- QPC SCRIPT MACROS ---
-function updateQpcList() {
-    const logicBox = document.getElementById('logicBox');
-    const list = document.getElementById('qpcListItems');
-    list.innerHTML = "";
-
-    for (const [name, code] of Object.entries(qpcData)) {
-        const div = document.createElement('div');
-        div.className = 'object-entry';
-        div.style.borderColor = '#000000';
-
-        const len = Math.floor((code || "").replace(/\s/g, "").length / 2);
-        div.innerHTML = `[<b style="color:#e67e22;">${name}</b>] <span style="color: #888;">(${len} inst)</span>`;
-        div.onclick = () => openQpcEditor(name);
-        list.appendChild(div);
-
-        if (editingQpcKey === name && logicBox) {
-            list.appendChild(logicBox);
-            logicBox.style.display = 'block';
+        if (!driveTileDir.match(/^https?:\/\//i) && !driveTileDir.startsWith('data:')) {
+            driveTileDir = hostOrigin + driveTileDir.replace(/^\/+/, '');
         }
     }
+    if (!driveIconDir.endsWith('/')) driveIconDir += '/';
+    if (!driveTileDir.endsWith('/')) driveTileDir += '/';
+
+    if (!(opts && opts.skipRender)) {
+        showTreeView();
+        await renderRootTree();
+    }
 }
 
-function addQpc() {
-    const nameStr = document.getElementById('newQpcName').value.trim();
-    if (!nameStr) {
-        alert("Please enter a name for the QPC tape.");
+async function refreshTree() {
+    if (!window.activeDrive) {
+        await showDriveMenu();
         return;
     }
-    if (qpcData[nameStr] !== undefined) {
-        alert("A QPC tape with this name already exists.");
+    await renderRootTree();
+}
+
+function formatDate(ts) {
+    if (!ts || ts.length !== 14) return ts || '--';
+    return `${ts.substring(0,4)}-${ts.substring(4,6)}-${ts.substring(6,8)} ${ts.substring(8,10)}:${ts.substring(10,12)}`;
+}
+
+function getFileVisualInfo(name, fullPath) {
+    // Check if inside a sector folder under /w/<sector>/<file>
+    const clean = fullPath.replace(/^[^:]+:\//, '');
+    const parts = clean.split('/').filter(Boolean);
+    const inSector = (parts.length === 3 && parts[0] === 'w' && name !== 'm' && name.length >= 4);
+
+    if (inSector) {
+        const iconId = name.substring(0, 2);
+        const zCode = name.substring(2, 4);
+        const dataCode = name.length >= 6 ? name.substring(4, 6) : '';
+        const itemLabel = (typeof gfxItemID === 'function') ? gfxItemID(iconId) : iconId;
+        const displayLabel = `${name} — ${itemLabel} (Z:${zCode}${dataCode ? ', D:' + dataCode : ''})`;
+        return { iconSrc: `${driveIconDir}${iconId}.png`, label: displayLabel };
+    }
+
+    const lower = name.toLowerCase();
+    let code = 'Fi';
+    if (lower === 'm') code = 'Ga';
+    else if (lower.endsWith('.htm') || lower.endsWith('.html')) code = 'Aa';
+    else if (lower.endsWith('.js')) code = 'Lj';
+    else if (lower.endsWith('.png') || lower.endsWith('.jpg') || lower.endsWith('.gif')) code = 'Im';
+    else if (name.length === 1 || lower.endsWith('.txt') || lower.endsWith('.cfg')) code = 'Tx';
+
+    return { iconSrc: `${driveIconDir}${code}.png`, label: name };
+}
+
+async function renderRootTree() {
+    const rootEl = document.getElementById('fm-root');
+    if (!window.activeDrive) {
+        rootEl.innerHTML = '<div class="loading-text">Select a .gfx drive to browse...</div>';
         return;
     }
 
-    saveCurrentEditor();
-    closeEditor();
+    rootEl.innerHTML = '';
+    const drive = window.activeDrive;
 
-    qpcData[nameStr] = "";
-    document.getElementById('newQpcName').value = "";
+    // Order requested: /a/ at top, /p/ second, /w/ third
+    const rootDirs = [
+        { name: 'a', label: '/a/ (Alpha Config)', path: `${drive}:/a` },
+        { name: 'p', label: '/p/ (Players / Data)', path: `${drive}:/p` },
+        { name: 'w', label: '/w/ (World Scripts & Sectors)', path: `${drive}:/w` }
+    ];
 
-    updateQpcList();
-    openQpcEditor(nameStr);
-}
-
-function openQpcEditor(name) {
-    if (editingQpcKey === name) {
-        saveCurrentEditor();
-        closeEditor();
-        return;
+    for (const dirInfo of rootDirs) {
+        const node = await createDirNode(dirInfo.label, dirInfo.path, '');
+        rootEl.appendChild(node);
     }
-
-    saveCurrentEditor();
-
-    editingIndex = -1;
-    editingGlobalKey = null;
-    editingQpcKey = name;
-
-    updateObjectList();
-    updateQpcList();
-
-    document.getElementById('logicLabel').innerText = "QPC TAPE";
-    document.getElementById('editingObjID').innerText = `[${name}]`;
-
-    const punchInput = document.getElementById('punchcodeInput');
-    if (punchInput) {
-        punchInput.value = qpcData[name] || "";
-    }
-
-    updateDecompiler();
 }
 
-async function importQpcLegacy() {
-    try {
-        const text = await navigator.clipboard.readText();
-        if (!text) return;
-        parseQpcData(text);
-        alert("QPC Legacy Scripts Imported!");
-    } catch(e) { console.error("Import QPC failed", e); }
-}
+async function createDirNode(displayName, fullPath, modifiedStr) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'fm-item-wrapper';
 
-function parseQpcData(text) {
-    const unescapeWhitespace = (str) => (str || "").replace(/\\n/g, "\n").replace(/\\r/g, "\r").replace(/\\\\/g, "\\");
-    const lines = text.split(/\r?\n/);
-    for (let line of lines) {
-        line = line.trim();
-        if (!line) continue;
-        const match = line.match(/^\[(.*?)\](.*)$/);
-        if (match) {
-            qpcData[match[1]] = unescapeWhitespace(match[2]);
+    const row = document.createElement('div');
+    row.className = 'fm-row';
+
+    const colName = document.createElement('div');
+    colName.className = 'fm-col-name';
+
+    const toggleSpan = document.createElement('span');
+    toggleSpan.className = 'fm-toggle';
+
+    const img = document.createElement('img');
+    img.src = `${driveIconDir}Au.png`;
+    img.className = 'fm-icon';
+    img.onerror = function() { this.style.visibility = 'hidden'; };
+
+    const labelSpan = document.createElement('span');
+    labelSpan.className = 'fm-dir-label';
+    labelSpan.textContent = displayName;
+    labelSpan.title = fullPath;
+
+    colName.appendChild(toggleSpan);
+    colName.appendChild(img);
+    colName.appendChild(labelSpan);
+
+    const colSize = document.createElement('div');
+    colSize.className = 'fm-meta';
+    colSize.textContent = '<DIR>';
+
+    const colDate = document.createElement('div');
+    colDate.className = 'fm-meta';
+    colDate.textContent = modifiedStr || '--';
+
+    row.appendChild(colName);
+    row.appendChild(colSize);
+    row.appendChild(colDate);
+    wrapper.appendChild(row);
+
+    const childrenContainer = document.createElement('div');
+    childrenContainer.className = 'fm-children';
+    wrapper.appendChild(childrenContainer);
+
+    let loaded = false;
+
+    async function setExpanded(expand) {
+        if (expand) {
+            expandedPaths.add(fullPath);
+            wrapper.classList.add('expanded');
+            toggleSpan.textContent = '[-]';
+            if (!loaded) {
+                loaded = true;
+                childrenContainer.innerHTML = '<div class="loading-text">Loading...</div>';
+                await populateDirectory(fullPath, childrenContainer);
+            }
+        } else {
+            expandedPaths.delete(fullPath);
+            wrapper.classList.remove('expanded');
+            toggleSpan.textContent = '[+]';
         }
     }
-    updateQpcList();
-}
 
-function exportQpcLegacy() {
-    saveCurrentEditor();
-    let out = "";
-    const escapeWhitespace = (str) => (str || "").replace(/\\/g, "\\\\").replace(/\n/g, "\\n").replace(/\r/g, "\\r");
-
-    for (const [name, code] of Object.entries(qpcData)) {
-        out += `[${name}]${escapeWhitespace(code)}\n`;
-    }
-
-    navigator.clipboard.writeText(out.trim());
-    alert("QPC EXPORTED TO CLIPBOARD!");
-}
-
-function updateObjectList() {
-    const logicBox = document.getElementById('logicBox');
-    if (logicBox) document.getElementById('panel').appendChild(logicBox);
-
-    const list = document.getElementById('listItems');
-    list.innerHTML = "";
-    mapSectors[currentSector].objects.forEach((obj, idx) => {
-        const div = document.createElement('div');
-        div.className = 'object-entry';
-        const typeLabel = obj.data ? `d:${obj.data}` : `dynamic`;
-        div.innerHTML = `[<b>${obj.id}</b> z:${obj.z} <span style="color: #888;">(${typeLabel})</span>] ${gfxItemID(obj.id)}`;
-        div.onclick = () => openEditor(idx);
-        list.appendChild(div);
-
-        if (idx === editingIndex && logicBox) {
-            list.appendChild(logicBox);
-            logicBox.style.display = 'block';
-        }
-    });
-
-    if (editingGlobalKey !== null && logicBox) {
-        document.getElementById('global-' + editingGlobalKey).appendChild(logicBox);
-        logicBox.style.display = 'block';
-    } else if (editingIndex === -1 && logicBox) {
-        logicBox.style.display = 'none';
-    }
-}
-
-function updateGlobalLabels() {
-    const getCount = (str) => Math.floor((str || "").replace(/\s/g, "").length / 2);
-
-    document.getElementById('global-lbl-a').innerText = getCount(globalLogic.a) > 0 ? `(${getCount(globalLogic.a)} inst)` : "";
-    document.getElementById('global-lbl-b').innerText = getCount(globalLogic.b) > 0 ? `(${getCount(globalLogic.b)} inst)` : "";
-    document.getElementById('global-lbl-c').innerText = getCount(globalLogic.c) > 0 ? `(${getCount(globalLogic.c)} inst)` : "";
-    document.getElementById('global-lbl-f').innerText = getCount(globalLogic.f) > 0 ? `(${getCount(globalLogic.f)} inst)` : "";
-    document.getElementById('global-lbl-t').innerText = getCount(globalLogic.t) > 0 ? `(${getCount(globalLogic.t)} inst)` : ""; 
-
-    updateNavDropdown();
-    render();
-}
-
-function addObject() {
-    const idStr = document.getElementById('newID').value.trim();
-    const zStr = document.getElementById('newZ').value.trim();
-    const dataStr = document.getElementById('newDATA').value.trim();
-
-    if (idStr.length !== 2 || zStr.length !== 2) {
-        alert("ID and Z must be exactly 2 characters (e.g., ID: 'Bd', Z: '0A')");
-        return;
-    }
-
-    if (editingIndex !== -1 || editingGlobalKey !== null || editingQpcKey !== null) {
-        saveCurrentEditor();
-        closeEditor();
-    }
-
-    const newObject = {
-        id: idStr,
-        z: zStr.toUpperCase(),
-        data: (dataStr.length === 2) ? dataStr : "",
-        logic: ""
+    row.onclick = async (e) => {
+        e.stopPropagation();
+        await setExpanded(!expandedPaths.has(fullPath));
     };
 
-    mapSectors[currentSector].objects.push(newObject);
-    document.getElementById('newID').value = "";
-    document.getElementById('newZ').value = "";
-    render();
-    openEditor(mapSectors[currentSector].objects.length - 1);
+    const isExpanded = expandedPaths.has(fullPath);
+    toggleSpan.textContent = isExpanded ? '[-]' : '[+]';
+    if (isExpanded) {
+        await setExpanded(true);
+    }
+
+    return wrapper;
 }
 
-function saveCurrentEditor() {
-    const punchInput = document.getElementById('punchcodeInput');
-    if (!punchInput) return;
-    let val = punchInput.value;
+function createFileRow(name, fullPath, sizeStr, dateStr) {
+    const row = document.createElement('div');
+    row.className = 'fm-row';
 
-    if (editingIndex !== -1) {
-        try { mapSectors[currentSector].objects[editingIndex].logic = val; } catch (e) { }
-    } else if (editingGlobalKey !== null) {
-        globalLogic[editingGlobalKey] = val;
-    } else if (editingQpcKey !== null) {
-        qpcData[editingQpcKey] = val;
+    const visual = getFileVisualInfo(name, fullPath);
+
+    const colName = document.createElement('div');
+    colName.className = 'fm-col-name';
+
+    const spacer = document.createElement('span');
+    spacer.className = 'fm-toggle';
+    spacer.textContent = '   ';
+
+    const img = document.createElement('img');
+    img.src = visual.iconSrc;
+    img.className = 'fm-icon';
+    img.onerror = function() {
+        this.onerror = null;
+        this.src = `${driveIconDir}Tx.png`;
+    };
+
+    const labelSpan = document.createElement('span');
+    labelSpan.className = 'fm-label';
+    labelSpan.textContent = visual.label;
+    labelSpan.title = fullPath;
+
+    colName.appendChild(spacer);
+    colName.appendChild(img);
+    colName.appendChild(labelSpan);
+
+    const colSize = document.createElement('div');
+    colSize.className = 'fm-meta';
+    colSize.textContent = sizeStr;
+
+    const colDate = document.createElement('div');
+    colDate.className = 'fm-meta';
+    colDate.textContent = dateStr;
+
+    row.appendChild(colName);
+    row.appendChild(colSize);
+    row.appendChild(colDate);
+
+    row.onclick = (e) => {
+        e.stopPropagation();
+        openFileInEditor(fullPath);
+    };
+
+    return row;
+}
+
+async function populateDirectory(dirPath, container) {
+    const dos = getDos();
+    if (!dos) return;
+
+    try {
+        if (!(await dos.exists(dirPath))) {
+            container.innerHTML = '<div class="loading-text">(empty)</div>';
+            return;
+        }
+
+        const entries = await dos.dir(dirPath);
+        container.innerHTML = '';
+
+        const dirs = entries
+            .filter(e => e.type === 'directory')
+            .sort((a, b) => a.name.localeCompare(b.name));
+
+        const files = entries
+            .filter(e => e.type === 'file' && !e.name.endsWith('_dir.sys!'))
+            .sort((a, b) => a.name.localeCompare(b.name));
+
+        if (dirs.length === 0 && files.length === 0) {
+            container.innerHTML = '<div class="loading-text">(empty)</div>';
+            return;
+        }
+
+        // List files first (e.g. a, b, c, e, t in /w/, or m + objects in sectors), then subdirs
+        for (const f of files) {
+            const fileName = f.name.substring(f.name.lastIndexOf('/') + 1);
+            const fullPath = dirPath + (dirPath.endsWith('/') ? '' : '/') + fileName;
+            container.appendChild(createFileRow(fileName, fullPath, dos.formatSize(f.size), formatDate(f.timestamp)));
+        }
+
+        for (const d of dirs) {
+            const cleanName = d.name.replace(/[<>]/g, '');
+            const folderName = cleanName.substring(cleanName.lastIndexOf('/') + 1);
+            const fullPath = dirPath + (dirPath.endsWith('/') ? '' : '/') + folderName;
+            container.appendChild(await createDirNode(folderName + '/', fullPath, formatDate(d.timestamp)));
+        }
+    } catch (err) {
+        container.innerHTML = `<div class="loading-text" style="color:var(--text-fg3, #f44);">Error reading ${dirPath}</div>`;
     }
 }
 
-function openGlobalEditor(key) {
-    if (editingGlobalKey === key) {
-        saveCurrentEditor();
-        closeEditor();
-        return;
+// ============================================================================
+// MERGED PUNCH CODE / TEXT FILE EDITOR
+// ============================================================================
+
+function formatTargetHeadline(targetPath) {
+    const clean = targetPath.replace(/^[^:]+:\//, '');
+    const parts = clean.split('/').filter(Boolean);
+
+    // Format Sector <sector> <Z> "<Item>" only for object/item files inside /w/<sector>/
+    if (parts.length === 3 && parts[0] === 'w') {
+        const sector = parts[1];
+        const filename = parts[2];
+        if (filename !== 'm' && filename.length >= 4) {
+            const iconId = filename.substring(0, 2);
+            const zCode = filename.substring(2, 4);
+            const itemLabel = (typeof gfxItemID === 'function') ? gfxItemID(iconId) : iconId;
+            return `Sector ${sector} ${zCode} "${itemLabel}" (${filename})`;
+        }
+    }
+    return targetPath;
+}
+
+async function openFileInEditor(targetPath) {
+    const dos = getDos();
+    if (!dos) return;
+
+    currentTargetPath = targetPath;
+    document.getElementById('target-file').textContent = formatTargetHeadline(targetPath);
+
+    let content = '';
+    try {
+        const loaded = await dos.load(targetPath);
+        if (loaded !== null) content = loaded;
+    } catch (e) {
+        content = '';
     }
 
-    saveCurrentEditor();
-    editingIndex = -1;
-    editingGlobalKey = key;
-    editingQpcKey = null;
+    // Expand escaped newlines if file was written with \n placeholders
+    content = content.replace(/\\n/g, '\n');
 
-    updateObjectList();
-    updateQpcList();
+    originalCode = content;
+    document.getElementById('punchcodeInput').value = content;
+    document.getElementById('save-btn').disabled = true;
 
-    const logicBox = document.getElementById('logicBox');
-    if (logicBox) {
-        document.getElementById('global-' + key).appendChild(logicBox);
-        logicBox.style.display = 'block';
+    document.getElementById('tree-view').style.display = 'none';
+    document.getElementById('editor-view').style.display = 'flex';
+
+    decompilepunchcode(content);
+}
+
+function showTreeView() {
+    document.getElementById('editor-view').style.display = 'none';
+    document.getElementById('tree-view').style.display = 'flex';
+    document.getElementById('tooltip').style.display = 'none';
+    renderRootTree();
+}
+
+function cancelEdit() {
+    currentTargetPath = null;
+    originalCode = '';
+    document.getElementById('punchcodeInput').value = '';
+    document.getElementById('save-btn').disabled = true;
+    document.getElementById('decompiler-view').innerHTML = '';
+    showTreeView();
+}
+
+function onCodeChange() {
+    const currentCode = document.getElementById('punchcodeInput').value;
+    document.getElementById('save-btn').disabled = (currentCode === originalCode);
+    decompilepunchcode(currentCode);
+}
+
+async function saveLogic() {
+    if (!currentTargetPath) return;
+    const dos = getDos();
+    if (!dos) return;
+
+    const currentCode = document.getElementById('punchcodeInput').value;
+
+    try {
+        await dos.save(currentTargetPath, currentCode);
+        originalCode = currentCode;
+        document.getElementById('save-btn').disabled = true;
+
+        if (window.popHtm) {
+            window.popHtm(
+                `<div style="padding:12px 18px; background:var(--menu-bg,#111); border:1px solid var(--fg-color,#0f0); color:var(--fg-color,#0f0); text-align:center;"><b>Saved!</b></div>`,
+                'center'
+            );
+            setTimeout(() => { if (window.hpop) window.hpop(); }, 900);
+        }
+    } catch (err) {
+        if (window.parent && window.parent.printDOS) {
+            window.parent.printDOS(`Error saving ${currentTargetPath}: [.4]${err.message || err}[.]\n`);
+        }
     }
-
-    let title = "";
-    if (key === 'a') title = "ALPHA (ON CONNECT)";
-    if (key === 'b') title = "BEFORE (PRE-TICK)";
-    if (key === 'c') title = "AFTER (POST-TICK)";
-    if (key === 'f') title = "FIRE ITEM";
-    if (key === 't') title = "TAG (PVP)";
-
-    document.getElementById('logicLabel').innerText = "GLOBAL PUNCH CODE";
-    document.getElementById('editingObjID').innerText = title;
-
-    const punchInput = document.getElementById('punchcodeInput');
-    if (punchInput) {
-        punchInput.value = globalLogic[key] || "";
-    }
-
-    updateDecompiler();
-    updateGlobalLabels();
 }
 
-function openEditor(idx) {
-    if (editingIndex === idx) {
-        saveCurrentEditor();
-        closeEditor();
-        return;
-    }
-
-    saveCurrentEditor();
-    editingIndex = idx;
-    editingGlobalKey = null;
-    editingQpcKey = null;
-
-    updateGlobalLabels();
-
-    const obj = mapSectors[currentSector].objects[idx];
-
-    document.getElementById('newID').value = obj.id;
-    document.getElementById('newZ').value = obj.z;
-    document.getElementById('newDATA').value = obj.data || "";
-
-    const labelEl = document.getElementById('logicLabel');
-    if (obj.data && obj.data.length === 2) {
-        labelEl.innerText = "PUNCH CODE";
-    } else {
-        labelEl.innerText = "ITEM INVENTORY";
-    }
-
-    document.getElementById('editingObjID').innerText = obj.id + "@" + obj.z;
-    document.getElementById('punchcodeInput').value = obj.logic;
-
-    updateDecompiler();
-    updateObjectList();
-    updateQpcList();
-}
-
-function closeEditor() {
-    editingIndex = -1;
-    editingGlobalKey = null;
-    editingQpcKey = null;
-
-    const logicBox = document.getElementById('logicBox');
-    document.getElementById('panel').appendChild(logicBox);
-    logicBox.style.display = 'none';
-
-    document.getElementById('newID').value = "";
-    document.getElementById('newZ').value = "";
-    document.getElementById('newDATA').value = "00";
-
-    document.getElementById('editingObjID').innerText = "";
-    document.getElementById('punchcodeInput').value = "";
-
-    updateDecompiler();
-    updateGlobalLabels();
-    updateObjectList();
-    updateQpcList();
-    render();
-}
-
-function rejectLogic() {
-    closeEditor();
-}
-
-function removeObject() {
-    if (editingIndex !== -1) {
-        mapSectors[currentSector].objects.splice(editingIndex, 1);
-    } else if (editingGlobalKey !== null) {
-        globalLogic[editingGlobalKey] = "";
-    } else if (editingQpcKey !== null) {
-        delete qpcData[editingQpcKey];
-    }
-    closeEditor();
-}
-
-function updateDecompiler() {
-    const code = document.getElementById('punchcodeInput').value;
-    const display = document.getElementById('decompiler');
-    if (!display) return;
-    display.style.display = 'none';
-    if (code.trim() !== "") decompilepunchcode(code);
-}
-
-function changeSector() {
-    saveCurrentEditor();
-    currentSector = nav.value;
-    document.getElementById('sectorLabel').innerText = currentSector;
-    closeEditor();
-    updateCityButton();
-    render();
-}
-
-// ----------------------------------------------------------------------
-// Decompiler Display Logic 
-// ----------------------------------------------------------------------
-function isWRegister(code) {
-    return code.length === 2 && code.charAt(0) === 'W' && (
-        (code.charAt(1) >= 'a' && code.charAt(1) <= 'z') ||
-        (code.charAt(1) >= '0' && code.charAt(1) <= '9')
-    );
-}
-
-function isNumerical(code) {
-    return code.length === 2 && !isNaN(parseInt(code));
-}
+// ============================================================================
+// VISUAL DECOMPILER ENGINE
+// ============================================================================
 
 function getCodeDescription(code) {
     if (code === "Za") return "nothing (null)";
-    if (code === "Z1") return "exit Z1";
-
     const itemText = typeof gfxItemID === "function" ? gfxItemID(code) : "Unknown";
     if (itemText !== "Item " + code && itemText !== "Unknown") return itemText;
-
-    if (code.length === 2 && code.charAt(0) >= 'A' && code.charAt(0) <= 'Z' && (LOWER.includes(code.charAt(1)) || CITY_SYMBOLS.includes(code.charAt(1)))) {
-        return `sector ${code}`;
-    }
     return `code "${code}"`;
 }
 
 function decompilepunchcode(initialCode) {
-    const punchcodeImagesContainer = document.getElementById('punchcodeImages');
-    punchcodeImagesContainer.innerHTML = "";
+    const container = document.getElementById('decompiler-view');
+    container.innerHTML = "";
     if (!initialCode) return;
 
     function bindHover(element, desc, startIdx, endIdx) {
         element.style.cursor = "pointer";
         element.addEventListener('mousemove', (e) => {
             const ta = document.getElementById('punchcodeInput');
-            ta.focus({ preventScroll: true });
-            ta.setSelectionRange(startIdx, endIdx);
+            if (document.activeElement === ta) {
+                ta.setSelectionRange(startIdx, endIdx);
+            }
             const tooltip = document.getElementById('tooltip');
             tooltip.style.display = 'block';
             tooltip.innerText = desc;
-            tooltip.style.left = (e.pageX + 15) + 'px';
-            tooltip.style.top = (e.pageY + 15) + 'px';
+            tooltip.style.left = Math.min(window.innerWidth - 180, e.clientX + 14) + 'px';
+            tooltip.style.top = Math.min(window.innerHeight - 40, e.clientY + 14) + 'px';
         });
         element.addEventListener('mouseleave', () => {
             document.getElementById('tooltip').style.display = 'none';
         });
     }
 
-    function parseAndRender(srcString, overrideStart = null, overrideEnd = null) {
-        let col = 0;
-        let ifnot = false;
-        let ifnotStartIdx = null;
+    let col = 0;
+    let ifnot = false;
+    let ifnotStartIdx = null;
+    const srcString = initialCode;
 
-        while (col < srcString.length) {
-            let startIdx = col;
-            let char = srcString.charAt(col);
+    while (col < srcString.length) {
+        const startIdx = col;
+        const char = srcString.charAt(col);
 
-            if (char === ' ' || char === '\t') {
-                const spacer = document.createElement('div');
-                spacer.style.width = '16px';
-                spacer.style.height = '32px';
-                spacer.style.display = 'inline-block';
-                punchcodeImagesContainer.appendChild(spacer);
-                col++;
-                continue;
-            }
-            else if (char === '\n' || char === '\r') {
-                const br = document.createElement('div');
-                br.style.flexBasis = '100%';
-                br.style.height = '0';
-                punchcodeImagesContainer.appendChild(br);
-                if (char === '\r' && srcString.charAt(col + 1) === '\n') col++;
-                col++;
-                continue;
-            }
-
-            let text = "";
-            let endIdx = col;
-
-            if (char === '[') {
-                let closeIdx = srcString.indexOf(']', col);
-                if (closeIdx !== -1) {
-                    text = srcString.substring(col, closeIdx + 1);
-                    endIdx = closeIdx + 1;
-                    col = endIdx;
-                } else {
-                    let len = Math.min(2, srcString.length - col);
-                    text = srcString.substring(col, col + len);
-                    endIdx = col + len;
-                    col = endIdx;
-                }
-            } else {
-                let len = Math.min(2, srcString.length - col);
-                text = srcString.substring(col, col + len);
-                endIdx = col + len;
-                col = endIdx;
-            }
-
-            let hlStart = overrideStart !== null ? overrideStart : startIdx;
-            let hlEnd = overrideEnd !== null ? overrideEnd : endIdx;
-
-            if (text.startsWith('[') && text.endsWith(']')) {
-                let macroName = text.substring(1, text.length - 1);
-                let macroCode = qpcData[macroName];
-                if (macroCode !== undefined) {
-                    parseAndRender(macroCode, hlStart, hlEnd);
-                } else {
-                    let block = createTextBlock(text);
-                    punchcodeImagesContainer.appendChild(block);
-                    bindHover(block, "Missing Tape: " + text, hlStart, hlEnd);
-                }
-                continue;
-            }
-
-            let item = text;
-            let rawDesc = typeof gfxItemID === "function" ? gfxItemID(item) : "Unknown";
-            if (rawDesc === "Unknown") rawDesc = getCodeDescription(item);
-
-            if (item === "Xn") {
-                ifnot = true;
-                ifnotStartIdx = hlStart;
-                continue;
-            }
-
-            let blockEl = null;
-
-            if (item === "Xc") {
-                blockEl = createImgBlock('i/Xc.png');
-                punchcodeImagesContainer.appendChild(blockEl);
-                bindHover(blockEl, rawDesc, hlStart, hlEnd);
-            } else {
-                let imgSrc = ifnot ? ('i/' + item + 'n.png') : ('i/' + item + '.png');
-                blockEl = createImgBlock(imgSrc);
-                punchcodeImagesContainer.appendChild(blockEl);
-
-                let cleanDesc = rawDesc.replace(/^[%\$#]{2}/, '');
-                let tooltipDesc = cleanDesc;
-
-                if (cleanDesc.match(/\[(.*?)\/(.*?)\]/)) {
-                    tooltipDesc = cleanDesc.replace(/\[(.*?)\/(.*?)\]/g, (match, left, right) => {
-                        return ifnot ? right : left;
-                    });
-                } else {
-                    tooltipDesc = ifnot ? ("If Not: " + cleanDesc) : cleanDesc;
-                }
-
-                let finalStart = ifnot ? ifnotStartIdx : hlStart;
-                bindHover(blockEl, tooltipDesc || item, finalStart, hlEnd);
-
-                let currentDesc = rawDesc;
-
-                while (currentDesc.startsWith("%%") || currentDesc.startsWith("$$") || currentDesc.startsWith("##")) {
-                    let prefix = currentDesc.substring(0, 2);
-
-                    let nStart = col;
-                    while(nStart < srcString.length && (srcString.charAt(nStart) === ' ' || srcString.charAt(nStart) === '\t' || srcString.charAt(nStart) === '\n' || srcString.charAt(nStart) === '\r')) {
-                        nStart++;
-                    }
-                    if (nStart >= srcString.length) break;
-
-                    let nextcode = srcString.substring(nStart, nStart + 2);
-                    col = nStart + 2;
-
-                    let paramHlStart = overrideStart !== null ? overrideStart : nStart;
-                    let paramHlEnd = overrideStart !== null ? overrideEnd : col;
-
-                    let paramBlock = null;
-                    let paramDesc = "";
-
-                    if (prefix === "%%") {
-                        currentDesc = currentDesc.substring(2);
-                        paramDesc = "Param: " + getCodeDescription(nextcode);
-                        paramBlock = createTextBlock(nextcode);
-                    } else if (prefix === "$$") {
-                        currentDesc = currentDesc.substring(2);
-                        paramDesc = "Item: " + (typeof gfxItemID === "function" ? gfxItemID(nextcode) : nextcode);
-                        paramBlock = createImgBlock('i/' + nextcode + '.png');
-                    } else if (prefix === "##") {
-                        currentDesc = currentDesc.substring(2);
-                        paramDesc = "Number: " + nextcode;
-                        paramBlock = createNumBlock(nextcode);
-                    }
-
-                    if (paramBlock) {
-                        punchcodeImagesContainer.appendChild(paramBlock);
-                        bindHover(paramBlock, paramDesc, paramHlStart, paramHlEnd);
-                    }
-                }
-            }
-            ifnot = false;
+        if (char === ' ' || char === '\t') {
+            const spacer = document.createElement('div');
+            spacer.className = 'punchcode-space';
+            container.appendChild(spacer);
+            col++;
+            continue;
+        } else if (char === '\n' || char === '\r') {
+            const br = document.createElement('div');
+            br.style.flexBasis = '100%';
+            br.style.height = '0';
+            container.appendChild(br);
+            if (char === '\r' && srcString.charAt(col + 1) === '\n') col++;
+            col++;
+            continue;
         }
-    }
 
-    parseAndRender(initialCode);
-}
+        const len = Math.min(2, srcString.length - col);
+        const item = srcString.substring(col, col + len);
+        const endIdx = col + len;
+        col = endIdx;
 
-let punchcodeBg = "Ca";
+        const rawDesc = getCodeDescription(item);
 
-function setPunchcodeBg(code) {
-    document.getElementById('bgInput').value = code;
-    punchcodeBg = code;
-    updateDecompiler();
-}
+        if (item === "Xn") {
+            ifnot = true;
+            ifnotStartIdx = startIdx;
+            continue;
+        }
 
-function setCustomPunchcodeBg() {
-    const code = document.getElementById('bgInput').value.trim();
-    if (code.length === 2) {
-        punchcodeBg = code;
-        updateDecompiler();
-    }
-}
+        const blockEl = document.createElement('div');
+        blockEl.className = 'punchcode-img';
+        blockEl.style.backgroundImage = `url('${driveTileDir}Za.png')`;
 
-function createSpacer(text) {
-    const wrap = document.createElement('div');
-    wrap.className = 'punchcode-space';
-    const div = document.createElement('div');
-    div.style.backgroundColor = 'transparent';
-    div.textContent = text;
-    wrap.appendChild(div);
-    return wrap;
-}
-
-function createTextBlock(text) {
-    const div = document.createElement('div');
-    div.className = 'punchcode-text';
-    div.textContent = text;
-    div.style.backgroundImage = `url('t/${punchcodeBg}.png')`;
-    div.style.color = punchcodeTextColor;
-    return div;
-}
-
-function createNumBlock(num) {
-    const wrap = document.createElement('div');
-    wrap.className = 'punchcode-num';
-    wrap.style.backgroundImage = `url('t/${punchcodeBg}.png')`;
-
-    if (!/^[A-Z]/.test(String(num))) {
-        const div = document.createElement('div');
-        div.className = 'punchcode-text';
-        div.style.backgroundColor = 'transparent';
-        div.style.backgroundImage = 'none';
-        div.style.color = punchcodeTextColor;
-        div.textContent = num;
-        wrap.appendChild(div);
-        return wrap;
-    } else {
         const img = document.createElement('img');
-        img.src = "i/" + num + ".png";
-        img.style.width = "32px";
-        img.style.height = "32px";
-        img.style.display = "block";
-        wrap.appendChild(img);
-        return wrap;
+        img.onerror = function() { this.style.opacity = '0.25'; };
+
+        if (item === "Xc") {
+            img.src = `${driveIconDir}Xc.png`;
+            bindHover(blockEl, rawDesc, startIdx, endIdx);
+        } else if (item.startsWith("##") || item.startsWith("%%") || item.startsWith("$$")) {
+            blockEl.className = 'punchcode-text';
+            blockEl.textContent = item;
+            bindHover(blockEl, "Parameter Marker", startIdx, endIdx);
+        } else {
+            img.src = ifnot ? `${driveIconDir}${item}n.png` : `${driveIconDir}${item}.png`;
+            const tooltipDesc = ifnot ? ("If Not: " + rawDesc) : rawDesc;
+            const finalStart = ifnot ? ifnotStartIdx : startIdx;
+            bindHover(blockEl, tooltipDesc || item, finalStart, endIdx);
+        }
+
+        if (blockEl.className === 'punchcode-img') blockEl.appendChild(img);
+        container.appendChild(blockEl);
+
+        while (col < srcString.length && (
+            srcString.substring(col, col + 2) === "%%" ||
+            srcString.substring(col, col + 2) === "$$" ||
+            srcString.substring(col, col + 2) === "##"
+        )) {
+            const prefix = srcString.substring(col, col + 2);
+            col += 2;
+            const paramText = srcString.substring(col, col + 2);
+            col += 2;
+
+            const paramBlock = document.createElement('div');
+            let paramDesc = "";
+
+            if (prefix === "##") {
+                paramBlock.className = 'punchcode-text';
+                paramBlock.textContent = paramText;
+                paramDesc = "Number: " + paramText;
+            } else {
+                paramBlock.className = 'punchcode-img';
+                paramBlock.style.backgroundImage = `url('${driveTileDir}Za.png')`;
+                const pImg = document.createElement('img');
+                pImg.src = `${driveIconDir}${paramText}.png`;
+                pImg.onerror = function() { this.style.opacity = '0.25'; };
+                paramBlock.appendChild(pImg);
+                paramDesc = (prefix === "%%" ? "Param: " : "Item: ") + getCodeDescription(paramText);
+            }
+            container.appendChild(paramBlock);
+            bindHover(paramBlock, paramDesc, col - 4, col);
+        }
+
+        ifnot = false;
     }
 }
-
-function createImgBlock(src) {
-    const wrap = document.createElement('div');
-    wrap.className = 'punchcode-img';
-    wrap.style.backgroundImage = `url('t/${punchcodeBg}.png')`;
-    const img = document.createElement('img');
-    img.src = src;
-    wrap.appendChild(img);
-    return wrap;
-}
-
-function DarkMode() {
-    punchcodeTextColor = "#000000";
-    updateDecompiler();
-}
-
-function LightMode() {
-    punchcodeTextColor = "#FFFFFF";
-    updateDecompiler();
-}
-
-window.onload = function() {
-    initBlank();
-};
-
-</script></body></html>
+</script>
+</body>
+</html>
