@@ -59,6 +59,35 @@
     button:hover { filter: brightness(1.2); }
     button:disabled { opacity: 0.45; cursor: not-allowed; }
 
+    /* New QPC Tag Bar */
+    #new-tag-bar {
+        display: none;
+        background-color: var(--menu-bg, #111);
+        border-bottom: 1px solid var(--fg-color, #0f0);
+        padding: 8px 12px;
+        gap: 8px;
+        align-items: center;
+        flex-wrap: wrap;
+        flex-shrink: 0;
+    }
+    #new-tag-bar input[type="text"] {
+        background: var(--input-bg, #000);
+        color: var(--input-fg, var(--fg-color, #0f0));
+        border: 1px solid var(--fg-color, #0f0);
+        padding: 5px 8px;
+        font-family: monospace;
+        font-size: 14px;
+        min-width: 180px;
+        flex: 1;
+        max-width: 280px;
+    }
+    #new-tag-error {
+        color: var(--text-fg3, #ff4444);
+        font-size: 12px;
+        flex-basis: 100%;
+        display: none;
+    }
+
     /* Views */
     #tree-view, #editor-view {
         flex: 1;
@@ -133,6 +162,9 @@
         overflow: hidden;
         text-overflow: ellipsis;
     }
+    .fm-label-invalid {
+        color: var(--text-fg3, #ff4444);
+    }
     .fm-row:hover .fm-label {
         color: var(--html-hover, var(--sel-fg, #0f0));
         text-decoration: underline;
@@ -177,6 +209,17 @@
         gap: 12px;
     }
 
+    #editor-notice {
+        display: none;
+        padding: 6px 10px;
+        border: 1px solid var(--text-fg2, #ff0);
+        background: var(--menu-bg, #111);
+        color: var(--text-fg2, #ff0);
+        font-size: 13px;
+        border-radius: 3px;
+        flex-shrink: 0;
+    }
+
     #decompiler-view {
         background: var(--case-bg, #080808);
         border: 1px solid var(--case-fg, var(--sel-bg, #333));
@@ -209,6 +252,43 @@
     .punchcode-img { width: 32px; height: 32px; display: inline-block; vertical-align: middle; margin: 1px; background-size: cover; }
     .punchcode-img img { width: 32px; height: 32px; display: block; image-rendering: pixelated; }
 
+    /* QPC Macro Visual Blocks */
+    .punchcode-macro {
+        display: inline-flex;
+        flex-wrap: wrap;
+        align-items: center;
+        border: 1px dashed var(--fg-color, #0f0);
+        border-radius: 4px;
+        padding: 2px 4px;
+        margin: 1px 3px;
+        background: rgba(0, 255, 0, 0.05);
+        cursor: pointer;
+    }
+    .punchcode-tag-badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--sel-bg, #333);
+        color: var(--sel-fg, #0f0);
+        border: 1px solid var(--fg-color, #0f0);
+        font-family: monospace;
+        font-size: 13px;
+        font-weight: bold;
+        padding: 0 6px;
+        height: 28px;
+        border-radius: 3px;
+        margin: 1px 4px 1px 1px;
+        cursor: pointer;
+    }
+    .punchcode-tag-missing {
+        border-color: var(--text-fg2, #ff0);
+        color: var(--text-fg2, #ff0);
+    }
+    .punchcode-tag-invalid {
+        border-color: var(--text-fg3, #f44);
+        color: var(--text-fg3, #f44);
+    }
+
     #tooltip {
         position: fixed;
         background: var(--menu-bg, #111);
@@ -232,7 +312,14 @@
     <div class="toolbar">
         <div class="toolbar-title">GFX COMPILER: <span id="active-drive-label">(No Drive)</span></div>
         <button onclick="showDriveMenu()">DRIVE</button>
+        <button id="new-tag-btn" onclick="toggleNewTagBar()" disabled>+ TAG</button>
         <button onclick="refreshTree()">REFRESH</button>
+    </div>
+    <div id="new-tag-bar">
+        <input type="text" id="new-tag-input" placeholder="tag name (a-z, 0-9, 3+ chars)" maxlength="32">
+        <button onclick="createNewTag()">CREATE</button>
+        <button onclick="toggleNewTagBar(false)">CANCEL</button>
+        <div id="new-tag-error"></div>
     </div>
     <div class="fm-header">
         <div>Name</div>
@@ -253,8 +340,9 @@
         <button id="save-btn" onclick="saveLogic()" disabled>SAVE TO DISK</button>
     </div>
     <div id="main-editor">
+        <div id="editor-notice"></div>
         <div id="decompiler-view"></div>
-        <textarea id="punchcodeInput" placeholder="Enter Punch Code or text here..." oninput="onCodeChange()" onchange="onCodeChange()"></textarea>
+        <textarea id="punchcodeInput" placeholder="Enter Punch Code or [tag] here..." oninput="onCodeChange()" onchange="onCodeChange()"></textarea>
     </div>
 </div>
 
@@ -265,6 +353,12 @@ window.activeDrive = null;
 let hostOrigin = '';
 let driveIconDir = 'i/';
 let driveTileDir = 't/';
+
+// Strict QPC tag rule: >= 3 chars, lowercase letters and numerals only
+const VALID_QPC_TAG_RE = /^[a-z0-9]{3,}$/;
+
+// In-memory cache of loaded /q/<tag> punch code for the active drive
+const qpcCache = new Map();
 
 // Tracks expanded folder paths so refreshes preserve tree state
 const expandedPaths = new Set();
@@ -277,7 +371,6 @@ function getDos() {
     return (window.parent && window.parent.CylonDOS) ? window.parent.CylonDOS : window.CylonDOS;
 }
 
-// Pull core + extended theme variables from parent OS and cylon:/a/
 async function applyExtendedTheme() {
     if (window.CylonSDK && window.CylonSDK.injectDesktopStyles) {
         window.CylonSDK.applyColors(window.parent ? window.parent.CylonColors : null);
@@ -319,7 +412,6 @@ async function applyExtendedTheme() {
 window.onload = async function() {
     await applyExtendedTheme();
 
-    // Tap anywhere if no drive is selected yet (in case menu was dismissed)
     document.getElementById('fm-root').addEventListener('pointerup', () => {
         if (!window.activeDrive) showDriveMenu();
     });
@@ -330,7 +422,6 @@ window.onload = async function() {
     }
 };
 
-// Re-check for incoming edit targets or refresh tree when switching tabs
 window.addEventListener('message', async (e) => {
     if (window.location.origin !== "null" && e.origin !== window.location.origin) return;
     if (e.source !== window && e.source !== window.parent) return;
@@ -341,6 +432,7 @@ window.addEventListener('message', async (e) => {
             if (!window.activeDrive) {
                 await showDriveMenu();
             } else if (document.getElementById('tree-view').style.display !== 'none') {
+                await preloadQpcTags();
                 await renderRootTree();
             }
         }
@@ -359,7 +451,6 @@ async function checkEditTarget() {
         targetPath = targetPath ? targetPath.trim() : '';
         if (!targetPath) return false;
 
-        // Consume target so subsequent clicks on the same file still trigger
         await dos.save('cylon:/a/gfxEditTarget', '');
 
         const colonIdx = targetPath.indexOf(':');
@@ -411,16 +502,40 @@ async function showDriveMenu() {
     window.parent.CylonPopManager.showContextMenu('topleft', items);
 }
 
+async function preloadQpcTags() {
+    qpcCache.clear();
+    const dos = getDos();
+    if (!dos || !window.activeDrive) return;
+
+    const qDir = `${window.activeDrive}:/q`;
+    try {
+        if (!(await dos.exists(qDir))) return;
+        const entries = await dos.dir(qDir);
+        for (const entry of entries) {
+            if (entry.type !== 'file') continue;
+            const tagName = entry.name.substring(entry.name.lastIndexOf('/') + 1);
+            // Enforce >= 3 chars and lowercase alphanumeric only
+            if (!VALID_QPC_TAG_RE.test(tagName)) continue;
+
+            const content = await dos.load(`${qDir}/${tagName}`);
+            qpcCache.set(tagName, content || '');
+        }
+    } catch (e) {
+        console.warn('Could not preload /q/ tags', e);
+    }
+}
+
 async function selectDrive(driveName, opts) {
     if (!driveName) return;
     window.activeDrive = driveName;
     document.getElementById('active-drive-label').textContent = driveName + ':/';
+    document.getElementById('new-tag-btn').disabled = false;
+    toggleNewTagBar(false);
 
-    // Default /w/ to expanded on newly chosen drive
     expandedPaths.clear();
+    expandedPaths.add(`${driveName}:/q`);
     expandedPaths.add(`${driveName}:/w`);
 
-    // Resolve drive-specific asset paths (with fallback to hostOrigin)
     const dos = getDos();
     driveIconDir = 'i/';
     driveTileDir = 't/';
@@ -448,6 +563,8 @@ async function selectDrive(driveName, opts) {
     if (!driveIconDir.endsWith('/')) driveIconDir += '/';
     if (!driveTileDir.endsWith('/')) driveTileDir += '/';
 
+    await preloadQpcTags();
+
     if (!(opts && opts.skipRender)) {
         showTreeView();
         await renderRootTree();
@@ -459,7 +576,60 @@ async function refreshTree() {
         await showDriveMenu();
         return;
     }
+    await preloadQpcTags();
     await renderRootTree();
+}
+
+function toggleNewTagBar(forceState) {
+    const bar = document.getElementById('new-tag-bar');
+    const errEl = document.getElementById('new-tag-error');
+    const input = document.getElementById('new-tag-input');
+    const show = typeof forceState === 'boolean' ? forceState : (bar.style.display !== 'flex');
+
+    errEl.style.display = 'none';
+    errEl.textContent = '';
+
+    if (show && window.activeDrive) {
+        bar.style.display = 'flex';
+        input.value = '';
+    } else {
+        bar.style.display = 'none';
+    }
+}
+
+async function createNewTag() {
+    if (!window.activeDrive) return;
+    const dos = getDos();
+    if (!dos) return;
+
+    const input = document.getElementById('new-tag-input');
+    const errEl = document.getElementById('new-tag-error');
+    const tagName = (input.value || '').trim();
+
+    if (!VALID_QPC_TAG_RE.test(tagName)) {
+        errEl.textContent = 'Invalid tag name: use 3+ lowercase letters or numerals (a-z, 0-9).';
+        errEl.style.display = 'block';
+        return;
+    }
+
+    const qDir = `${window.activeDrive}:/q`;
+    const tagPath = `${qDir}/${tagName}`;
+
+    try {
+        if (!(await dos.exists(qDir))) {
+            await dos.mkdir(qDir);
+        }
+        if (!(await dos.exists(tagPath))) {
+            await dos.save(tagPath, '');
+            qpcCache.set(tagName, '');
+        }
+        expandedPaths.add(qDir);
+        toggleNewTagBar(false);
+        await openFileInEditor(tagPath);
+    } catch (err) {
+        errEl.textContent = 'Error creating tag: ' + (err.message || err);
+        errEl.style.display = 'block';
+    }
 }
 
 function formatDate(ts) {
@@ -467,8 +637,13 @@ function formatDate(ts) {
     return `${ts.substring(0,4)}-${ts.substring(4,6)}-${ts.substring(6,8)} ${ts.substring(8,10)}:${ts.substring(10,12)}`;
 }
 
+function isPathInQDir(fullPath) {
+    const clean = fullPath.replace(/^[^:]+:\//, '');
+    const parts = clean.split('/').filter(Boolean);
+    return (parts.length === 2 && parts[0] === 'q');
+}
+
 function getFileVisualInfo(name, fullPath) {
-    // Check if inside a sector folder under /w/<sector>/<file>
     const clean = fullPath.replace(/^[^:]+:\//, '');
     const parts = clean.split('/').filter(Boolean);
     const inSector = (parts.length === 3 && parts[0] === 'w' && name !== 'm' && name.length >= 4);
@@ -479,7 +654,18 @@ function getFileVisualInfo(name, fullPath) {
         const dataCode = name.length >= 6 ? name.substring(4, 6) : '';
         const itemLabel = (typeof gfxItemID === 'function') ? gfxItemID(iconId) : iconId;
         const displayLabel = `${name} — ${itemLabel} (Z:${zCode}${dataCode ? ', D:' + dataCode : ''})`;
-        return { iconSrc: `${driveIconDir}${iconId}.png`, label: displayLabel };
+        return { iconSrc: `${driveIconDir}${iconId}.png`, label: displayLabel, invalid: false };
+    }
+
+    if (parts.length === 2 && parts[0] === 'q') {
+        if (!VALID_QPC_TAG_RE.test(name)) {
+            return {
+                iconSrc: `${driveIconDir}Tx.png`,
+                label: `${name} (ignored: invalid QPC tag name)`,
+                invalid: true
+            };
+        }
+        return { iconSrc: `${driveIconDir}Tx.png`, label: `[${name}]`, invalid: false };
     }
 
     const lower = name.toLowerCase();
@@ -490,7 +676,7 @@ function getFileVisualInfo(name, fullPath) {
     else if (lower.endsWith('.png') || lower.endsWith('.jpg') || lower.endsWith('.gif')) code = 'Im';
     else if (name.length === 1 || lower.endsWith('.txt') || lower.endsWith('.cfg')) code = 'Tx';
 
-    return { iconSrc: `${driveIconDir}${code}.png`, label: name };
+    return { iconSrc: `${driveIconDir}${code}.png`, label: name, invalid: false };
 }
 
 async function renderRootTree() {
@@ -503,10 +689,10 @@ async function renderRootTree() {
     rootEl.innerHTML = '';
     const drive = window.activeDrive;
 
-    // Order requested: /a/ at top, /p/ second, /w/ third
     const rootDirs = [
         { name: 'a', label: '/a/ (Alpha Config)', path: `${drive}:/a` },
         { name: 'p', label: '/p/ (Players / Data)', path: `${drive}:/p` },
+        { name: 'q', label: '/q/ (Qandy Punch Code)', path: `${drive}:/q` },
         { name: 'w', label: '/w/ (World Scripts & Sectors)', path: `${drive}:/w` }
     ];
 
@@ -615,7 +801,7 @@ function createFileRow(name, fullPath, sizeStr, dateStr) {
     };
 
     const labelSpan = document.createElement('span');
-    labelSpan.className = 'fm-label';
+    labelSpan.className = visual.invalid ? 'fm-label fm-label-invalid' : 'fm-label';
     labelSpan.textContent = visual.label;
     labelSpan.title = fullPath;
 
@@ -669,7 +855,6 @@ async function populateDirectory(dirPath, container) {
             return;
         }
 
-        // List files first (e.g. a, b, c, e, t in /w/, or m + objects in sectors), then subdirs
         for (const f of files) {
             const fileName = f.name.substring(f.name.lastIndexOf('/') + 1);
             const fullPath = dirPath + (dirPath.endsWith('/') ? '' : '/') + fileName;
@@ -695,7 +880,6 @@ function formatTargetHeadline(targetPath) {
     const clean = targetPath.replace(/^[^:]+:\//, '');
     const parts = clean.split('/').filter(Boolean);
 
-    // Format Sector <sector> <Z> "<Item>" only for object/item files inside /w/<sector>/
     if (parts.length === 3 && parts[0] === 'w') {
         const sector = parts[1];
         const filename = parts[2];
@@ -706,6 +890,9 @@ function formatTargetHeadline(targetPath) {
             return `Sector ${sector} ${zCode} "${itemLabel}" (${filename})`;
         }
     }
+    if (parts.length === 2 && parts[0] === 'q') {
+        return `QPC Tag [${parts[1]}] (${targetPath})`;
+    }
     return targetPath;
 }
 
@@ -713,8 +900,23 @@ async function openFileInEditor(targetPath) {
     const dos = getDos();
     if (!dos) return;
 
+    await preloadQpcTags();
+
     currentTargetPath = targetPath;
     document.getElementById('target-file').textContent = formatTargetHeadline(targetPath);
+
+    const noticeEl = document.getElementById('editor-notice');
+    if (isPathInQDir(targetPath)) {
+        const tagName = targetPath.substring(targetPath.lastIndexOf('/') + 1);
+        if (!VALID_QPC_TAG_RE.test(tagName)) {
+            noticeEl.textContent = `Security Warning: "${tagName}" is invalid for QPC (must be 3+ lowercase a-z or 0-9). UNIVAC will not load this file.`;
+            noticeEl.style.display = 'block';
+        } else {
+            noticeEl.style.display = 'none';
+        }
+    } else {
+        noticeEl.style.display = 'none';
+    }
 
     let content = '';
     try {
@@ -724,7 +926,6 @@ async function openFileInEditor(targetPath) {
         content = '';
     }
 
-    // Expand escaped newlines if file was written with \n placeholders
     content = content.replace(/\\n/g, '\n');
 
     originalCode = content;
@@ -750,6 +951,7 @@ function cancelEdit() {
     document.getElementById('punchcodeInput').value = '';
     document.getElementById('save-btn').disabled = true;
     document.getElementById('decompiler-view').innerHTML = '';
+    document.getElementById('editor-notice').style.display = 'none';
     showTreeView();
 }
 
@@ -771,6 +973,14 @@ async function saveLogic() {
         originalCode = currentCode;
         document.getElementById('save-btn').disabled = true;
 
+        // Keep QPC cache in sync immediately if editing a valid /q/<tag> file
+        if (isPathInQDir(currentTargetPath)) {
+            const tagName = currentTargetPath.substring(currentTargetPath.lastIndexOf('/') + 1);
+            if (VALID_QPC_TAG_RE.test(tagName)) {
+                qpcCache.set(tagName, currentCode);
+            }
+        }
+
         if (window.popHtm) {
             window.popHtm(
                 `<div style="padding:12px 18px; background:var(--menu-bg,#111); border:1px solid var(--fg-color,#0f0); color:var(--fg-color,#0f0); text-align:center;"><b>Saved!</b></div>`,
@@ -786,7 +996,7 @@ async function saveLogic() {
 }
 
 // ============================================================================
-// VISUAL DECOMPILER ENGINE
+// VISUAL DECOMPILER ENGINE (with [tag] QPC Macro Resolution)
 // ============================================================================
 
 function getCodeDescription(code) {
@@ -801,11 +1011,14 @@ function decompilepunchcode(initialCode) {
     container.innerHTML = "";
     if (!initialCode) return;
 
+    const editingQpc = currentTargetPath ? isPathInQDir(currentTargetPath) : false;
+
     function bindHover(element, desc, startIdx, endIdx) {
         element.style.cursor = "pointer";
         element.addEventListener('mousemove', (e) => {
+            e.stopPropagation();
             const ta = document.getElementById('punchcodeInput');
-            if (document.activeElement === ta) {
+            if (document.activeElement === ta && startIdx != null && endIdx != null) {
                 ta.setSelectionRange(startIdx, endIdx);
             }
             const tooltip = document.getElementById('tooltip');
@@ -819,100 +1032,168 @@ function decompilepunchcode(initialCode) {
         });
     }
 
-    let col = 0;
-    let ifnot = false;
-    let ifnotStartIdx = null;
-    const srcString = initialCode;
+    function renderSequence(srcString, targetEl, opts) {
+        const allowTags = !!(opts && opts.allowTags);
+        const mapIndices = !(opts && opts.fixedRange);
+        const fixedStart = opts && opts.fixedRange ? opts.fixedRange[0] : null;
+        const fixedEnd = opts && opts.fixedRange ? opts.fixedRange[1] : null;
 
-    while (col < srcString.length) {
-        const startIdx = col;
-        const char = srcString.charAt(col);
+        let col = 0;
+        let ifnot = false;
+        let ifnotStartIdx = null;
 
-        if (char === ' ' || char === '\t') {
-            const spacer = document.createElement('div');
-            spacer.className = 'punchcode-space';
-            container.appendChild(spacer);
-            col++;
-            continue;
-        } else if (char === '\n' || char === '\r') {
-            const br = document.createElement('div');
-            br.style.flexBasis = '100%';
-            br.style.height = '0';
-            container.appendChild(br);
-            if (char === '\r' && srcString.charAt(col + 1) === '\n') col++;
-            col++;
-            continue;
-        }
+        while (col < srcString.length) {
+            const startIdx = mapIndices ? col : fixedStart;
+            const char = srcString.charAt(col);
 
-        const len = Math.min(2, srcString.length - col);
-        const item = srcString.substring(col, col + len);
-        const endIdx = col + len;
-        col = endIdx;
-
-        const rawDesc = getCodeDescription(item);
-
-        if (item === "Xn") {
-            ifnot = true;
-            ifnotStartIdx = startIdx;
-            continue;
-        }
-
-        const blockEl = document.createElement('div');
-        blockEl.className = 'punchcode-img';
-        blockEl.style.backgroundImage = `url('${driveTileDir}Za.png')`;
-
-        const img = document.createElement('img');
-        img.onerror = function() { this.style.opacity = '0.25'; };
-
-        if (item === "Xc") {
-            img.src = `${driveIconDir}Xc.png`;
-            bindHover(blockEl, rawDesc, startIdx, endIdx);
-        } else if (item.startsWith("##") || item.startsWith("%%") || item.startsWith("$$")) {
-            blockEl.className = 'punchcode-text';
-            blockEl.textContent = item;
-            bindHover(blockEl, "Parameter Marker", startIdx, endIdx);
-        } else {
-            img.src = ifnot ? `${driveIconDir}${item}n.png` : `${driveIconDir}${item}.png`;
-            const tooltipDesc = ifnot ? ("If Not: " + rawDesc) : rawDesc;
-            const finalStart = ifnot ? ifnotStartIdx : startIdx;
-            bindHover(blockEl, tooltipDesc || item, finalStart, endIdx);
-        }
-
-        if (blockEl.className === 'punchcode-img') blockEl.appendChild(img);
-        container.appendChild(blockEl);
-
-        while (col < srcString.length && (
-            srcString.substring(col, col + 2) === "%%" ||
-            srcString.substring(col, col + 2) === "$$" ||
-            srcString.substring(col, col + 2) === "##"
-        )) {
-            const prefix = srcString.substring(col, col + 2);
-            col += 2;
-            const paramText = srcString.substring(col, col + 2);
-            col += 2;
-
-            const paramBlock = document.createElement('div');
-            let paramDesc = "";
-
-            if (prefix === "##") {
-                paramBlock.className = 'punchcode-text';
-                paramBlock.textContent = paramText;
-                paramDesc = "Number: " + paramText;
-            } else {
-                paramBlock.className = 'punchcode-img';
-                paramBlock.style.backgroundImage = `url('${driveTileDir}Za.png')`;
-                const pImg = document.createElement('img');
-                pImg.src = `${driveIconDir}${paramText}.png`;
-                pImg.onerror = function() { this.style.opacity = '0.25'; };
-                paramBlock.appendChild(pImg);
-                paramDesc = (prefix === "%%" ? "Param: " : "Item: ") + getCodeDescription(paramText);
+            if (char === ' ' || char === '\t') {
+                const spacer = document.createElement('div');
+                spacer.className = 'punchcode-space';
+                targetEl.appendChild(spacer);
+                col++;
+                continue;
+            } else if (char === '\n' || char === '\r') {
+                const br = document.createElement('div');
+                br.style.flexBasis = '100%';
+                br.style.height = '0';
+                targetEl.appendChild(br);
+                if (char === '\r' && srcString.charAt(col + 1) === '\n') col++;
+                col++;
+                continue;
             }
-            container.appendChild(paramBlock);
-            bindHover(paramBlock, paramDesc, col - 4, col);
-        }
 
-        ifnot = false;
+            // Detect [tag] QPC macro syntax
+            if (char === '[') {
+                const closeIdx = srcString.indexOf(']', col + 1);
+                if (closeIdx !== -1) {
+                    const tagName = srcString.substring(col + 1, closeIdx);
+                    const tagEnd = mapIndices ? closeIdx + 1 : fixedEnd;
+                    col = closeIdx + 1;
+
+                    if (!VALID_QPC_TAG_RE.test(tagName)) {
+                        const badBadge = document.createElement('div');
+                        badBadge.className = 'punchcode-tag-badge punchcode-tag-invalid';
+                        badBadge.textContent = `[${tagName}]`;
+                        bindHover(badBadge, `Invalid QPC tag "[${tagName}]" (must be 3+ lowercase a-z / 0-9)`, startIdx, tagEnd);
+                        targetEl.appendChild(badBadge);
+                        ifnot = false;
+                        continue;
+                    }
+
+                    if (!allowTags) {
+                        const nestedBadge = document.createElement('div');
+                        nestedBadge.className = 'punchcode-tag-badge punchcode-tag-missing';
+                        nestedBadge.textContent = `[${tagName}]`;
+                        bindHover(nestedBadge, `Nested tag "[${tagName}]" (UNIVAC expands tags single-pass only)`, startIdx, tagEnd);
+                        targetEl.appendChild(nestedBadge);
+                        ifnot = false;
+                        continue;
+                    }
+
+                    if (!qpcCache.has(tagName)) {
+                        const missBadge = document.createElement('div');
+                        missBadge.className = 'punchcode-tag-badge punchcode-tag-missing';
+                        missBadge.textContent = `[${tagName}]`;
+                        bindHover(missBadge, `Missing QPC tag: /q/${tagName} not found`, startIdx, tagEnd);
+                        targetEl.appendChild(missBadge);
+                        ifnot = false;
+                        continue;
+                    }
+
+                    const macroCode = qpcCache.get(tagName) || '';
+                    const macroGroup = document.createElement('div');
+                    macroGroup.className = 'punchcode-macro';
+
+                    const badge = document.createElement('div');
+                    badge.className = 'punchcode-tag-badge';
+                    badge.textContent = `[${tagName}]`;
+                    bindHover(badge, `QPC Macro /q/${tagName}: ${macroCode || '(empty)'}`, startIdx, tagEnd);
+                    macroGroup.appendChild(badge);
+
+                    // Expand visual icons of /q/<tag> inline (single-pass)
+                    renderSequence(macroCode, macroGroup, {
+                        allowTags: false,
+                        fixedRange: [startIdx, tagEnd]
+                    });
+
+                    targetEl.appendChild(macroGroup);
+                    ifnot = false;
+                    continue;
+                }
+            }
+
+            const len = Math.min(2, srcString.length - col);
+            const item = srcString.substring(col, col + len);
+            const endIdx = mapIndices ? (col + len) : fixedEnd;
+            col = col + len;
+
+            const rawDesc = getCodeDescription(item);
+
+            if (item === "Xn") {
+                ifnot = true;
+                ifnotStartIdx = startIdx;
+                continue;
+            }
+
+            const blockEl = document.createElement('div');
+            blockEl.className = 'punchcode-img';
+            blockEl.style.backgroundImage = `url('${driveTileDir}Za.png')`;
+
+            const img = document.createElement('img');
+            img.onerror = function() { this.style.opacity = '0.25'; };
+
+            if (item === "Xc") {
+                img.src = `${driveIconDir}Xc.png`;
+                bindHover(blockEl, rawDesc, startIdx, endIdx);
+            } else if (item.startsWith("##") || item.startsWith("%%") || item.startsWith("$$")) {
+                blockEl.className = 'punchcode-text';
+                blockEl.textContent = item;
+                bindHover(blockEl, "Parameter Marker", startIdx, endIdx);
+            } else {
+                img.src = ifnot ? `${driveIconDir}${item}n.png` : `${driveIconDir}${item}.png`;
+                const tooltipDesc = ifnot ? ("If Not: " + rawDesc) : rawDesc;
+                const finalStart = (ifnot && ifnotStartIdx != null) ? ifnotStartIdx : startIdx;
+                bindHover(blockEl, tooltipDesc || item, finalStart, endIdx);
+            }
+
+            if (blockEl.className === 'punchcode-img') blockEl.appendChild(img);
+            targetEl.appendChild(blockEl);
+
+            while (col < srcString.length && (
+                srcString.substring(col, col + 2) === "%%" ||
+                srcString.substring(col, col + 2) === "$$" ||
+                srcString.substring(col, col + 2) === "##"
+            )) {
+                const prefix = srcString.substring(col, col + 2);
+                col += 2;
+                const paramText = srcString.substring(col, col + 2);
+                col += 2;
+
+                const paramBlock = document.createElement('div');
+                let paramDesc = "";
+
+                if (prefix === "##") {
+                    paramBlock.className = 'punchcode-text';
+                    paramBlock.textContent = paramText;
+                    paramDesc = "Number: " + paramText;
+                } else {
+                    paramBlock.className = 'punchcode-img';
+                    paramBlock.style.backgroundImage = `url('${driveTileDir}Za.png')`;
+                    const pImg = document.createElement('img');
+                    pImg.src = `${driveIconDir}${paramText}.png`;
+                    pImg.onerror = function() { this.style.opacity = '0.25'; };
+                    paramBlock.appendChild(pImg);
+                    paramDesc = (prefix === "%%" ? "Param: " : "Item: ") + getCodeDescription(paramText);
+                }
+                targetEl.appendChild(paramBlock);
+                bindHover(paramBlock, paramDesc, mapIndices ? (col - 4) : fixedStart, mapIndices ? col : fixedEnd);
+            }
+
+            ifnot = false;
+        }
     }
+
+    renderSequence(initialCode, container, { allowTags: !editingQpc });
 }
 </script>
 </body>

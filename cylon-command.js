@@ -102,7 +102,7 @@
     '  uninstall [-y]                 Delete Cylon DOS from indexDB',
     '  update <file|*> [-y]           Update file on indexDB with newer version',
     '  echo [text]                    Print text to the console',
-    '  pop <pos> <html>               Show popup at pos (center, click, cursor, hex)',
+    '  pop <pos> <html>               Show popup, or: pop force|align|hide|status',
     '  cls                            Clear the terminal screen',
     '  reboot [-y]                    Reboot Cylon DOS', 
     '  help [command]                 Show help (e.g. "help mount" or "help fdisk")\n'
@@ -713,16 +713,50 @@ async function handleCylonCommand(line) {
             return { handled: true, output: 'Unknown krystals subcommand.' };                  
 
         case 'pop':
-                  var popMatch = line.match(/^\s*pop\s+(\S+)\s+(.*)$/i);
-                  if (popMatch) {
-                      var posStr = popMatch[1].toLowerCase();
-                      var htmlStr = popMatch[2];
-                      if (global.CylonPopManager) {
-                          global.CylonPopManager.callPopHtm(htmlStr, posStr);
-                      }
-                      return { handled: true, output: '' };
+          if (args[0]) {
+              var popSub = args[0].toLowerCase();
+              if (popSub === 'force') {
+                  if (!args[1]) {
+                      return { handled: true, output: 'PopForce: ' + (global.PopForce || 'hidden') };
                   }
-                  return { handled: true, output: usage('pop <center|click|cursor|Z-Hex> <html>') };
+                  var fVal = args[1].toLowerCase();
+                  if (fVal !== 'visible' && fVal !== 'hidden') {
+                      return { handled: true, output: usage('pop force <visible|hidden>') };
+                  }
+                  if (global.CylonPopManager) global.CylonPopManager.setPopForce(fVal);
+                  return { handled: true, output: 'PopForce: ' + fVal };
+              }
+              if (popSub === 'align') {
+                  if (!args[1]) {
+                      return { handled: true, output: 'PopAlign: ' + (global.PopAlign || 'center') };
+                  }
+                  if (global.CylonPopManager) global.CylonPopManager.setPopAlign(args[1].toLowerCase());
+                  return { handled: true, output: 'PopAlign: ' + args[1].toLowerCase() };
+              }
+              if (popSub === 'hide' || popSub === 'close') {
+                  if (global.CylonPopManager) global.CylonPopManager.callHpop();
+                  return { handled: true, output: '' };
+              }
+              if (popSub === 'status') {
+                  return {
+                      handled: true,
+                      output: 'PopForce: ' + (global.PopForce || 'hidden') +
+                              '\nPopUpVis: ' + (global.PopUpVis || 'hidden') +
+                              '\nPopAlign: ' + (global.PopAlign || 'center')
+                  };
+              }
+          }
+
+          var popMatch = line.match(/^\s*pop\s+(\S+)\s+(.*)$/i);
+          if (popMatch) {
+              var posStr = popMatch[1].toLowerCase();
+              var htmlStr = popMatch[2];
+              if (global.CylonPopManager) {
+                  global.CylonPopManager.callPopHtm(htmlStr, posStr);
+              }
+              return { handled: true, output: '' };
+          }
+          return { handled: true, output: usage('pop <center|click|cursor|full|Z-Hex> <html> | pop force <visible|hidden>') };
           
         case 'pwd':
           return { handled: true, output: dos.pwd() };
@@ -1077,6 +1111,10 @@ global.showTerminal = function () {
 
     activePage = null;
 
+    if (global.CylonPopManager && typeof global.CylonPopManager.switchContext === 'function') {
+      global.CylonPopManager.switchContext('__terminal__');
+    }
+
     updateTaskbar();
     if (typeof global.setOSMode === 'function') global.setOSMode('terminal');
   };
@@ -1106,6 +1144,10 @@ global.showTerminal = function () {
     
     if (typeof global.hideFullKeyboard === 'function') {
       global.hideFullKeyboard();
+    }
+
+    if (global.CylonPopManager && typeof global.CylonPopManager.switchContext === 'function') {
+      global.CylonPopManager.switchContext(filename);
     }
 
     updateTaskbar();
@@ -1161,6 +1203,10 @@ global.showTerminal = function () {
     var frame = openPages[filename];
     if (!frame) return;
 
+    if (global.CylonPopManager && typeof global.CylonPopManager.removeContext === 'function') {
+      global.CylonPopManager.removeContext(filename);
+    }
+
     frame.remove();
     delete openPages[filename];
 
@@ -1201,21 +1247,20 @@ window.cycleActivePage = function() {
       }
   };
 
-// ============================================================================
-//   Pop Function Compatibility Layer for Cylon OS
-// ============================================================================
-
 (function() {
     "use strict";
 
     const CylonPopManager = {
         activeContext: null,
         pendingPop: null,
-        isMenuOpen: false,        // NEW: Tracks if a context menu is focused
-        menuElements: [],         // NEW: Tracks the DOM elements of menu items
-        menuActions: [],          // NEW: Tracks the callbacks mapped to menu items
-        selectedIndex: 0,         // NEW: Tracks the current keyboard selection
-        
+        activeContextKey: '__terminal__',
+        pageStates: Object.create(null),
+        isTaskbarMenu: false,
+        isMenuOpen: false,
+        menuElements: [],
+        menuActions: [],
+        selectedIndex: 0,
+
         init: function() {
             try {
                 if (window.parent && window.parent !== window) {
@@ -1227,58 +1272,292 @@ window.cycleActivePage = function() {
                 }
             } catch (e) {}
 
+            if (window.PopAlign === undefined) window.PopAlign = 'center';
+            if (window.PopUpVis === undefined) window.PopUpVis = 'hidden';
+            if (window.PopForce === undefined) window.PopForce = 'hidden';
+            window.PopUserTouched = false;
+            window.PUV = null;
+
             window.addEventListener('message', (e) => this.handlePopMessage(e));
             this.exposePopFunctions();
         },
 
+        getContextState: function(key) {
+            key = key || this.activeContextKey || '__terminal__';
+            if (!this.pageStates[key]) {
+                this.pageStates[key] = {
+                    visible: false,
+                    popForce: 'hidden',
+                    popAlign: 'center',
+                    pos: 'center',
+                    isMenuOpen: false,
+                    menuElements: [],
+                    menuActions: [],
+                    selectedIndex: 0,
+                    fragment: null,
+                    lastClickZ: -1
+                };
+            }
+            return this.pageStates[key];
+        },
+
+        getContextKeyFromSource: function(sourceWin) {
+            if (sourceWin && sourceWin !== window && sourceWin !== window.parent) {
+                const frames = document.querySelectorAll('iframe.page-frame');
+                for (let i = 0; i < frames.length; i++) {
+                    if (frames[i].contentWindow === sourceWin) {
+                        return frames[i].dataset.filename || this.activeContextKey;
+                    }
+                }
+            }
+            return this.activeContextKey || '__terminal__';
+        },
+
+        isPopupVisible: function() {
+            if (this.isTaskbarMenu) return true;
+            const st = this.getContextState(this.activeContextKey);
+            return !!st.visible;
+        },
+
+        isMenuOpenForWindow: function(win) {
+            const key = this.getContextKeyFromSource(win);
+            if (this.isTaskbarMenu && key === this.activeContextKey) return true;
+            const st = this.getContextState(key);
+            return !!st.isMenuOpen;
+        },
+
+        syncGlobalsFromActive: function() {
+            const st = this.getContextState(this.activeContextKey);
+            window.PopForce = st.popForce;
+            window.PopAlign = st.popAlign;
+            window.PopUpVis = (this.isTaskbarMenu || st.visible) ? 'visible' : 'hidden';
+
+            if (!this.isTaskbarMenu) {
+                this.isMenuOpen = st.isMenuOpen;
+                this.menuElements = st.menuElements;
+                this.menuActions = st.menuActions;
+                this.selectedIndex = st.selectedIndex;
+            }
+
+            const vis = this.isTaskbarMenu || st.visible;
+            window.popupActive = vis;
+            const shield = document.getElementById('qandy-popup-shield');
+            if (shield) shield.style.display = vis ? 'block' : 'none';
+        },
+
+        saveActiveDOMToState: function() {
+            const st = this.getContextState(this.activeContextKey);
+            const popEl = document.getElementById('cylon-pop');
+            if (popEl && st.visible && !st.isMenuOpen && popEl.childNodes.length > 0) {
+                const frag = document.createDocumentFragment();
+                while (popEl.firstChild) {
+                    frag.appendChild(popEl.firstChild);
+                }
+                st.fragment = frag;
+            }
+        },
+
+        renderContextState: function(key) {
+            const st = this.getContextState(key);
+            clearTimeout(window.PUV);
+            window.PopUserTouched = false;
+
+            if (st.visible && st.fragment) {
+                this.createSimplePop(st.fragment, st.pos);
+                st.fragment = null;
+            } else {
+                const popEl = document.getElementById('cylon-pop');
+                if (popEl) popEl.innerHTML = '';
+                const popWrapper = document.getElementById('cylon-pop-wrapper');
+                if (popWrapper) popWrapper.style.visibility = 'hidden';
+            }
+            this.syncGlobalsFromActive();
+        },
+
+        switchContext: function(newKey) {
+            newKey = newKey || '__terminal__';
+            if (newKey === this.activeContextKey && !this.isTaskbarMenu) return;
+
+            if (this.isTaskbarMenu) {
+                this.isTaskbarMenu = false;
+                this.isMenuOpen = false;
+                this.menuElements = [];
+                this.menuActions = [];
+                this.selectedIndex = 0;
+                const popEl = document.getElementById('cylon-pop');
+                if (popEl) popEl.innerHTML = '';
+            } else {
+                const oldState = this.getContextState(this.activeContextKey);
+                if (oldState.isMenuOpen) {
+                    oldState.visible = false;
+                    oldState.isMenuOpen = false;
+                    oldState.menuElements = [];
+                    oldState.menuActions = [];
+                    oldState.selectedIndex = 0;
+                    oldState.fragment = null;
+                    const popEl = document.getElementById('cylon-pop');
+                    if (popEl) popEl.innerHTML = '';
+                } else {
+                    this.saveActiveDOMToState();
+                }
+            }
+
+            if (window.proxyInputInPopup) {
+                window.proxyInputInPopup = false;
+                window.proxyInputMask = false;
+                if (typeof window.setOSMode === 'function') {
+                    window.setOSMode(newKey === '__terminal__' ? 'terminal' : 'app');
+                }
+            }
+
+            this.activeContextKey = newKey;
+            this.renderContextState(newKey);
+        },
+
+        removeContext: function(key) {
+            if (!key) return;
+            if (key === this.activeContextKey) {
+                this.isTaskbarMenu = false;
+                this.callHpopForContext(key);
+            }
+            delete this.pageStates[key];
+        },
+
+        getViewportBounds: function() {
+            let maxBottom = window.innerHeight;
+            let maxRight = window.innerWidth;
+
+            const inputBar = document.getElementById('input-bar');
+            if (inputBar) {
+                const ibRect = inputBar.getBoundingClientRect();
+                if (ibRect.height > 0 && ibRect.top < maxBottom) {
+                    maxBottom = ibRect.top;
+                }
+            }
+
+            const kbOverlay = document.getElementById('kb-overlay');
+            if (kbOverlay && kbOverlay.classList.contains('is-open')) {
+                const kbRect = kbOverlay.getBoundingClientRect();
+                if (kbRect.height > 0 && kbRect.top < maxBottom) {
+                    maxBottom = kbRect.top;
+                }
+            }
+
+            return { maxRight, maxBottom };
+        },
+
         handlePopMessage: function(e) {
             if (!e.data || typeof e.data !== 'object') return;
-            // --- Security Upgrade: Origin and Source Validation ---
             if (window.location.origin !== "null" && e.origin !== window.location.origin) return;
             let isKnownFrame = Array.from(document.querySelectorAll('iframe')).some(f => f.contentWindow === e.source);
             if (e.source !== window && e.source !== window.parent && !isKnownFrame) return;
-            // ------------------------------------------------------
 
             const { type } = e.data;
+            const key = this.getContextKeyFromSource(e.source);
 
             if (type === 'CYLON_POP_HTM') {
-                this.callPopHtm(e.data.html, e.data.position);
+                this.callPopHtmForContext(key, e.data.html, e.data.position);
             } else if (type === 'CYLON_POP_HIDE') {
-                this.callHpop();
+                this.callHpopForContext(key);
             } else if (type === 'CYLON_POP_WEB') {
                 this.callPopWeb(e.data.url);
             } else if (type === 'CYLON_POP_WEB_HIDE') {
                 this.callHpopWeb();
             } else if (type === 'CYLON_POP_ALIGN') {
-                this.setPopAlign(e.data.align);
+                this.setPopAlignForContext(key, e.data.align);
+            } else if (type === 'CYLON_POP_FORCE') {
+                this.setPopForceForContext(key, e.data.force);
+            }
+        },
+
+        callPopHtmForContext: function(key, html, pos) {
+            if (!html) return;
+            key = key || this.activeContextKey;
+            const st = this.getContextState(key);
+
+            st.visible = true;
+            st.isMenuOpen = false;
+            st.menuElements = [];
+            st.menuActions = [];
+            st.selectedIndex = 0;
+            st.pos = pos || st.popAlign || 'center';
+            st.lastClickZ = (window.lastClickZ !== undefined && window.lastClickZ !== -1)
+                ? window.lastClickZ
+                : (window.lastClickedZ !== undefined ? window.lastClickedZ : -1);
+
+            if (window.parent && window.parent !== window && typeof window.parent.popHtm === 'function' && window.parent.popHtm !== window.popHtm) {
+                window.parent.popHtm(html, pos);
+                return;
+            }
+
+            if (key === this.activeContextKey && !this.isTaskbarMenu) {
+                clearTimeout(window.PUV);
+                window.PopUserTouched = false;
+                st.fragment = null;
+                this.createSimplePop(html, st.pos);
+                this.syncGlobalsFromActive();
+            } else {
+                const frag = document.createDocumentFragment();
+                if (typeof html === 'string') {
+                    const tmp = document.createElement('div');
+                    tmp.innerHTML = html;
+                    while (tmp.firstChild) frag.appendChild(tmp.firstChild);
+                } else if (html instanceof Node) {
+                    frag.appendChild(html);
+                }
+                st.fragment = frag;
             }
         },
 
         callPopHtm: function(html, pos) {
-            this.isMenuOpen = false; // Reset if a standard popup overrides the menu
-            if (!html) return;
-            if (window.parent && window.parent !== window && typeof window.parent.popHtm === 'function' && window.parent.popHtm !== window.popHtm) {
-                window.parent.popHtm(html, pos);
-            } else {
-                this.createSimplePop(html, pos);
+            this.callPopHtmForContext(this.activeContextKey, html, pos);
+        },
+
+        callHpopForContext: function(key) {
+            key = key || this.activeContextKey;
+
+            if (window.parent && window.parent !== window && typeof window.parent.hpop === 'function' && window.parent.hpop !== window.hpop) {
+                window.parent.hpop();
+                return;
+            }
+
+            if (this.isTaskbarMenu && key === this.activeContextKey) {
+                this.isTaskbarMenu = false;
+                this.isMenuOpen = false;
+                this.menuElements = [];
+                this.menuActions = [];
+                this.selectedIndex = 0;
+                this.renderContextState(this.activeContextKey);
+                return;
+            }
+
+            const st = this.getContextState(key);
+            st.visible = false;
+            st.isMenuOpen = false;
+            st.menuElements = [];
+            st.menuActions = [];
+            st.selectedIndex = 0;
+            st.fragment = null;
+
+            if (key === this.activeContextKey) {
+                clearTimeout(window.PUV);
+                window.PopUserTouched = false;
+                const popEl = document.getElementById('cylon-pop');
+                if (popEl) popEl.innerHTML = '';
+                const popWrapper = document.getElementById('cylon-pop-wrapper');
+                if (popWrapper) popWrapper.style.visibility = 'hidden';
+                this.syncGlobalsFromActive();
             }
         },
 
         callHpop: function() {
-            this.isMenuOpen = false; // Menu is closed
-            if (window.parent && window.parent !== window && typeof window.parent.hpop === 'function' && window.parent.hpop !== window.hpop) {
-                window.parent.hpop();
-            } else {
-                const popWrapper = document.getElementById('cylon-pop-wrapper');
-                if (popWrapper) popWrapper.style.visibility = 'hidden';
-            }
+            this.callHpopForContext(this.activeContextKey);
         },
 
         hideContextMenu: function() {
             this.callHpop();
         },
 
-        // --- NEW: Applies Theme Highlighting to focused items ---
         applyMenuHighlight: function() {
             if (!this.menuElements) return;
             this.menuElements.forEach((btn, idx) => {
@@ -1292,7 +1571,6 @@ window.cycleActivePage = function() {
             });
         },
 
-        // --- NEW: Handles keyboard navigation from active child components ---
         handleMenuKey: function(key) {
             if (!this.isMenuOpen || !this.menuElements || this.menuElements.length === 0) return false;
 
@@ -1307,7 +1585,7 @@ window.cycleActivePage = function() {
                 return true;
             } else if (k === 'enter') {
                 let action = this.menuActions[this.selectedIndex];
-                this.callHpop(); // Ensure we close out
+                this.callHpop();
                 if (action) action();
                 return true;
             } else if (k === 'escape' || k === 'esc') {
@@ -1318,13 +1596,8 @@ window.cycleActivePage = function() {
         },
 
         showContextMenu: function(e, items) {
-            this.callHpop(); 
-            
-            // Register Keyboard State
-            this.isMenuOpen = true;
-            this.menuElements = [];
-            this.menuActions = [];
-            this.selectedIndex = 0;
+            const isFromIframe = !!(e && e.view && e.view !== window && e.view !== window.parent);
+            const targetKey = isFromIframe ? this.getContextKeyFromSource(e.view) : this.activeContextKey;
 
             let posOrCoords;
             if (e === 'topleft' || (e && e.pos === 'topleft')) {
@@ -1333,7 +1606,7 @@ window.cycleActivePage = function() {
                 let absX = (e && e.clientX) || 0;
                 let absY = (e && e.clientY) || 0;
 
-                if (e && e.view && e.view !== window && e.view !== window.parent) {
+                if (isFromIframe) {
                     let frames = document.querySelectorAll('iframe');
                     for (let i = 0; i < frames.length; i++) {
                         if (frames[i].contentWindow === e.view) {
@@ -1346,6 +1619,9 @@ window.cycleActivePage = function() {
                 }
                 posOrCoords = { x: absX, y: absY };
             }
+
+            let menuElements = [];
+            let menuActions = [];
 
             let menuFrag = document.createDocumentFragment();
             let menuContainer = document.createElement('div');
@@ -1360,7 +1636,7 @@ window.cycleActivePage = function() {
                 btn.style.cssText = `
                     padding: 8px 12px; cursor: pointer; user-select: none; border-radius: 2px;
                 `;
-                
+
                 btn.addEventListener('pointerdown', (ev) => {
                     ev.preventDefault();
                     ev.stopPropagation();
@@ -1368,27 +1644,54 @@ window.cycleActivePage = function() {
 
                 btn.addEventListener('pointerup', (ev) => {
                     ev.stopPropagation();
-                    window.hpop(); 
+                    window.hpop();
                     if (item.action) item.action();
                 });
-                
-                // Tie hovering cleanly into the keyboard tracking state
-                btn.onmouseenter = () => { 
+
+                btn.onmouseenter = () => {
                     this.selectedIndex = index;
                     this.applyMenuHighlight();
                 };
-                
-                this.menuElements.push(btn);
-                this.menuActions.push(item.action || function(){});
+
+                menuElements.push(btn);
+                menuActions.push(item.action || function(){});
                 menuContainer.appendChild(btn);
             });
 
             menuFrag.appendChild(menuContainer);
 
-            this.createSimplePop(menuFrag, posOrCoords);
-            
-            // Force highlighting on the first index immediately
-            this.applyMenuHighlight();
+            if (!isFromIframe) {
+                // Taskbar / OS menu: stash active page's popup so dismissing restores it
+                if (!this.isTaskbarMenu) {
+                    this.saveActiveDOMToState();
+                }
+                this.isTaskbarMenu = true;
+                this.isMenuOpen = true;
+                this.menuElements = menuElements;
+                this.menuActions = menuActions;
+                this.selectedIndex = 0;
+
+                this.createSimplePop(menuFrag, posOrCoords);
+                this.syncGlobalsFromActive();
+                this.applyMenuHighlight();
+            } else {
+                this.callHpopForContext(targetKey);
+                const st = this.getContextState(targetKey);
+                st.visible = true;
+                st.isMenuOpen = true;
+                st.menuElements = menuElements;
+                st.menuActions = menuActions;
+                st.selectedIndex = 0;
+                st.pos = posOrCoords;
+
+                if (targetKey === this.activeContextKey && !this.isTaskbarMenu) {
+                    this.createSimplePop(menuFrag, posOrCoords);
+                    this.syncGlobalsFromActive();
+                    this.applyMenuHighlight();
+                } else {
+                    st.fragment = menuFrag;
+                }
+            }
         },
 
         getOrCreatePopWrapper: function() {
@@ -1400,26 +1703,11 @@ window.cycleActivePage = function() {
                     position: fixed;
                     top: 0; left: 0; width: 100vw; height: 100vh;
                     background: transparent;
-                    z-index: 100000;
+                    z-index: 90;
                     display: flex;
                     align-items: center;
                     justify-content: center;
                 `;
-                                
-                popWrapper.addEventListener('pointerdown', (ev) => {
-                    if (ev.target === popWrapper) {
-                        ev.preventDefault();
-                        ev.stopPropagation();
-                    }
-                });
-
-                popWrapper.addEventListener('pointerup', (ev) => {
-                    if (ev.target === popWrapper) {
-                        window.hpop();
-                        ev.preventDefault();
-                        ev.stopPropagation();
-                    }
-                });
 
                 popWrapper.addEventListener('click', function(e) {
                     let link = e.target.closest('a');
@@ -1434,15 +1722,34 @@ window.cycleActivePage = function() {
                             } else {
                                 window.postMessage({ type: 'gfx', cmd: cmd }, (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
                             }
-                            window.hpop(); 
-                            return; 
+                            if (window.PopForce !== 'visible') {
+                                window.hpop();
+                            }
+                            return;
                         }
+                    }
+                });
+
+                popWrapper.addEventListener('pointerdown', (ev) => {
+                    if (ev.target === popWrapper) {
+                        ev.preventDefault();
+                        ev.stopPropagation();
+                    }
+                });
+
+                popWrapper.addEventListener('pointerup', (ev) => {
+                    if (ev.target === popWrapper) {
+                        if (this.isMenuOpen || window.PopForce !== 'visible') {
+                            window.hpop();
+                        }
+                        ev.preventDefault();
+                        ev.stopPropagation();
                     }
                 });
 
                 let popEl = document.createElement('div');
                 popEl.id = 'cylon-pop';
-                
+
                 popEl.style.cssText = `
                     background: var(--menu-bg, #111);
                     color: var(--menu-fg, #aaa);
@@ -1451,13 +1758,31 @@ window.cycleActivePage = function() {
                     border: 1px solid var(--sel-bg, #333);
                     border-radius: 4px;
                     max-width: 90vw;
-                    max-height: 90vh;
+                    max-height: calc(100vh - var(--bar-height, 60px) - 16px);
                     overflow: auto;
                     box-shadow: 0 4px 15px rgba(0,0,0,0.8);
                 `;
-                
+
+                popEl.addEventListener('mouseenter', () => {
+                    window.PopUserTouched = true;
+                    window.PopUpVis = 'visible';
+                    clearTimeout(window.PUV);
+                });
+
                 popEl.addEventListener('mouseleave', () => {
-                    window.hpop();
+                    if (this.isMenuOpen) {
+                        window.hpop();
+                        return;
+                    }
+                    if (window.PopUserTouched) {
+                        window.PopUpVis = (window.PopForce === 'visible') ? 'visible' : 'hidden';
+                        clearTimeout(window.PUV);
+                        window.PUV = setTimeout(() => {
+                            if (window.PopUpVis === 'hidden' && window.PopForce !== 'visible') {
+                                window.hpop();
+                            }
+                        }, 300);
+                    }
                 });
 
                 popWrapper.appendChild(popEl);
@@ -1476,25 +1801,30 @@ window.cycleActivePage = function() {
             } else if (html instanceof Node) {
                 popEl.appendChild(html);
             }
-            
+
             popWrapper.style.visibility = 'visible';
-            
+
             popEl.style.position = 'relative';
             popEl.style.left = 'auto';
             popEl.style.top = 'auto';
+            popEl.style.width = '';
+            popEl.style.height = '';
             popEl.style.transform = 'none';
             popEl.style.margin = '0 auto';
 
-            pos = pos || window.PopAlign || 'center';
+            const st = this.getContextState(this.activeContextKey);
+            pos = pos || st.popAlign || window.PopAlign || 'center';
             let targetZ = -1;
 
-            if (pos === 'click' && window.lastClickZ !== undefined) {
-                targetZ = window.lastClickZ;
-            } else if (pos === 'cursor' && window.playerZ !== undefined) {
-                targetZ = window.playerZ;
-            } else if (typeof pos === 'string' && /^[0-9a-fA-F]+$/.test(pos)) {
-                targetZ = parseInt(pos, 16);
+            const clickZ = (st.lastClickZ !== undefined && st.lastClickZ !== -1)
+                ? st.lastClickZ
+                : ((window.lastClickZ !== undefined && window.lastClickZ !== -1) ? window.lastClickZ : window.lastClickedZ);
+
+            if (pos === 'click' && clickZ !== undefined) {
+                targetZ = clickZ;
             }
+
+            const bounds = this.getViewportBounds();
 
             if (pos === 'topleft') {
                 popEl.style.position = 'absolute';
@@ -1506,19 +1836,36 @@ window.cycleActivePage = function() {
                 popEl.style.margin = '0';
                 popEl.style.left = Math.max(0, pos.x - 12) + 'px';
                 popEl.style.top = Math.max(0, pos.y - 8) + 'px';
-                
-                setTimeout(() => {
-                   let r = popEl.getBoundingClientRect();
-                   if (r.right > window.innerWidth) popEl.style.left = (window.innerWidth - r.width - 5) + 'px';
-                   if (r.bottom > window.innerHeight) popEl.style.top = (window.innerHeight - r.height - 5) + 'px';
-                }, 0);
-                
+
+                let r = popEl.getBoundingClientRect();
+                if (r.right > bounds.maxRight - 5) {
+                    popEl.style.left = Math.max(5, bounds.maxRight - r.width - 5) + 'px';
+                }
+                if (r.bottom > bounds.maxBottom - 5) {
+                    popEl.style.top = Math.max(5, bounds.maxBottom - r.height - 5) + 'px';
+                }
+            } else if (pos === 'full') {
+                const screenWrap = document.getElementById('screen-wrapper');
+                popEl.style.position = 'absolute';
+                popEl.style.margin = '0';
+                if (screenWrap) {
+                    const rect = screenWrap.getBoundingClientRect();
+                    popEl.style.left = rect.left + 'px';
+                    popEl.style.top = rect.top + 'px';
+                    popEl.style.width = rect.width + 'px';
+                    popEl.style.height = rect.height + 'px';
+                } else {
+                    popEl.style.left = '0px';
+                    popEl.style.top = '0px';
+                    popEl.style.width = '100vw';
+                    popEl.style.height = bounds.maxBottom + 'px';
+                }
             } else if (targetZ >= 0 && window.CylonGFX) {
                 let cols = window.CylonGFX.gridWide || 8;
                 let rows = window.CylonGFX.gridTall || 4;
-                
+
                 targetZ = Math.max(0, Math.min(targetZ, (cols * rows) - 1));
-                
+
                 let x = targetZ % cols;
                 let y = Math.floor(targetZ / cols);
 
@@ -1527,7 +1874,7 @@ window.cycleActivePage = function() {
                     popEl.style.position = 'absolute';
                     popEl.style.margin = '0';
                     let rect = screenWrap.getBoundingClientRect();
-                    
+
                     let tileW = rect.width / cols;
                     let tileH = rect.height / rows;
 
@@ -1537,21 +1884,19 @@ window.cycleActivePage = function() {
                     popEl.style.left = pxLeft + 'px';
                     popEl.style.top = pxTop + 'px';
                     popEl.style.transform = 'translate(-50%, -50%)';
-                    
-                    setTimeout(() => {
-                        let pRect = popEl.getBoundingClientRect();
-                        let shiftX = 0; let shiftY = 0;
-                        
-                        if (pRect.left < 0) shiftX = -pRect.left + 5;
-                        else if (pRect.right > window.innerWidth) shiftX = window.innerWidth - pRect.right - 5;
-                        
-                        if (pRect.top < 0) shiftY = -pRect.top + 5;
-                        else if (pRect.bottom > window.innerHeight) shiftY = window.innerHeight - pRect.bottom - 5;
-                        
-                        if (shiftX !== 0 || shiftY !== 0) {
-                            popEl.style.transform = `translate(calc(-50% + ${shiftX}px), calc(-50% + ${shiftY}px))`;
-                        }
-                    }, 0);
+
+                    let pRect = popEl.getBoundingClientRect();
+                    let shiftX = 0; let shiftY = 0;
+
+                    if (pRect.left < 5) shiftX = 5 - pRect.left;
+                    else if (pRect.right > bounds.maxRight - 5) shiftX = (bounds.maxRight - 5) - pRect.right;
+
+                    if (pRect.top < 5) shiftY = 5 - pRect.top;
+                    else if (pRect.bottom > bounds.maxBottom - 5) shiftY = (bounds.maxBottom - 5) - pRect.bottom;
+
+                    if (shiftX !== 0 || shiftY !== 0) {
+                        popEl.style.transform = `translate(calc(-50% + ${shiftX}px), calc(-50% + ${shiftY}px))`;
+                    }
                 }
             }
         },
@@ -1574,12 +1919,40 @@ window.cycleActivePage = function() {
             }
         },
 
-        setPopAlign: function(align) {
+        setPopForceForContext: function(key, force) {
+            const val = (String(force || '').toLowerCase() === 'visible') ? 'visible' : 'hidden';
+            key = key || this.activeContextKey;
+
+            if (window.parent && window.parent !== window && typeof window.parent.setPopForce === 'function' && window.parent.setPopForce !== window.setPopForce) {
+                window.parent.setPopForce(val);
+            } else {
+                const st = this.getContextState(key);
+                st.popForce = val;
+                if (key === this.activeContextKey) {
+                    window.PopForce = val;
+                }
+            }
+        },
+
+        setPopForce: function(force) {
+            this.setPopForceForContext(this.activeContextKey, force);
+        },
+
+        setPopAlignForContext: function(key, align) {
+            key = key || this.activeContextKey;
             if (window.parent && window.parent !== window && window.parent.PopAlign !== undefined) {
                 window.parent.PopAlign = align;
             } else {
-                window.PopAlign = align;
+                const st = this.getContextState(key);
+                st.popAlign = align;
+                if (key === this.activeContextKey) {
+                    window.PopAlign = align;
+                }
             }
+        },
+
+        setPopAlign: function(align) {
+            this.setPopAlignForContext(this.activeContextKey, align);
         },
 
         createSimplePopWeb: function(url) {
@@ -1596,7 +1969,7 @@ window.cycleActivePage = function() {
                     align-items: center;
                     justify-content: center;
                 `;
-                
+
                 webPopWrapper.addEventListener('click', function(e) {
                     if (e.target === webPopWrapper) {
                         window.hpopWeb();
@@ -1631,6 +2004,7 @@ window.cycleActivePage = function() {
             window.popWeb = function(url) { self.callPopWeb(url); };
             window.hpopWeb = function() { self.callHpopWeb(); };
             window.setPopAlign = function(align) { self.setPopAlign(align); };
+            window.setPopForce = function(force) { self.setPopForce(force); };
             window.pop = window.popHtm;
         }
     };

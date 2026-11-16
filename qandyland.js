@@ -31,6 +31,7 @@ var exec = require('child_process').exec;
 var http = require('http');
 var path = require('path');
 var fs   = require('fs');
+var crypto = require('crypto');
 
 // ── Configuration ─────────────────────────────────────────────────────────────
 
@@ -1059,9 +1060,10 @@ function bigbang(driveName, session) {
     return { success: false, error: 'cannot read ' + driveName + ': ' + (e.message || String(e)) };
   }
 
-  // --- NEW: Load matching .qpc tapes file ---
+  // --- Load matching legacy .qpc tapes file and queue valid entries for /q/ ---
+  var VALID_QPC_TAG_RE = /^[a-z0-9]{3,}$/;
   var qpcPath = path.join(process.cwd(), driveName.replace(/\.gfx$/i, '.qpc'));
-  var qpcTapes = {};
+  var qpcEntries = [];
   try {
     if (fs.existsSync(qpcPath)) {
       var rawQpc = fs.readFileSync(qpcPath, 'utf8');
@@ -1072,9 +1074,17 @@ function bigbang(driveName, session) {
         var match = qLine.match(/^\[(.*?)\](.*)$/);
         if (match) {
           var tapeName = match[1];
-          // Pre-clean tape code formatting so it's ready to inject
-          var tapeCode = match[2].replace(/ /g, "").replace(/_NL_/g, "").replace(/\\n/g, "").replace(/\\r/g, "").replace(/\\\\/g, "\\");
-          qpcTapes[tapeName] = tapeCode;
+          if (!VALID_QPC_TAG_RE.test(tapeName)) {
+            console.warn('Skipping invalid QPC tag "' + tapeName + '" (must be >= 3 lowercase a-z / 0-9 chars)');
+            continue;
+          }
+          var tapeCode = match[2]
+            .replace(/_NL_/g, "\n")
+            .replace(/\\n/g, "\n")
+            .replace(/\\r/g, "")
+            .replace(/\\\\/g, "\\")
+            .trim();
+          qpcEntries.push({ name: tapeName, code: tapeCode });
         }
       }
     }
@@ -1082,23 +1092,10 @@ function bigbang(driveName, session) {
     console.warn('Could not read QPC tapes file:', e.message);
   }
 
-  // Helper to expand tags once (left-to-right, no recursion)
-  function expandTags(sourceCode) {
-    if (!sourceCode) return '';
-    return sourceCode.replace(/\[(.*?)\]/g, function(fullMatch, tagName) {
-      if (qpcTapes[tagName] !== undefined) {
-        return qpcTapes[tagName];
-      }
-      return fullMatch; // Leave unchanged if tape is missing
-    });
-  }
-  // ------------------------------------------
-
   var lines = raw.split('\n');
   var sectors = [];       // { id, tiles, exits, items[] }
   var systemFiles = [];   // { id, data } for global UNIVAC scripts
   var playerCodes = [];
-  var seenCodes   = {};
 
   for (var li = 0; li < lines.length; li++) {
     var line = lines[li].trim();
@@ -1123,11 +1120,9 @@ function bigbang(driveName, session) {
     var mapData   = dotIdx >= 0 ? rest.substring(0, dotIdx) : rest;
     var itemData  = dotIdx >= 0 ? rest.substring(dotIdx + 1) : '';
 
-    // tiles are first 192 chars (96 × 2); exits are the remainder
-    var tiles = mapData.substring(0, 280); 
+    var tiles = mapData.substring(0, 280);
     var exitStr = mapData.substring(280);
-    
-    // Parse items using comma separation
+
     var items = [];
     if (itemData) {
       var rawItems = itemData.split('~');
@@ -1157,24 +1152,32 @@ function bigbang(driveName, session) {
   if (!pDir.success && pDir.error !== 'directory already exists') {
     return { success: false, error: 'failed to create /p/ directory: ' + pDir.error };
   }
+  
+  // Create /q/ root directory for Qandy Punch Code tags and seed valid .qpc entries
+  var qDir = dirMake(driveName, '/', 'q', session);
+  if (!qDir.success && qDir.error !== 'directory already exists') {
+    return { success: false, error: 'failed to create /q/ directory: ' + qDir.error };
+  }
 
-  // Save 1-character system files into /w/ using their dynamic keys (e.g. w/a, w/b)
+  for (var qei = 0; qei < qpcEntries.length; qei++) {
+    var qRes = fileSave(driveName, '/', 'q/' + qpcEntries[qei].name, qpcEntries[qei].code, 'UNIVAC', 'UNIVAC');
+    if (!qRes.success) errors.push('q/' + qpcEntries[qei].name + ': ' + qRes.error);
+  }
+
+  // Save 1-character system files into /w/ (UNIVAC.loadPunchCode resolves [tags] & whitespace)
   for (var fi = 0; fi < systemFiles.length; fi++) {
     var sysFile = systemFiles[fi];
-    
-    // EXPAND QPC TAGS FIRST
-    var rawCode = expandTags(sysFile.data);
-    
-    // Strip out whitespace 
-    var raw1 = rawCode.replace(/ /g, "");
-    var item1 = raw1.replace(/_NL_/g, "");
-    var item2 = item1.replace(/\\n/g, "");
-    var itemCode = item2.replace(/\\r/g, "").replace(/\\\\/g, "\\");
-    
-    var sfResult = fileSave(driveName, '/', 'w/' + sysFile.id, itemCode, 'UNIVAC', 'UNIVAC'); //'
+    var sysCode = String(sysFile.data || '')
+      .replace(/_NL_/g, "\n")
+      .replace(/\\n/g, "\n")
+      .replace(/\\r/g, "")
+      .replace(/\\\\/g, "\\")
+      .trim();
+
+    var sfResult = fileSave(driveName, '/', 'w/' + sysFile.id, sysCode, 'UNIVAC', 'UNIVAC'); //'
     if (!sfResult.success) errors.push('w/' + sysFile.id + ': ' + sfResult.error);
   }
-  
+
   // Process Sector Items
   for (var si = 0; si < sectors.length; si++) {
     var sector  = sectors[si];
@@ -1186,29 +1189,22 @@ function bigbang(driveName, session) {
       continue;
     }
 
-    // m(.txt) – valid terrain tiles (192 chars)
     var mResult = fileSave(driveName, '/', dirPath + '/m', sector.tiles, session, 'bigbang');
     if (!mResult.success) errors.push(dirPath + '/m: ' + mResult.error);
 
-    // e(.txt) – valid exits
     var eResult = fileSave(driveName, '/', dirPath + '/e', sector.exits, session, 'bigbang');
     if (!eResult.success) errors.push(dirPath + '/e: ' + eResult.error);
 
-    // Create item files with Bytecode inside
+    // Save item files keeping [tags] intact for editing & runtime UNIVAC loading
     for (var ii = 0; ii < sector.items.length; ii++) {
       var parts = sector.items[ii].split('|');
       var itemMeta = parts[0];
+      var itemCode = String(parts[1] || '')
+        .replace(/_NL_/g, "\n")
+        .replace(/\\n/g, "\n")
+        .replace(/\\r/g, "")
+        .trim();
 
-      // EXPAND QPC TAGS FIRST
-      var rawCode = expandTags(parts[1] || '');
-
-      // Strip out whitespace then slice the exact limits
-      var item1 = rawCode.replace(/ /g, "");
-      var item2 = item1.replace(/_NL_/g, "");
-      var item3 = item2.replace(/\\n/g, "");
-      var itemCode = item3.replace(/\\r/g, "");
-
-      var itemId = itemCode.substring(0, 2);
       var iResult = fileSave(driveName, '/', dirPath + '/' + itemMeta, itemCode, '', 'bigbang');
       if (!iResult.success) errors.push(dirPath + '/' + itemMeta + ': ' + iResult.error);
     }
@@ -1375,7 +1371,130 @@ function calculateLineOfSight(driveName, centerSector) {
   return Array.from(visible);
 }
 
+var DEFAULT_PLAYER_ITEM = 'Sa';
+var DEFAULT_PLAYER_INV  = 'Za'.repeat(20);
+var IDLE_LOGOUT_MS      = 120000; // 2 minutes without a ping removes idle player from /w/
+
+function hashPassword(password) {
+  var salt = crypto.randomBytes(16).toString('hex');
+  var hash = crypto.scryptSync(String(password), salt, 32).toString('hex');
+  return salt + ':' + hash;
+}
+
+function verifyPassword(password, stored) {
+  if (!stored || stored.indexOf(':') === -1) return false;
+  var parts = stored.split(':');
+  var salt = parts[0];
+  var expectedHex = parts[1];
+  if (!salt || !expectedHex) return false;
+  var actualBuf = crypto.scryptSync(String(password), salt, 32);
+  var expectedBuf = Buffer.from(expectedHex, 'hex');
+  if (actualBuf.length !== expectedBuf.length) return false;
+  return crypto.timingSafeEqual(actualBuf, expectedBuf);
+}
+
+function validateCredentials(username, password) {
+  if (!username || username.length < 3) return '04';   // At least 3 chars
+  if (username.length >= 16) return '05';              // Under 16 chars
+  if (!/^[A-Za-z0-9]+$/.test(username)) return '03';  // Alphanumeric only
+  if (!/^[A-Z]/.test(username)) return '16';           // Must start with upper-case letter
+  if (/^guest/i.test(username)) return '17';           // Cannot start with "guest"
+  if (!password || password.length < 4) return '08';   // Password at least 4 chars
+  if (/[\r\n]/.test(password) || password.indexOf('--') !== -1) return '07';
+  return null;
+}
+
+function getSpawnDefaults(drive, gfxZBase) {
+  var sector = 'Bc';
+  var zStr = encodeZ(0, gfxZBase);
+  var sLoad = fileLoad(drive, '/', 'a/gfxSpawn', 'system');
+  if (sLoad.success && sLoad.content && sLoad.content.trim().length === 2) {
+    sector = sLoad.content.trim();
+  }
+  var zLoad = fileLoad(drive, '/', 'a/gfxSpawnZ', 'system');
+  if (zLoad.success && zLoad.content) {
+    zStr = encodeZ(decodeZ(zLoad.content.trim(), gfxZBase), gfxZBase);
+  }
+  return { sector: sector, zStr: zStr };
+}
+
+function saveUserSnapshot(player, session, passwordHashOverride) {
+  if (!player || !player.drive || !player.userKey) return;
+  var drive = player.drive;
+  var uPath = 'u/' + player.userKey;
+
+  var gfxZBase = 10;
+  var zBaseLoad = fileLoad(drive, '/', 'a/gfxZBase', 'system');
+  if (zBaseLoad.success && zBaseLoad.content) {
+    var parsed = parseInt(zBaseLoad.content, 10);
+    if (!isNaN(parsed) && ((parsed >= 2 && parsed <= 36) || parsed === 52)) gfxZBase = parsed;
+  }
+
+  var existing = fileLoad(drive, '/', uPath, 'system');
+  var exactName = player.username || player.userKey;
+  var passHash  = passwordHashOverride || '';
+  if (existing.success && existing.content) {
+    var lines = existing.content.split('\n');
+    if (lines[0]) exactName = lines[0].trim();
+    if (!passHash && lines[1]) passHash = lines[1].trim();
+  }
+
+  var invContent = DEFAULT_PLAYER_INV;
+  if (player.fullPath) {
+    var pFile = fileLoad(drive, '/', player.fullPath, session || 'system');
+    if (pFile.success && typeof pFile.content === 'string') {
+      invContent = pFile.content;
+    }
+  }
+
+  var itemId = (player.item && player.item.length >= 2) ? player.item.substring(0, 2) : DEFAULT_PLAYER_ITEM;
+  var zStr   = encodeZ(parseInt(player.z, 10) || 0, gfxZBase);
+  var stateLine = [itemId, player.map || 'Bc', zStr, player.avatar || '', invContent].join('|');
+
+  fileSave(drive, '/', uPath, exactName + '\n' + passHash + '\n' + stateLine, 'system', 'system');
+}
+
+setInterval(function () {
+  var now = Date.now();
+  for (var entry of playerIndex.entries()) {
+    var sess = entry[0];
+    var p = entry[1];
+    if (p && p.lastSeen && (now - p.lastSeen > IDLE_LOGOUT_MS)) {
+      removePlayerFromWorld(p, sess);
+      playerIndex.delete(sess);
+    }
+  }
+}, 30000).unref();
+
+function removePlayerFromWorld(player, session) {
+  if (!player || !player.drive) return;
+  if (player.userKey) {
+    saveUserSnapshot(player, session);
+  }
+  if (player.fullPath) {
+    fileDelete(player.drive, '/', player.fullPath, session || 'system');
+  }
+  if (player.pubId) {
+    fileDelete(player.drive, '/', 'p/' + player.pubId, session || 'system');
+  }
+}
+
+// Periodically evict idle logged-in users from /w/ and save their snapshot to /u/
+setInterval(function () {
+  var now = Date.now();
+  for (var entry of playerIndex.entries()) {
+    var sess = entry[0];
+    var p = entry[1];
+    if (p && p.userKey && p.lastSeen && (now - p.lastSeen > IDLE_LOGOUT_MS)) {
+      removePlayerFromWorld(p, sess);
+      playerIndex.delete(sess);
+    }
+  }
+}, 30000).unref();
+
 function plugboard(req, stacker, plugs, drive, session) {
+  
+  var skipPostTick = false;
   
   let gfxZBase = 10;
   let zBaseLoad = fileLoad(drive, '/', 'a/gfxZBase', session);
@@ -1443,8 +1562,8 @@ function plugboard(req, stacker, plugs, drive, session) {
     }
   }
   
-  let tape="";
-  runfile('w/b'); // 'b' (before) executes before command is processed
+  let tape = "";
+  if (fileExists(drive, '/', 'w/b').exists) runfile('w/b');
   
   var refresh = true;
   let column = 0; 
@@ -1459,15 +1578,15 @@ function plugboard(req, stacker, plugs, drive, session) {
       case 'Vs':
       case 'Ve':
       case 'Vw':
-        if (!player.item || player.item === "") { break; }
+        if (!player.item || player.item === "" || player.item.startsWith('Za')) { break; }
         tape += code;
         break;
         
       case 'Vd': 
-        if (!player.item || player.item === "") { break; }
+        if (!player.item || player.item === "" || player.item.startsWith('Za')) { break; }
         let item = plugs.slice(column, column + 2); column += 2;
         tape += code+item;
-        break;      
+        break;
 
       case 'OD':
         if (tape) { runtape(tape); tape = ""; }
@@ -1476,39 +1595,30 @@ function plugboard(req, stacker, plugs, drive, session) {
         let objz  = plugs.slice(column + 2, column + 4);
         column += 4;
 
-        console.log('### OD '+objfile+' '+objid+' '+objz+' '); 
-        // output: ## OD null Sa 66  
-        
-        if (player.item === 'Za') {
-        	 if (objid.charAt(0) === 'S') {
-        	 	player.z = decodeZ(objz, gfxZBase);
-        	 }
+        if (!player.item || player.item.startsWith('Za')) {
+          if (objid.charAt(0) === 'S') {
+            player.z = decodeZ(objz, gfxZBase);
+          }
         }
 
         let pZStr = encodeZ(player.z, gfxZBase);
-
         let odSearchPattern = 'w/' + player.map + '/' + objid + pZStr + '??';
         let odFilesResponse = fileSearch(drive, odSearchPattern);
 
-        console.log('### OD '+pZStr+' '+odSearchPattern+' '+odFilesResponse); 
-        // output: ### OD 44 w/Ha/Sa44?? [object Object] 
-        
         if (odFilesResponse.success && odFilesResponse.results.length > 0) {
           for (let i = 0; i < odFilesResponse.results.length; i++) {
-            console.log(odFilesResponse.results[i].name);
             let entryName = odFilesResponse.results[i].name;
             let matchedBase = entryName.substring(entryName.lastIndexOf('/') + 1);
-            if (matchedBase.length === 6) {
-              console.log('YES');
-              // no output, this if is never executed
+            if (entryName === 'w/' + player.map + '/' + matchedBase &&
+                matchedBase.length === 6 &&
+                matchedBase.startsWith(objid + pZStr)) {
               objfile = entryName;
-              break; 
+              break;
             }
           }
         }
 
         if (objfile != null) {
-          // console.log("UNIVAC(" + drive + ", " + player.fullPath + ", " + objfile + ")");
           if (typeof UNIVAC === 'function') {
             let uResult = UNIVAC(drive, player.fullPath, objfile, session);
             if (uResult) {
@@ -1517,33 +1627,39 @@ function plugboard(req, stacker, plugs, drive, session) {
               player.avatar = uResult.avatar;
               if (uResult.playerid) player.pubId = uResult.playerid;
               if (uResult.item) player.item = uResult.item + player.pubId;
-              
               player.fullPath = uResult.fullPath;
               output += uResult.output;
             }
-            // console.log("###1205### fullPath="+player.fullPath+" objfile="+objfile);
-            // ###1196### fullPath=w/H1/Sa44AaAaAaAa objfile=w/H1/Sa66Za
           }
         }
         break;
-               
+
       case 'ID':
         if (tape) { runtape(tape); tape = ""; }
         let itemId = plugs.slice(column, column + 2);
         let itemZ  = plugs.slice(column + 2, column + 4);
         column += 4;
-        
+
         let searchPrefix = 'w/' + player.map + '/' + itemId;
         let filesResponse = fileSearch(drive, searchPrefix + '*');
-        
+
         if (filesResponse.success && filesResponse.results.length > 0) {
           let matchedPath = null;
           let matchedBase = null;
-          
+
           for (let i = 0; i < filesResponse.results.length; i++) {
-            let base = filesResponse.results[i].name.split('/').pop();
-            if (base.substring(2, 4) === itemZ) {
-              matchedPath = filesResponse.results[i].name;
+            let entryName = filesResponse.results[i].name;
+            let base = entryName.split('/').pop();
+            if (entryName !== 'w/' + player.map + '/' + base) continue;
+            if (base.substring(0, 2) !== itemId || base.substring(2, 4) !== itemZ) continue;
+
+            let candidateFullId = base.length >= 8 ? (itemId + base.substring(4, 8)) : itemId;
+            if (!matchedPath) {
+              matchedPath = entryName;
+              matchedBase = base;
+            }
+            if (candidateFullId === player.item) {
+              matchedPath = entryName;
               matchedBase = base;
               break;
             }
@@ -1553,9 +1669,7 @@ function plugboard(req, stacker, plugs, drive, session) {
             let matchedPubId = matchedBase.length >= 8 ? matchedBase.substring(4, 8) : "";
             let matchedFullId = matchedPubId ? itemId + matchedPubId : itemId;
 
-            // intercept 'Zj' (fire) and run global script
             if (itemId === 'Zj') {
-              // console.log("UNIVAC(" + drive + ", " + player.fullPath + ", w/f)");
               if (typeof UNIVAC === 'function') {
                 let uResult = UNIVAC(drive, player.fullPath, 'w/f', session);
                 if (uResult) {
@@ -1564,25 +1678,21 @@ function plugboard(req, stacker, plugs, drive, session) {
                   player.avatar = uResult.avatar;
                   if (uResult.playerid) player.pubId = uResult.playerid;
                   if (uResult.item) player.item = uResult.item + player.pubId;
-                  
                   player.fullPath = uResult.fullPath;
                   output += uResult.output;
                 }
               }
-              break; // Skip the rest of the ID logic, we are done!
+              break;
             }
-            
-            // If the player clicks their own item, send inventory
-            // console.log("###1256 matchedFullId="+matchedFullId+" player.item="+player.item);
+
             if (matchedFullId === player.item) {
               let invLoad = fileLoad(drive, '/', player.fullPath, session);
               let inventoryData = (invLoad.success && invLoad.content) ? invLoad.content : '';
-              output += "S^Vi" + inventoryData + "^S";
-              break; 
+              output += "S^Vi" + inventoryData + "--^S";
+              break;
             }
-            
-            // Pick up standard dynamic items
-            if (itemId >= 'Aa' && itemId < 'Qa') { tape += 'XnVd'+itemId; }
+
+            if (itemId >= 'Aa' && itemId < 'Qa') { tape += 'XnVd' + itemId; }
           }
         }
         break;
@@ -1592,6 +1702,7 @@ function plugboard(req, stacker, plugs, drive, session) {
         if (tape) { runtape(tape); tape = ""; }
         let playerid = plugs.slice(column, column + 4);
         column = column + 4;
+        if (!player.item || player.item.startsWith('Za')) { break; }
         tape='Xt'+playerid;
         runtape(tape);
         break;
@@ -1682,9 +1793,11 @@ function plugboard(req, stacker, plugs, drive, session) {
         break;
 
       case 'ST':
+        skipPostTick = true;
         if (tape) { runtape(tape); tape = ""; }
         if (session && playerIndex.has(session)) {
-          output += "ST" + session;
+          output = "ST" + session;
+          refresh = false;
         } else {
           let chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
           let pubId = '';
@@ -1700,20 +1813,21 @@ function plugboard(req, stacker, plugs, drive, session) {
             item:     "",
             z:        0,
             avatar:   "",
-            pubId:    pubId
+            pubId:    pubId,
+            lastSeen: Date.now()
           };
           playerIndex.set(session, player);
 
-          // Create the ghost player file with Za (empty slot) as the item
+          // Create the ghost player file with Za (empty slot) using /a/gfxSpawn & /a/gfxSpawnZ
           runtape("XaZa");
-          player.item = 'Za'; // mark slot as created so item guards pass
-          let numericZ = parseInt(player.z, 10) || 0;
-          // overwrite UNIVAC output as client has no session token to process it yet
-          output += "ST" + session;
-          var refresh=false;
+          if (!player.item) player.item = 'Za' + (player.pubId || '');
+
+          // Overwrite UNIVAC output as client has no session token to process it yet
+          output = "ST" + session;
+          refresh = false;
         }
         column = plugs.length;
-        break;        
+        break;
 
       case 'VA':
         if (tape) { runtape(tape); tape = ""; }
@@ -1728,8 +1842,184 @@ function plugboard(req, stacker, plugs, drive, session) {
         }
 
         if (!player.item || player.item === "") break; 
-        if (vaAvatar !== player.avatar) { runtape("Va" + vaAvatar + "--"); }
+        if (vaAvatar !== player.avatar) {
+          runtape("Va" + vaAvatar + "--");
+          if (player.userKey) saveUserSnapshot(player, session);
+        }
+
         break;                
+
+      case 'LG': {
+        if (tape) { runtape(tape); tape = ""; }
+        if (player.userKey) {
+          output += "S^LE21^S"; // Already logged in
+          refresh = false; skipPostTick = true;
+          column = plugs.length;
+          break;
+        }
+        if (!player.item || player.item.startsWith('Za')) {
+          runtape("Xa" + DEFAULT_PLAYER_ITEM + DEFAULT_PLAYER_INV + "--");
+        }
+        var guestName = 'guest' + (player.pubId || '0000');
+        player.username = guestName;
+        player.userKey  = null;
+        player.lastSeen = Date.now();
+        output += "S^LG" + guestName + "--^S";
+        break;
+      }
+
+      case 'LI': {
+        if (tape) { runtape(tape); tape = ""; }
+        let endUser = plugs.indexOf('--', column);
+        let uName = endUser !== -1 ? plugs.slice(column, endUser) : '';
+        column = endUser !== -1 ? endUser + 2 : plugs.length;
+        let endPass = plugs.indexOf('--', column);
+        let uPass = endPass !== -1 ? plugs.slice(column, endPass) : '';
+        column = endPass !== -1 ? endPass + 2 : plugs.length;
+
+        let err = validateCredentials(uName, uPass);
+        if (err) {
+          output += "S^LE" + err + "^S";
+          refresh = false; skipPostTick = true;
+          column = plugs.length;
+          break;
+        }
+
+        let userKey = uName.toLowerCase();
+        let uLoad = fileLoad(drive, '/', 'u/' + userKey, 'system');
+        if (!uLoad.success || !uLoad.content) {
+          output += "S^LE13^S"; // Player Name Does Not Exist
+          refresh = false; skipPostTick = true;
+          column = plugs.length;
+          break;
+        }
+
+        let lines = uLoad.content.split('\n');
+        let exactName  = (lines[0] || uName).trim();
+        let storedHash = (lines[1] || '').trim();
+
+        if (!verifyPassword(uPass, storedHash)) {
+          output += "S^LE09^S"; // Invalid Password
+          refresh = false; skipPostTick = true;
+          column = plugs.length;
+          break;
+        }
+
+        // Check if this account is already logged in on another session
+        let alreadyActive = false;
+        for (let [otherSess, otherP] of playerIndex.entries()) {
+          if (otherSess !== session && otherP.drive === drive && otherP.userKey === userKey) {
+            if (Date.now() - (otherP.lastSeen || 0) < 10000) {
+              alreadyActive = true;
+              break;
+            } else {
+              removePlayerFromWorld(otherP, otherSess);
+              playerIndex.delete(otherSess);
+            }
+          }
+        }
+        if (alreadyActive) {
+          output += "S^LE20^S"; // Player Already Logged In - Wait 10 seconds
+          refresh = false; skipPostTick = true;
+          column = plugs.length;
+          break;
+        }
+
+        // Reload /u/ in case stale-session cleanup just updated Line 3
+        uLoad = fileLoad(drive, '/', 'u/' + userKey, 'system');
+        lines = (uLoad.content || '').split('\n');
+        let savedParts = (lines[2] || '').split('|');
+
+        // Clean up current Za ghost, active guest, or previous account from /w/ and /p/
+        if (player.fullPath || player.pubId) {
+          removePlayerFromWorld(player, session);
+          player.fullPath = null;
+          player.userKey  = null;
+          player.username = null;
+        }
+
+        let sp = getSpawnDefaults(drive, gfxZBase);
+        let pId      = savedParts[0] || DEFAULT_PLAYER_ITEM;
+        let pSector  = savedParts[1] || sp.sector;
+        let pZStr    = savedParts[2] || sp.zStr;
+        let pAvatar  = savedParts[3] || '';
+        let pContent = savedParts[4] !== undefined ? savedParts[4] : DEFAULT_PLAYER_INV;
+        let newPubId = UNIVAC.tickOdometer(drive);
+
+        let restoredPath = 'w/' + pSector + '/' + pId + pZStr + newPubId + pAvatar;
+        fileSave(drive, '/', restoredPath, pContent, session, session);
+        fileSave(drive, '/', 'p/' + newPubId, pSector + pZStr + pAvatar, session, session);
+
+        player.fullPath = restoredPath;
+        player.map      = pSector;
+        player.z        = decodeZ(pZStr, gfxZBase);
+        player.item     = pId + newPubId;
+        player.avatar   = pAvatar;
+        player.pubId    = newPubId;
+        player.username = exactName;
+        player.userKey  = userKey;
+        player.lastSeen = Date.now();
+
+        output += "S^LI" + exactName + "--^S";
+        break;
+      }
+
+      case 'LC': {
+        if (tape) { runtape(tape); tape = ""; }
+        let endUser = plugs.indexOf('--', column);
+        let uName = endUser !== -1 ? plugs.slice(column, endUser) : '';
+        column = endUser !== -1 ? endUser + 2 : plugs.length;
+        let endPass = plugs.indexOf('--', column);
+        let uPass = endPass !== -1 ? plugs.slice(column, endPass) : '';
+        column = endPass !== -1 ? endPass + 2 : plugs.length;
+
+        if (player.userKey) {
+          output += "S^LE21^S"; // Already logged in
+          refresh = false; skipPostTick = true;
+          column = plugs.length;
+          break;
+        }
+
+        let err = validateCredentials(uName, uPass);
+        if (err) {
+          output += "S^LE" + err + "^S";
+          refresh = false; skipPostTick = true;
+          column = plugs.length;
+          break;
+        }
+
+        let userKey = uName.toLowerCase();
+        if (fileExists(drive, '/', 'u/' + userKey).exists) {
+          output += "S^LE10^S"; // Player Name Already Taken
+          refresh = false; skipPostTick = true;
+          column = plugs.length;
+          break;
+        }
+
+        // If still a Za ghost, spawn as Sa; if already an active guest, keep their live /w/ file
+        if (!player.item || player.item.startsWith('Za')) {
+          runtape("Xa" + DEFAULT_PLAYER_ITEM + DEFAULT_PLAYER_INV + "--");
+        }
+
+        player.username = uName;
+        player.userKey  = userKey;
+        player.lastSeen = Date.now();
+        saveUserSnapshot(player, session, hashPassword(uPass));
+
+        output += "S^LC" + uName + "--^S";
+        break;
+      }
+
+      case 'LO': {
+        if (tape) { runtape(tape); tape = ""; }
+        removePlayerFromWorld(player, session);
+        if (session) playerIndex.delete(session);
+        session = null;
+        output += "S^LO--^S";
+        refresh = false; skipPostTick = true;
+        column = plugs.length;
+        break;
+      }
 
       case 'OO':
         var refresh=false;
@@ -1740,43 +2030,41 @@ function plugboard(req, stacker, plugs, drive, session) {
 
   if (tape) { runtape(tape); tape=""; }
 
-  // --- track sectors team has explored ---
-  if (player.item && player.item.length >= 2) {
-    var team = player.item.substring(0, 2);
-    if (team >= 'Sa' && team <= 'Sd') {
-      let tsLoad = fileLoad(drive, '/', 'w/' + team, session);
-      let tsStr = (tsLoad.success && tsLoad.content) ? tsLoad.content : "";
-      if (tsStr.indexOf(player.map) < 0) {
-        tsStr = tsStr + player.map;
-        fileSave(drive, '/', 'w/' + team, tsStr, session, 'system');
+  if (!skipPostTick && session) {
+    // --- track sectors team has explored ---
+    if (player.item && player.item.length >= 2) {
+      var team = player.item.substring(0, 2);
+      if (team >= 'Sa' && team <= 'Sd') {
+        let tsLoad = fileLoad(drive, '/', 'w/' + team, session);
+        let tsStr = (tsLoad.success && tsLoad.content) ? tsLoad.content : "";
+        if (tsStr.indexOf(player.map) < 0) {
+          tsStr = tsStr + player.map;
+          fileSave(drive, '/', 'w/' + team, tsStr, session, 'system');
+        }
       }
     }
-  }
-  
-  // --- PvP Tag Intercept ---
-  if (player.pubId && player.map) {
-    let tagPath = 'w/' + player.map + '/Xt' + player.pubId;
-    let tagRes = fileLoad(drive, '/', tagPath, session);
-    if (tagRes.success && tagRes.content) {
-      let attackerId = tagRes.content.substring(0, 4);
-      let attackVal  = tagRes.content.substring(4, 6);
-      
-      // Delete the tag immediately so it only executes once
-      fileDelete(drive, '/', tagPath, session);
-      
-      // console.log("plugboard: Player " + player.pubId + " was tagged by " + attackerId + " (Power: " + attackVal + ")");
-      
-      // Inject the incoming attack value into temporary register W@ and execute the global 't' file
-      runtape('XsW@' + attackVal);
-      runfile('w/t');
-    }
-  }
-  
-  runfile('w/c'); // 'c' (after b) file executes after command is processed
-  
-  if (session) { playerIndex.set(session, player); }
 
-  
+    // --- PvP Tag Intercept ---
+    if (player.pubId && player.map) {
+      let tagPath = 'w/' + player.map + '/Xt' + player.pubId;
+      let tagRes = fileLoad(drive, '/', tagPath, session);
+      if (tagRes.success && tagRes.content) {
+        let attackerId = tagRes.content.substring(0, 4);
+        let attackVal  = tagRes.content.substring(4, 6);
+        fileDelete(drive, '/', tagPath, session);
+        if (fileExists(drive, '/', 'w/t').exists) {
+          runtape('XsW@' + attackVal);
+          runfile('w/t');
+        }
+      }
+    }
+
+    if (fileExists(drive, '/', 'w/c').exists) runfile('w/c');
+
+    player.lastSeen = Date.now();
+    playerIndex.set(session, player);
+  }
+
   if (refresh) {
     let list = fileList(drive, 'w/' + player.map, null, session);
     let items = [];

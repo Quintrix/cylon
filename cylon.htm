@@ -83,19 +83,25 @@ let cwd = "/";
 let osMode = 'terminal';
 let activeAppTitle = "";
 let proxyInputId = null;
-let popupActive = false; // Tracks if a Cylon Popup is visible to protect the desktop layer
+
+window.popupActive = false; // Tracks if a Cylon Popup is visible to protect the desktop layer
 
 document.body.addEventListener('pointerdown', function(e) {
-    // Intercept clicks on the OS background elements to close popups and prevent underlying actions
-    if (popupActive) {
-        if (e.target.closest('#input-bar') || e.target.closest('#screen-wrapper')) {
-            e.preventDefault(); 
+    const isPopVis = window.popupActive || (window.CylonPopManager && window.CylonPopManager.isPopupVisible && window.CylonPopManager.isPopupVisible());
+    if (isPopVis) {
+        let isMenu = window.CylonPopManager && window.CylonPopManager.isMenuOpen;
+        if (e.target.closest('#screen-wrapper')) {
+            e.preventDefault();
             e.stopPropagation();
-            if (typeof window.hpop === 'function') window.hpop();
-            
-            let shield = document.getElementById('qandy-popup-shield');
-            if (shield) shield.style.display = 'none';
-            popupActive = false;
+            if (window.PopForce !== 'visible' || isMenu) {
+                if (typeof window.hpop === 'function') window.hpop();
+            }
+        } else if (e.target.closest('#input-bar')) {
+            if (window.PopForce !== 'visible' || isMenu) {
+                e.preventDefault();
+                e.stopPropagation();
+                if (typeof window.hpop === 'function') window.hpop();
+            }
         }
     }
 }, { capture: true });
@@ -126,6 +132,8 @@ const PAGES = Object.freeze(new Set([
     'cylon-capflag.htm',
     'cylon-capflag.gfx',
     'cylon-qandy.gfx',
+    'cylon-queville.gfx',
+    'cylon-queville.htm',
     'qandyland.js',
     'qandyland-univac.js',
     'gfx-tileset.htm',
@@ -134,10 +142,6 @@ const PAGES = Object.freeze(new Set([
     'gfx-mods.htm',
     'gfx-viewer.htm',
     'gfx-compiler.htm',
-    'capflag.htm',
-    'capflag.gfx',
-    'queville.htm',
-    'queville.gfx'
 ]));
 
 // ============================================================================
@@ -369,6 +373,80 @@ window.toggleAppFocus = function() {
     }
 };
 
+window.proxyInputInPopup = false;
+window.proxyInputMask = false;
+
+window.applyProxyInputToTarget = function(type, id, value) {
+    if (!id) return;
+    if (window.proxyInputInPopup) {
+        var popRoot = document.getElementById('cylon-pop');
+        var el = popRoot ? popRoot.querySelector('#' + CSS.escape(id)) : document.getElementById(id);
+        if (el) {
+            el.value = value;
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+            if (type === 'QANDY_COMMIT_INPUT') {
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+                el.blur();
+            }
+        }
+        return;
+    }
+    var activeFrame = document.querySelector('.page-frame.active');
+    if (activeFrame && activeFrame.contentWindow) {
+        activeFrame.contentWindow.postMessage({
+            type: type,
+            id: id,
+            value: value
+        }, (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
+    }
+};
+
+let popAutoIdCounter = 0;
+
+function handlePopInputTap(e) {
+    const el = e.target;
+    if (!el || !el.closest || !el.closest('#cylon-pop')) return;
+    if (el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && (el.type === 'text' || el.type === 'password'))) {
+        el.setAttribute('inputmode', 'none');
+
+        if (e.type === 'pointerdown' || (e.type === 'mousedown' && e.pointerType === undefined) || e.type === 'touchstart') {
+            e.preventDefault();
+            if (document.activeElement && document.activeElement !== document.body) {
+                document.activeElement.blur();
+            }
+            window.focus();
+
+            if (!el.id) el.id = 'qandy-pop-input-' + (popAutoIdCounter++);
+
+            if ((osMode === 'app-edit' || osMode === 'app-textarea') && proxyInputId && proxyInputId !== el.id) {
+                window.applyProxyInputToTarget('QANDY_COMMIT_INPUT', proxyInputId, inputBuffer);
+            }
+
+            window.proxyInputInPopup = true;
+            window.proxyInputMask = (el.type === 'password');
+            proxyInputId = el.id;
+            window.proxyInputMaxLen = el.hasAttribute('maxlength') ? parseInt(el.getAttribute('maxlength'), 10) : null;
+
+            window.setOSMode(
+                el.tagName === 'TEXTAREA' ? 'app-textarea' : 'app-edit',
+                `${el.id}: `
+            );
+
+            inputBuffer = el.value || "";
+            cursorPos = inputBuffer.length;
+            selAnchor = null;
+
+            window.showFullKeyboard();
+            window.updateOverlayInput();
+            // Do not call panToRect: keyboard covers the popup without moving it
+        }
+    }
+}
+
+document.addEventListener('pointerdown', handlePopInputTap, { capture: true, passive: false });
+document.addEventListener('mousedown', handlePopInputTap, { capture: true, passive: false });
+document.addEventListener('touchstart', handlePopInputTap, { capture: true, passive: false });
+
 // Sync OS Mode dynamically based on what the user's browser is focused on
 function syncAppMode() {
     if (osMode !== 'app' && osMode !== 'app-cli') return;
@@ -452,14 +530,6 @@ window.addEventListener('message', function(e) {
         if (e.data.rect) window.panToRect(e.data.rect);
     } else if (e.data.type === 'CYLON_PRINT') {
         if (typeof print === 'function') print(e.data.text);
-    } else if (e.data.type === 'CYLON_POP_HTM') {
-        popupActive = true;
-        let shield = document.getElementById('qandy-popup-shield');
-        if (shield) shield.style.display = 'block';
-    } else if (e.data.type === 'CYLON_POP_HIDE') {
-        popupActive = false;
-        let shield = document.getElementById('qandy-popup-shield');
-        if (shield) shield.style.display = 'none';
     } else if (e.data.type === 'QANDY_INPUT_RECT') {
         window.panToRect(e.data.rect);
     } else if (e.data.type === 'QANDY_SET_MODE') {
@@ -928,26 +998,6 @@ function powerOn() {
 
 window.onload = function() {
     powerOn();
-
-    // Monkey-patch local popHtm/hpop in case they are called natively to toggle the shield and state
-    let _origPopHtm = window.popHtm;
-    if (_origPopHtm) {
-        window.popHtm = function() {
-            popupActive = true;
-            let shield = document.getElementById('qandy-popup-shield');
-            if (shield) shield.style.display = 'block';
-            return _origPopHtm.apply(this, arguments);
-        };
-    }
-    let _origHpop = window.hpop;
-    if (_origHpop) {
-        window.hpop = function() {
-            popupActive = false;
-            let shield = document.getElementById('qandy-popup-shield');
-            if (shield) shield.style.display = 'none';
-            return _origHpop.apply(this, arguments);
-        };
-    }
 };
 
 function loadNext() {

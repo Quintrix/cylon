@@ -36,9 +36,7 @@ window.onload = async function() {
     if (!window.CylonCommand) return document.body.innerHTML = "<h3 style='color:red;'>Requires Cylon OS</h3>";
 
     // 1. Mount the local graphical assets (tiles/icons) from the .gfx file
-    await window.CylonCommand(`mount ${WORLD_DRIVE} idb`);
-    await window.CylonCommand(`iferror mount ram: ram queville`);
-    await window.CylonCommand(`cylon:`);
+    await window.CylonCommand(`mount ${WORLD_DRIVE} ram`);
 
     // 2. Initialize the Graphics Engine safely
     if (window.CylonGFX) {
@@ -46,7 +44,7 @@ window.onload = async function() {
         window.CylonGFX.moveCursor = function() { /* Disabled: Server controls movement */ };
         window.CylonGFX.showTargetMenu = handleLocalClick; 
         
-        await window.CylonGFX.init('queville:/w/A1'); // Start at A1, server will override
+        await window.CylonGFX.init('queville:/w/Aa'); // Start at Aa, server will override
         fitDesktopToScreen();
         window.addEventListener('resize', fitDesktopToScreen);
     }

@@ -272,10 +272,10 @@ window.onload = async function() {
         }
         
         let dx = 0, dy = 0;
-        if (key === 'ArrowUp' || key === 'w' || key === 'W') dy = -1;
-        else if (key === 'ArrowDown' || key === 's' || key === 'S') dy = 1;
-        else if (key === 'ArrowLeft' || key === 'a' || key === 'A') dx = -1;
-        else if (key === 'ArrowRight' || key === 'd' || key === 'D') dx = 1;
+        if (key === 'ArrowUp') dy = -1;
+        else if (key === 'ArrowDown') dy = 1;
+        else if (key === 'ArrowLeft') dx = -1;
+        else if (key === 'ArrowRight') dx = 1;
         else if (key === 'Enter') { 
             gfx.executeCursor(); 
             if (e) e.preventDefault(); 

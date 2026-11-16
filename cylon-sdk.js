@@ -30,6 +30,34 @@ window.hpop = function() {
     }
 };
 
+window.setPopForce = function(force) {
+    if (window.parent !== window) {
+        window.parent.postMessage({ type: 'CYLON_POP_FORCE', force: force }, (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
+    } else {
+        window.PopForce = force;
+    }
+};
+
+window.setPopAlign = function(align) {
+    if (window.parent !== window) {
+        window.parent.postMessage({ type: 'CYLON_POP_ALIGN', align: align }, (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
+    } else {
+        window.PopAlign = align;
+    }
+};
+
+window.popWeb = function(url) {
+    if (window.parent !== window) {
+        window.parent.postMessage({ type: 'CYLON_POP_WEB', url: url }, (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
+    }
+};
+
+window.hpopWeb = function() {
+    if (window.parent !== window) {
+        window.parent.postMessage({ type: 'CYLON_POP_WEB_HIDE' }, (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
+    }
+};
+
 // 3. Hardware / System Utilities
 window.dosExit = function() {
     if (window.parent && typeof window.parent.showTerminal === 'function') {
@@ -434,7 +462,7 @@ window.CylonSDK.showAppPopup = function(item) {
         if (window.parent.PopAlign !== undefined) window.parent.PopAlign = "click";
         if (item.zLocation) {
             let zBase = (window.parent.CylonGFX && window.parent.CylonGFX.gfxZBase) ? window.parent.CylonGFX.gfxZBase : 10;
-            window.parent.lastClickedZ = parseInt(item.zLocation, zBase); 
+            window.parent.lastClickZ = window.parent.lastClickedZ = parseInt(item.zLocation, zBase); 
         }
         window.parent.popHtm(html);
     } else if (typeof popHtm === 'function') {

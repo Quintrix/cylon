@@ -61,3 +61,25 @@ File Structure for .gfx Files (desktop.gfx, capflag.gfx, queville.gfx):
         
   /p/ — players, players are assigned a unique file ID in this directory and the file 
         contents contains the map sector the player is currently on
+
+
+
+
+### How apps & scripts will use it afterward
+- **From JS apps/games (via `cylon-sdk.js`):**
+  ```javascript
+  setPopForce('visible');
+  setPopAlign('center');
+  pop('<div>Choose your avatar...</div>');
+  // Later, once chosen:
+  setPopForce('hidden');
+  hpop();
+  ```
+- **From `CylonScript`, desktop files, or terminal:**
+  ```text
+  pop force visible
+  pop center <div>Choose your avatar...</div>
+  ...
+  pop force hidden
+  pop hide
+  ```

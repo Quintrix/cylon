@@ -9,7 +9,7 @@
 <style>
    body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; color: #0f0; font-family: monospace; overflow: hidden; user-select: none; }
    #desktop-wrapper { position: relative; width: 100%; height: calc(100% - 60px); overflow: hidden; }
-   
+
    /* Action-RPG Style Inventory HUD */
    #inventory-bar { position: absolute; bottom: 0; width: 100%; height: 60px; border-top: 2px solid #333; background: #111; display: flex; align-items: center; padding: 0 10px; box-sizing: border-box; }
    .inv-item { cursor: pointer; margin-right: 10px; transition: transform 0.1s; }
@@ -17,11 +17,11 @@
    .progress-container { flex: 1; height: 10px; background: #500; margin: 0 15px; border: 1px solid #333; }
    .progress-bar { height: 100%; background: #0f0; transition: width 0.2s; }
    .stat-block { display: flex; flex-direction: column; font-size: 12px; margin-right: 10px; color: #aaa; }
-   
+
    #bg-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; image-rendering: pixelated; }
    #tiles-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 5; }
    #icons-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; }
-   
+
    .icon-wrap { position: absolute; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; transition: background-color 0.1s; }
    .icon-wrap:hover { background-color: rgba(255, 255, 255, 0.1); z-index: 20; }
    .icon-img { max-width: 60%; max-height: 55%; object-fit: contain; image-rendering: pixelated; filter: drop-shadow(2px 2px 2px rgba(0,0,0,0.8)); }
@@ -35,481 +35,566 @@
   <div id="icons-layer"></div>
 </div>
 <div id="inventory-bar"></div>
- 
+
 <script>
 // ============================================================================
-// CAPTURE THE FLAG CLIENT ENGINE
+// CAPTURE THE FLAG CLIENT ENGINE (Ping/Pong Client Layer)
 // ============================================================================
 window.onload = async function() {
-   if (window.CylonSDK && window.CylonSDK.injectDesktopStyles) {
-       window.CylonSDK.applyColors(window.parent.CylonColors);
-   }
- 
-   // Initial Engine State
-   window.gfxDo = "ST";
-   window.playerItem = "Za";
-   window.playerInven = "";
-   window.wRegisters = {};
-   window.wzValue = 0;
- 
-   // Route CylonGFX cursor movements through the UNIVAC punch code pipeline
-   window.CylonGFX.setCursorZ = function(newZ) {
-       window.playerZ = newZ;
-       this.renderCursor();
-   };
-   
-   window.gfxCollisionHook = function(z, item) {
-       let tile = document.getElementById(`gfx-tile-${z}`);
-       if (tile) {
-           let src = tile.src;
-           let codeMatch = src.match(/\/([a-zA-Z0-9]{2})\.png$/);
-           if (codeMatch) {
-               let code = codeMatch[1];
-               let t = code.charAt(0);
-               if (t >= 'A' && t <= 'K') return true;
-               
-               let inv = window.playerInven || "";
-               let has = (itm) => inv.indexOf(itm) !== -1;
-               let master = has('Aa');
-               switch (t) {
-                   case 'M': return master || has('Ae');
-                   case 'R': return master || has('Ab');
-                   case 'S': return master || has('Ad') || has('Ae');
-                   case 'T': return master || has('Ac');
-                   default: return false;
-               }
-           }
-       }
-       return true;
-   };
- 
-   // Client-side execution of server punch codes!
-   window.serverdown = function(sPlugs) {
-       let sCol = 0;
-       while (sCol < sPlugs.length) {
-           let verb = sPlugs.substring(sCol, sCol + 2); sCol += 2;
-           if (verb === "Va") {
-               window.capflagAvatar("");
-           } else if (verb === "Vr") {
-               sCol += 4; // visual removal natively handled by DOM sync
-           } else if (verb === "Vi") {
-               let nextDash = sPlugs.indexOf("--", sCol);
-               if (nextDash < 0) {
-                   window.playerInven = sPlugs.substring(sCol);
-                   sCol = sPlugs.length;
-               } else {
-                   window.playerInven = sPlugs.substring(sCol, nextDash);
-                   sCol = nextDash + 2;
-               }
-               window.renderInventory();
-           }
-       }
-   };
- 
-   // UI Avatar Pop
-   window.capflagAvatar = function(avatar) {
-       let hat = ""; let body = ""; let fbody = "";
-       
-       if (window.playerItem === "Sa") { body = "D3"; fbody = "H3"; hat = "J0"; }
-       if (window.playerItem === "Sb") { body = "D0"; fbody = "H0"; hat = "J1"; }
-       if (window.playerItem === "Sc") { body = "D1"; fbody = "H1"; hat = "J2"; }
-       if (window.playerItem === "Sd") { body = "D2"; fbody = "H2"; hat = "J3"; }
-       
-       // Fallback for safety
-       if (!body) { body = "D0"; fbody = "H0"; hat = "J1"; }
- 
-       if (body && hat) {
-           let PUP = `<div style="text-align:center; padding:10px;">
-               <div style="margin-bottom:10px; font-weight:bold;">Select Face:</div>
-               <a href="gfx:VA${avatar}B0${body}${hat}--"><img src="c/B0.png" width=32 height=32 style="image-rendering:pixelated"></a> &nbsp;
-               <a href="gfx:VA${avatar}B1${body}${hat}--"><img src="c/B1.png" width=32 height=32 style="image-rendering:pixelated"></a> &nbsp;
-               <a href="gfx:VA${avatar}B2${body}${hat}--"><img src="c/B2.png" width=32 height=32 style="image-rendering:pixelated"></a><br>
-               <a href="gfx:VA${avatar}B3${body}${hat}--"><img src="c/B3.png" width=32 height=32 style="image-rendering:pixelated"></a> &nbsp;
-               <a href="gfx:VA${avatar}B4${body}${hat}--"><img src="c/B4.png" width=32 height=32 style="image-rendering:pixelated"></a> &nbsp;
-               <a href="gfx:VA${avatar}B5${body}${hat}--"><img src="c/B5.png" width=32 height=32 style="image-rendering:pixelated"></a>
-               <div style="margin:10px 0; font-weight:bold;">Female:</div>
-               <a href="gfx:VA${avatar}F0${fbody}${hat}--"><img src="c/F0.png" width=32 height=32 style="image-rendering:pixelated"></a> &nbsp;
-               <a href="gfx:VA${avatar}F1${fbody}${hat}--"><img src="c/F1.png" width=32 height=32 style="image-rendering:pixelated"></a> &nbsp;
-               <a href="gfx:VA${avatar}F2${fbody}${hat}--"><img src="c/F2.png" width=32 height=32 style="image-rendering:pixelated"></a><br>
-               <a href="gfx:VA${avatar}F3${fbody}${hat}--"><img src="c/F3.png" width=32 height=32 style="image-rendering:pixelated"></a> &nbsp;
-               <a href="gfx:VA${avatar}F4${fbody}${hat}--"><img src="c/F4.png" width=32 height=32 style="image-rendering:pixelated"></a> &nbsp;
-               <a href="gfx:VA${avatar}F5${fbody}${hat}--"><img src="c/F5.png" width=32 height=32 style="image-rendering:pixelated"></a>
-           </div>`;
-           if (window.parent && window.parent.popHtm) window.parent.popHtm(PUP, 'center');
-           else if (window.popHtm) window.popHtm(PUP, 'center');
-       } else {
-           let PUP = `<div style="text-align:center; padding:15px; width:220px; font-family:var(--font-face, monospace);">
-               <h3 style="margin-top:0; color:var(--text-fg2, #ff0);">Capture the Flag</h3>
-               <p style="font-size:13px; color:var(--menu-fg, #aaa);">Click a team hat on the map to join!</p>
-           </div>`;
-           if (window.parent && window.parent.popHtm) window.parent.popHtm(PUP, 'center');
-           else if (window.popHtm) window.popHtm(PUP, 'center');
-       }
-   };
- 
-   window.renderInventory = function() {
-       let items = window.playerInven;
-       let hud = document.getElementById('inventory-bar');
-       if (!hud) return;
-       
-       let html = ''; let col = 0;
-       window.wRegisters = {}; window.wzValue = 0;
- 
-       while (col < items.length) {
-           let verb = items.substring(col, col + 2); col += 2;
-           if (verb < "Pa") {
-               html += `<div class="inv-item" onclick="handleInvClick('${verb}')"><img src="i/${verb}.png" width="32" height="32" title="${verb}"></div>`;
-           } else {
-               let valStr = items.substring(col, col + 2); col += 2;
-               if (verb === "Wz") window.wzValue = parseInt(valStr, 10) || 0;
-               if (verb.charAt(0) === "W") window.wRegisters[verb] = valStr;
-           }
-       }
-       
-       let greenW = Math.max(0, Math.min(100, window.wzValue));
-       html += `<div class="progress-container"><div class="progress-bar" style="width:${greenW}%;"></div></div>`;
-       html += `<div class="stat-block">`;
-       for(let reg in window.wRegisters) {
-           if (reg !== "Wz") html += `<div>${reg}: ${window.wRegisters[reg]}</div>`;
-       }
-       html += `</div>`;
-       hud.innerHTML = html;
-   };
- 
-   window.handleInvClick = function(item) {
-       let desc = typeof window.gfxItemID === 'function' ? window.gfxItemID(item) : item;
-       let PUP = `<div align="center" style="padding:10px;">
-           <strong>${desc}</strong><br><br>
-           <img src="i/${item}.png" height="32" width="32" style="image-rendering:pixelated;"><br><br>
-           <a href="gfx:Vd${item}" style="display:inline-block; margin-right:10px; padding:6px 12px; background:var(--sel-bg, #333); color:var(--sel-fg, #0f0); text-decoration:none; border-radius:3px; font-weight:bold;">Drop</a>
-           <a href="#" onclick="if(window.parent && window.parent.hpop) window.parent.hpop(); else if (window.hpop) window.hpop(); return false;" style="display:inline-block; padding:6px 12px; background:#111; color:#aaa; border:1px solid #333; text-decoration:none; border-radius:3px; font-weight:bold;">Back</a>
-       </div>`;
-       if (window.parent && window.parent.popHtm) window.parent.popHtm(PUP, 'center');
-       else if (window.popHtm) window.popHtm(PUP, 'center');
-   };
- 
-   window.addEventListener('message', async (e) => {
-       if (e.data.type === 'gfx') {
-           let cmd = e.data.cmd;
-           if (cmd.startsWith("SD")) { cmd = cmd.substring(2); }
-           if (window.gfxDo === "RF") window.gfxDo = "";
-           window.gfxDo += cmd;
-           if (window.parent && window.parent.hpop) window.parent.hpop();
-           else if (window.hpop) window.hpop();
-       }
-   });
- 
-   // ========================================================================
-   // STARTUP UI BOOTLOADER
-   // ========================================================================
-   
-   let ts = 5000;
-   let checkInit = () => {
-       if (!window.parent || !window.parent.CylonDOS || !window.CylonGFX) {
-           ts -= 200;
-           if (ts > 0) setTimeout(checkInit, 200);
-           return;
-       }
-       startup();
-   };
- 
-   let startup = async () => {
-       window.PopAlign = "center";
-       
-       let jdos = window.parent && window.parent.CylonDOS ? window.parent.CylonDOS : window.CylonDOS;
-       let hostOrigin = 'https://qandy.onrender.com';
-       
-       // 1. Fetch OS Host Origin for Asset Loading
-       try {
-           if (jdos) {
-               let savedOrigin = await jdos.load('cylon:/a/cylonHostOrigin');
-               if (savedOrigin) hostOrigin = savedOrigin.trim();
-           }
-       } catch(err) {
-           console.warn('Could not read cylon:/a/cylonHostOrigin, using fallback.');
-       }
-       
-       let baseUrl = hostOrigin.endsWith('/') ? hostOrigin.slice(0, -1) : hostOrigin;
-       
-       // 2. Select the correct backend GFX Server
-       let isLocal = window.location.origin.includes('localhost') || window.location.origin.includes('127.0.0.1') || baseUrl.includes('localhost');
-       let url = isLocal ? 'http://localhost:8080/qandyland.js' : 'https://qandy.onrender.com/qandyland.js';
-       let world = 'capflag';
- 
-       let PUP = `<div>Connecting...</div>`;
-       if (window.parent && window.parent.popHtm) window.parent.popHtm(PUP, 'center');
-       else if (window.popHtm) window.popHtm(PUP, 'center');
- 
-       // Mount the filesystem into the OS RAM so the engine can pull the tile graphics natively
-       await CylonCommand(`mount ${baseUrl}/cylon-${world}.gfx ram ${world}`);
-       
-       // Directly connect our App's local engine rather than backgrounding it to the OS Terminal
-       window.remoteQandylandUrl = url;
-       window.desktopDrive = world;
-       window.cylonGfxSession = null;
-       window.gfxDo = "ST";
- 
-       // Locate designated starting sector map bounds
-       let startSector = 'Aa';
-       try {
-           let loaded = await window.parent.CylonDOS.load(`${world}:/a/gfxSector`);
-           if (loaded && loaded.trim().length === 2) startSector = loaded.trim();
-       } catch(e) {}
- 
-       await window.CylonGFX.init(`${world}:/w/${startSector}`);
-       
-       window.CylonGFX.gfxTickRate = 1000;
-       window.CylonGFX.startNetworkTick();
-       
-       if (window.parent && window.parent.hpop) window.parent.hpop();
-       else if (window.hpop) window.hpop();
-   };
- 
-   setTimeout(checkInit, 400);
- 
-   window.addEventListener('resize', fitDesktopToScreen);
-   if (window.ResizeObserver) {
-       new ResizeObserver(fitDesktopToScreen).observe(document.body);
-   }
- 
-   // Buffer keyboard commands directly to the server while triggering a fast visual predictor
-   window.CylonGFX.moveCursor = function(dx, dy) {
-       let cmd = null;
-       if (dy < 0) cmd = 'Vn';
-       else if (dy > 0) cmd = 'Vs';
-       else if (dx < 0) cmd = 'Vw';
-       else if (dx > 0) cmd = 'Ve';
-       
-       if (cmd) {
-           if (window.gfxDo === "RF") window.gfxDo = "";
-           window.gfxDo += cmd; // <-- Pings Server cleanly on next network tick
- 
-           // Local Visual Predictor Routine
-           let x = window.playerZ % this.gridWide;
-           let y = Math.floor(window.playerZ / this.gridWide);
-           let nx = x + dx;
-           let ny = y + dy;
- 
-           if (nx >= 0 && nx < this.gridWide && ny >= 0 && ny < this.gridTall) {
-               let targetZ = ny * this.gridWide + nx;
-               let moveBlocked = false;
-               
-               if (typeof window.gfxCollisionHook === 'function') {
-                   moveBlocked = !window.gfxCollisionHook(targetZ, window.playerItem);
-               }
- 
-               if (!moveBlocked) {
-                   this.setCursorZ(targetZ);
-               } else {
-                   this.targetCursorZ = -1;
-                   this.pendingCursorAction = null;
-               }
-           } else {
-               // If it hits an edge scroll bound, we visually stop and let the server handle it
-               this.targetCursorZ = -1;
-               this.pendingCursorAction = null;
-           }
-       }
-   };
- 
-   // Buffer keyboard commands seamlessly into the new moveCursor predictor
-   window.keydown = function(key, e) {
-       if (!window.CylonGFX) return;
-       window.CylonGFX.targetCursorZ = -1;
-       window.CylonGFX.pendingCursorAction = null;
- 
-       let handled = false;
-       let dx = 0, dy = 0;
-       
-       if (key === 'ArrowUp' || key === 'w' || key === 'W')    { dy = -1; handled = true; }
-       else if (key === 'ArrowDown' || key === 's' || key === 'S')  { dy = 1; handled = true; }
-       else if (key === 'ArrowLeft' || key === 'a' || key === 'A')  { dx = -1; handled = true; }
-       else if (key === 'ArrowRight' || key === 'd' || key === 'D') { dx = 1; handled = true; }
-       
-       if (handled) {
-           window.CylonGFX.moveCursor(dx, dy);
-           if (e) e.preventDefault();
-       }
-   };
- 
-   // Inject Action-RPG Context Controller aligned natively to UNIVAC IDs and ODs
-   window.CylonGFX.showTargetMenu = function(z, clientX, clientY) {
-       let items = [];
-       let iconWraps = document.querySelectorAll(`.icon-wrap[data-z="${z}"]`);
- 
-       iconWraps.forEach(wrap => {
-           let path = wrap.getAttribute('data-path');
-           if (!path) return;
- 
-           let basename = path.split('/').pop();
-           let fullCode = basename.replace(/\.png$/i, ''); // Pluck exact item + UID + Z
-           
-           let itemId = basename.substring(0, 2);
-           let pubId = basename.length >= 8 ? basename.substring(4, 8) : "";
-           let zHex = basename.substring(2, 4);
-           let labelText = wrap.getAttribute('data-label') || itemId;
- 
-           // Anything length 6 that doesn't start with V or X is generally a static object
-           let isOd = (basename.length === 6 && itemId.charAt(0) !== 'V' && itemId.charAt(0) !== 'X');
-           let isGhostPlayer = !window.playerItem || window.playerItem === "Za" || window.playerItem === "";
- 
-           // Pass execution to window.itemdown / window.objdown routers ensuring pathfinding happens BEFORE server queuing
-           if (itemId >= 'Sa' && itemId <= 'Sd') {
-               if (isGhostPlayer) {
-                   items.push({
-                       label: `${labelText}`,
-                       action: () => window.objdown(fullCode)
-                   });
-               } else if (itemId === window.playerItem && (pubId === window.playerId || !window.playerId)) {
-                   items.push({
-                       label: `Inventory`,
-                       action: () => window.objdown(fullCode)
-                   });
-               } else if (pubId) {
-                   items.push({
-                       label: `Tag ${labelText}`,
-                       action: () => window.objdown(fullCode)
-                   });
-               }
-           } else if (itemId === 'Xt') {
-               items.push({
-                   label: `Tag Marker`,
-                   action: () => window.objdown(fullCode)
-               });
-           } else if (itemId.charAt(0) !== 'V' && itemId.charAt(0) !== 'X') {
-               items.push({
-                   label: `${labelText}`,
-                   action: () => {
-                       if (isOd) window.objdown(fullCode);
-                       else window.itemdown(fullCode);
-                   }
-               });
-           }
-       });
- 
-       let x = z % this.gridWide;
-       let y = Math.floor(z / this.gridWide);
-       let parts = this.currentPath.split('/');
-       let currentSector = parts[parts.length - 1];
- 
-       let addScroll = (dirChar, label, dx, dy) => {
-           let nextSector = this.calculateTargetSector(currentSector, dirChar, this.gfxLowerBound, this.gfxRoundWorld);
-           if (nextSector) {
-               items.push({
-                   label: label,
-                   action: () => this.walkToZ(z, () => this.moveCursor(dx, dy))
-               });
-           }
-       };
- 
-       if (y === 0) addScroll('N', 'Scroll North', 0, -1);
-       if (y === this.gridTall - 1) addScroll('S', 'Scroll South', 0, 1);
-       if (x === this.gridWide - 1) addScroll('E', 'Scroll East', 1, 0);
-       if (x === 0) addScroll('W', 'Scroll West', -1, 0);
- 
-       if (window.playerItem !== "Za" || items.length === 0) {
-           items.push({
-               label: 'Walk Here',
-               action: () => this.walkToZ(z)
-           });
-       }
- 
-       if (items.length > 0) {
-           let mockEvent = { clientX, clientY, view: window };
-           if (window.parent && window.parent.CylonPopManager) {
-               window.parent.CylonPopManager.showContextMenu(mockEvent, items);
-           } else if (window.CylonPopManager) {
-               window.CylonPopManager.showContextMenu(mockEvent, items);
-           }
-       }
-   };
+
+    if (window.CylonSDK && window.parent && window.parent.CylonColors) {
+        window.CylonSDK.applyColors(window.parent.CylonColors);
+    }
+
+    window.wRegisters = {};
+    window.wzValue = 0;
+
+    function assetDirs() {
+        let iconDir = (window.CylonGFX && window.CylonGFX.gfxIconDir) ? window.CylonGFX.gfxIconDir : 'i/';
+        let charDir = (window.CylonGFX && window.CylonGFX.gfxCharDir) ? window.CylonGFX.gfxCharDir : 'c/';
+        return { iconDir, charDir };
+    }
+
+    function showPop(html, pos) {
+        if (window.parent && window.parent.popHtm) window.parent.popHtm(html, pos || 'center');
+        else if (window.popHtm) window.popHtm(html, pos || 'center');
+    }
+
+    function hidePop() {
+        if (window.parent && window.parent.hpop) window.parent.hpop();
+        else if (window.hpop) window.hpop();
+    }
+
+    // Terrain & collision checks using cached CylonGFX.mapTiles
+    window.isWalkable = function(z) {
+        let gfx = window.CylonGFX;
+        if (!gfx) return false;
+        let total = gfx.gridWide * gfx.gridTall;
+        if (z < 0 || z >= total) return false;
+
+        let tData = gfx.mapTiles && gfx.mapTiles[window.map];
+        if (!tData) return true;
+
+        let code = tData.substring(z * 2, z * 2 + 2);
+        if (!code) return true;
+        let t = code.charAt(0);
+        if (t >= 'A' && t <= 'K') return true;
+
+        let inv = window.playerInven || "";
+        let has = (itm) => inv.indexOf(itm) !== -1;
+        let master = has('Aa');
+        switch (t) {
+            case 'M': return master || has('Ae');
+            case 'R': return master || has('Ab');
+            case 'S': return master || has('Ad') || has('Ae');
+            case 'T': return master || has('Ac');
+            default:  return false;
+        }
+    };
+
+    window.gfxCollisionHook = function(z) {
+        return window.isWalkable(z);
+    };
+
+    // 200ms auto-walk pathfinder (called by CylonGFX.cursorTick when playerWalk > -1)
+    window.walkdown = function() {
+        if (window.playerWalk === -1) return;
+        let gfx = window.CylonGFX;
+        let mi = window.movingItems && window.movingItems[window.playerItem];
+        let currentZ = mi ? mi.z : window.playerZ;
+
+        if (currentZ === window.playerWalk) {
+            if (window.playerDo) {
+                if (typeof window.playerDo === 'function') {
+                    window.playerDo();
+                } else if (typeof window.playerDo === 'string') {
+                    if (window.gfxDo === "RF") window.gfxDo = "";
+                    window.gfxDo += window.playerDo;
+                }
+            }
+            window.playerWalk = -1;
+            window.playerDo = "";
+            return;
+        }
+
+        let cols = gfx.gridWide;
+        let cx = currentZ % cols, cy = Math.floor(currentZ / cols);
+        let tx = window.playerWalk % cols, ty = Math.floor(window.playerWalk / cols);
+        let dx = tx - cx, dy = ty - cy;
+
+        let dirX = dx < 0 ? 'Vw' : (dx > 0 ? 'Ve' : null);
+        let dirY = dy < 0 ? 'Vn' : (dy > 0 ? 'Vs' : null);
+
+        let primaryCmd = (Math.abs(dx) > Math.abs(dy)) ? dirX : dirY;
+        let secondaryCmd = (Math.abs(dx) > Math.abs(dy)) ? dirY : dirX;
+
+        let moveCmd = null;
+        let nextZ1 = primaryCmd ? gfx.moveZ(currentZ, primaryCmd) : currentZ;
+        let nextZ2 = secondaryCmd ? gfx.moveZ(currentZ, secondaryCmd) : currentZ;
+
+        if (primaryCmd && nextZ1 !== currentZ && window.isWalkable(nextZ1)) {
+            moveCmd = primaryCmd;
+        } else if (secondaryCmd && nextZ2 !== currentZ && window.isWalkable(nextZ2)) {
+            moveCmd = secondaryCmd;
+        }
+
+        if (moveCmd) {
+            if (window.gfxDo === "RF") window.gfxDo = "";
+            window.gfxDo += moveCmd;
+            if (typeof window.beep === 'function') window.beep(900, 25, 0.01);
+
+            if (!window.movingItems[window.playerItem]) {
+                window.movingItems[window.playerItem] = { z: currentZ, queue: [], avatar: window.playerAvatar };
+            }
+            window.movingItems[window.playerItem].queue.push(moveCmd);
+        } else {
+            window.playerWalk = -1;
+            window.playerDo = "";
+        }
+    };
+
+    // Server S^...^S packet handler
+    window.serverdown = function(sPlugs) {
+        let sCol = 0;
+        while (sCol < sPlugs.length) {
+            let verb = sPlugs.substring(sCol, sCol + 2);
+            sCol += 2;
+
+            if (verb === "Va") {
+                if (sPlugs.substring(sCol, sCol + 2) === "--") sCol += 2;
+                window.capflagAvatar("");
+            } else if (verb === "Vr") {
+                let noun = sPlugs.substring(sCol, sCol + 2); sCol += 2;
+                let zStr = sPlugs.substring(sCol, sCol + 2); sCol += 2;
+                let numericZ = window.CylonGFX.decodeZ(zStr, window.CylonGFX.gfxZBase);
+                let el = document.getElementById(`obj_${noun}_${numericZ}`);
+                if (el) el.remove();
+            } else if (verb === "Vi") {
+                let nextDash = sPlugs.indexOf("--", sCol);
+                if (nextDash < 0) {
+                    window.playerInven = sPlugs.substring(sCol);
+                    sCol = sPlugs.length;
+                } else {
+                    window.playerInven = sPlugs.substring(sCol, nextDash);
+                    sCol = nextDash + 2;
+                }
+                window.renderInventory();
+            }
+        }
+    };
+
+    // Avatar Picker Popup
+    window.capflagAvatar = function(avatar) {
+        let { charDir } = assetDirs();
+        let hat = "", body = "", fbody = "";
+
+        if (window.playerItem === "Sa") { body = "D3"; fbody = "H3"; hat = "J0"; }
+        if (window.playerItem === "Sb") { body = "D0"; fbody = "H0"; hat = "J1"; }
+        if (window.playerItem === "Sc") { body = "D1"; fbody = "H1"; hat = "J2"; }
+        if (window.playerItem === "Sd") { body = "D2"; fbody = "H2"; hat = "J3"; }
+
+        if (body && hat) {
+            let PUP = `<div style="text-align:center; padding:10px;">
+                <div style="margin-bottom:10px; font-weight:bold;">Select Face:</div>
+                <a href="gfx:VA${avatar}B0${body}${hat}--"><img src="${charDir}B0.png" width=32 height=32 style="image-rendering:pixelated"></a> &nbsp;
+                <a href="gfx:VA${avatar}B1${body}${hat}--"><img src="${charDir}B1.png" width=32 height=32 style="image-rendering:pixelated"></a> &nbsp;
+                <a href="gfx:VA${avatar}B2${body}${hat}--"><img src="${charDir}B2.png" width=32 height=32 style="image-rendering:pixelated"></a><br>
+                <a href="gfx:VA${avatar}B3${body}${hat}--"><img src="${charDir}B3.png" width=32 height=32 style="image-rendering:pixelated"></a> &nbsp;
+                <a href="gfx:VA${avatar}B4${body}${hat}--"><img src="${charDir}B4.png" width=32 height=32 style="image-rendering:pixelated"></a> &nbsp;
+                <a href="gfx:VA${avatar}B5${body}${hat}--"><img src="${charDir}B5.png" width=32 height=32 style="image-rendering:pixelated"></a>
+                <div style="margin:10px 0; font-weight:bold;">Female:</div>
+                <a href="gfx:VA${avatar}F0${fbody}${hat}--"><img src="${charDir}F0.png" width=32 height=32 style="image-rendering:pixelated"></a> &nbsp;
+                <a href="gfx:VA${avatar}F1${fbody}${hat}--"><img src="${charDir}F1.png" width=32 height=32 style="image-rendering:pixelated"></a> &nbsp;
+                <a href="gfx:VA${avatar}F2${fbody}${hat}--"><img src="${charDir}F2.png" width=32 height=32 style="image-rendering:pixelated"></a><br>
+                <a href="gfx:VA${avatar}F3${fbody}${hat}--"><img src="${charDir}F3.png" width=32 height=32 style="image-rendering:pixelated"></a> &nbsp;
+                <a href="gfx:VA${avatar}F4${fbody}${hat}--"><img src="${charDir}F4.png" width=32 height=32 style="image-rendering:pixelated"></a> &nbsp;
+                <a href="gfx:VA${avatar}F5${fbody}${hat}--"><img src="${charDir}F5.png" width=32 height=32 style="image-rendering:pixelated"></a>
+            </div>`;
+            showPop(PUP, 'center');
+        } else {
+            let PUP = `<div style="text-align:center; padding:15px; width:220px; font-family:var(--font-face, monospace);">
+                <h3 style="margin-top:0; color:var(--text-fg2, #ff0);">Capture the Flag</h3>
+                <p style="font-size:13px; color:var(--menu-fg, #aaa);">Click a team hat on the map to join!</p>
+            </div>`;
+            showPop(PUP, 'center');
+        }
+    };
+
+    // Bottom HUD Inventory Renderer
+    window.renderInventory = function() {
+        let items = window.playerInven || "";
+        let hud = document.getElementById('inventory-bar');
+        if (!hud) return;
+
+        let { iconDir } = assetDirs();
+        let html = '';
+        let col = 0;
+        window.wRegisters = {};
+        window.wzValue = 0;
+
+        while (col < items.length) {
+            let verb = items.substring(col, col + 2);
+            col += 2;
+            if (verb < "Pa") {
+                let title = typeof window.gfxItemID === 'function' ? window.gfxItemID(verb) : verb;
+                html += `<div class="inv-item" onclick="handleInvClick('${verb}')"><img src="${iconDir}${verb}.png" width="32" height="32" title="${title}" style="image-rendering:pixelated;"></div>`;
+            } else {
+                let valStr = items.substring(col, col + 2);
+                col += 2;
+                if (verb === "Wz") window.wzValue = parseInt(valStr, 10) || 0;
+                if (verb.charAt(0) === "W") window.wRegisters[verb] = valStr;
+            }
+        }
+
+        let greenW = Math.max(0, Math.min(100, window.wzValue));
+        html += `<div class="progress-container"><div class="progress-bar" style="width:${greenW}%;"></div></div>`;
+        html += `<div class="stat-block">`;
+        for (let reg of Object.keys(window.wRegisters).sort()) {
+            if (reg !== "Wz") html += `<div>${reg}: ${window.wRegisters[reg]}</div>`;
+        }
+        html += `</div>`;
+        hud.innerHTML = html;
+    };
+
+    window.handleInvClick = function(item) {
+        let { iconDir } = assetDirs();
+        let desc = typeof window.gfxItemID === 'function' ? window.gfxItemID(item) : item;
+        let PUP = `<div align="center" style="padding:10px;">
+            <strong>${desc}</strong><br><br>
+            <img src="${iconDir}${item}.png" height="32" width="32" style="image-rendering:pixelated;"><br><br>
+            <a href="gfx:SDVd${item}" style="display:inline-block; margin-right:10px; padding:6px 12px; background:var(--sel-bg, #333); color:var(--sel-fg, #0f0); text-decoration:none; border-radius:3px; font-weight:bold;">Drop</a>
+            <a href="#" onclick="if(window.parent && window.parent.hpop) window.parent.hpop(); else if (window.hpop) window.hpop(); return false;" style="display:inline-block; padding:6px 12px; background:#111; color:#aaa; border:1px solid #333; text-decoration:none; border-radius:3px; font-weight:bold;">Back</a>
+        </div>`;
+        showPop(PUP, 'center');
+    };
+
+    // Route popup <a href="gfx:..."> clicks straight into window.gfxDo
+    window.addEventListener('message', (e) => {
+        if (window.location.origin !== "null" && e.origin !== window.location.origin) return;
+        if (e.data && e.data.type === 'gfx') {
+            let cmd = String(e.data.cmd || '');
+            if (cmd.startsWith("SD")) cmd = cmd.substring(2);
+            if (window.gfxDo === "RF") window.gfxDo = "";
+            window.gfxDo += cmd;
+            hidePop();
+        }
+    });
+
+    // Keyboard Controls (matches capflag.js buffering + Look mode)
+    window.keydown = function(key, e) {
+        let gfx = window.CylonGFX;
+        if (!gfx) return;
+
+        let keyStr = (typeof e === 'object' && e && e.key) ? e.key : key;
+
+        if (keyStr === 'Escape' || key === 27) {
+            hidePop();
+            if (gfx.isLooking) {
+                gfx.isLooking = false;
+                if (gfx.lookCanvas) gfx.lookCanvas.style.display = 'none';
+                window.gfxDo = "RF";
+            }
+            return;
+        }
+
+        if (keyStr === 'Enter' || keyStr === ' ') {
+            gfx.executeCursor();
+            if (e) e.preventDefault();
+            return;
+        }
+
+        if (window.playerItem === "Za" || !window.playerItem) return;
+
+        if (keyStr === 'l' || keyStr === 'L') {
+            if (window.gfxDo === "RF") window.gfxDo = "";
+            window.gfxDo += "Vl";
+            return;
+        }
+
+        // Block move buffering if a non-move action is queued
+        if (window.gfxDo && window.gfxDo !== "RF") {
+            for (let i = 0; i < window.gfxDo.length; i += 2) {
+                let chk = window.gfxDo.slice(i, i + 2);
+                if (!['Vn', 'Vs', 'Ve', 'Vw'].includes(chk)) return;
+            }
+        }
+
+        // Cancel auto-walk when manual direction keys are pressed
+        window.playerWalk = -1;
+        window.playerDo = "";
+
+        // Simulate future Z across queued moves to prevent double-scrolling or walking into walls
+        let testZ = (window.movingItems[window.playerItem] && window.movingItems[window.playerItem].z !== undefined)
+            ? window.movingItems[window.playerItem].z
+            : window.playerZ;
+
+        if (window.movingItems[window.playerItem]) {
+            let q = window.movingItems[window.playerItem].queue || [];
+            for (let qMove of q) {
+                let qCol = testZ % gfx.gridWide;
+                let qRow = Math.floor(testZ / gfx.gridWide);
+                if ((qMove === 'Vn' && qRow === 0) ||
+                    (qMove === 'Vs' && qRow === gfx.gridTall - 1) ||
+                    (qMove === 'Vw' && qCol === 0) ||
+                    (qMove === 'Ve' && qCol === gfx.gridWide - 1)) {
+                    return;
+                }
+                testZ = gfx.moveZ(testZ, qMove);
+            }
+        }
+
+        let todo = null;
+        if (keyStr === 'ArrowUp' || keyStr === 'w' || keyStr === 'W') todo = 'Vn';
+        else if (keyStr === 'ArrowDown' || keyStr === 's' || keyStr === 'S') todo = 'Vs';
+        else if (keyStr === 'ArrowLeft' || keyStr === 'a' || keyStr === 'A') todo = 'Vw';
+        else if (keyStr === 'ArrowRight' || keyStr === 'd' || keyStr === 'D') todo = 'Ve';
+
+        if (todo) {
+            let targetZ = gfx.moveZ(testZ, todo);
+            if (targetZ !== testZ && !window.isWalkable(targetZ)) {
+                return;
+            }
+
+            if (window.gfxDo === "RF") window.gfxDo = "";
+            window.gfxDo += todo;
+
+            if (!window.movingItems[window.playerItem]) {
+                window.movingItems[window.playerItem] = { z: window.playerZ, queue: [], avatar: window.playerAvatar };
+            }
+            window.movingItems[window.playerItem].queue.push(todo);
+
+            if (e) e.preventDefault();
+        }
+    };
+
+    // Context Menu for Tile / Object / Player Interactions
+    window.CylonGFX.showTargetMenu = function(z, clientX, clientY) {
+        let items = [];
+        let iconWraps = document.querySelectorAll(`.icon-wrap[data-z="${z}"]`);
+
+        iconWraps.forEach(wrap => {
+            let path = wrap.getAttribute('data-path') || '';
+            let basename = wrap.getAttribute('data-code') || path.split('/').pop();
+            if (!basename) return;
+
+            let fullCode = basename.replace(/\.png$/i, '');
+            let itemId = fullCode.substring(0, 2);
+            let pubId = fullCode.length >= 8 ? fullCode.substring(4, 8) : "";
+            let isStaticObj = wrap.classList.contains('static-obj') || (fullCode.length === 6 && itemId.charAt(0) !== 'V' && itemId.charAt(0) !== 'X');
+            let labelText = wrap.getAttribute('data-label') || itemId;
+
+            if (itemId.charAt(0) === 'V' || itemId.charAt(0) === 'X') {
+                if (itemId === 'Xt') {
+                    items.push({ label: `Tag Marker`, action: () => window.objdown(fullCode) });
+                }
+                return;
+            }
+
+            if (isStaticObj) {
+                items.push({
+                    label: labelText,
+                    action: () => window.objdown(fullCode)
+                });
+            } else if (itemId >= 'Sa' && itemId <= 'Sd' && pubId) {
+                if (itemId === window.playerItem && pubId === window.playerId) {
+                    items.push({ label: `Inventory`, action: () => window.objdown(fullCode) });
+                } else if (window.playerItem && window.playerItem !== "Za") {
+                    items.push({ label: `Tag ${labelText}`, action: () => window.objdown(fullCode) });
+                }
+            } else {
+                items.push({
+                    label: labelText,
+                    action: () => window.itemdown(fullCode)
+                });
+            }
+        });
+
+        let x = z % this.gridWide;
+        let y = Math.floor(z / this.gridWide);
+        let parts = this.currentPath.split('/');
+        let currentSector = parts[parts.length - 1];
+
+        let addScroll = (dirChar, label, dx, dy) => {
+            let nextSector = this.calculateTargetSector(currentSector, dirChar, this.gfxLowerBound, this.gfxRoundWorld);
+            if (nextSector) {
+                items.push({
+                    label: label,
+                    action: () => this.walkToZ(z, () => this.moveCursor(dx, dy))
+                });
+            }
+        };
+
+        if (y === 0) addScroll('N', 'Scroll North', 0, -1);
+        if (y === this.gridTall - 1) addScroll('S', 'Scroll South', 0, 1);
+        if (x === this.gridWide - 1) addScroll('E', 'Scroll East', 1, 0);
+        if (x === 0) addScroll('W', 'Scroll West', -1, 0);
+
+        if (window.playerItem && window.playerItem !== "Za") {
+            items.push({
+                label: 'Walk Here',
+                action: () => this.walkToZ(z)
+            });
+        }
+
+        if (items.length === 1 && items[0].label === 'Walk Here') {
+            items[0].action();
+            return;
+        }
+
+        if (items.length > 0) {
+            let mockEvent = { clientX, clientY, view: window };
+            if (window.parent && window.parent.CylonPopManager) {
+                window.parent.CylonPopManager.showContextMenu(mockEvent, items);
+            } else if (window.CylonPopManager) {
+                window.CylonPopManager.showContextMenu(mockEvent, items);
+            }
+        }
+    };
+
+    // ========================================================================
+    // STARTUP UI BOOTLOADER
+    // ========================================================================
+    let ts = 5000;
+    let checkInit = () => {
+        if (!window.parent || !window.parent.CylonDOS || !window.CylonGFX) {
+            ts -= 200;
+            if (ts > 0) setTimeout(checkInit, 200);
+            return;
+        }
+        startup();
+    };
+
+    let startup = async () => {
+        window.PopAlign = "center";
+
+        let jdos = window.parent && window.parent.CylonDOS ? window.parent.CylonDOS : window.CylonDOS;
+        let hostOrigin = 'https://qandy.onrender.com';
+
+        try {
+            if (jdos) {
+                let savedOrigin = await jdos.load('cylon:/a/cylonHostOrigin');
+                if (savedOrigin) hostOrigin = savedOrigin.trim();
+            }
+        } catch (err) {}
+
+        let baseUrl = hostOrigin.endsWith('/') ? hostOrigin.slice(0, -1) : hostOrigin;
+        let isLocal = window.location.origin.includes('localhost') || window.location.origin.includes('127.0.0.1') || baseUrl.includes('localhost');
+        let url = isLocal ? 'http://localhost:8080/qandyland.js' : `${baseUrl}/qandyland.js`;
+        let world = 'capflag';
+
+        showPop(`<div>Connecting...</div>`, 'center');
+
+        // Mount cylon-capflag.gfx into local OS RAM once so CylonGFX can read tilemaps & static objects
+        await CylonCommand(`mount ${baseUrl}/cylon-${world}.gfx ram ${world}`);
+
+        let startSector = 'Fb';
+        try {
+            let loaded = await jdos.load(`${world}:/a/gfxSector`) || await jdos.load(`${world}:/a/gfxSpawn`);
+            if (loaded && loaded.trim().length === 2) startSector = loaded.trim();
+        } catch (e) {}
+
+        window.CylonGFX.gfxTickRate = 1000;
+        await window.CylonGFX.gfxConnect(url, world, `cylon-${world}.gfx`, startSector);
+
+        hidePop();
+        setTimeout(() => {
+            if (window.playerItem === "Za") {
+                showPop(`<div style="text-align:center; padding:12px;">
+                    <strong>Capture the Flag</strong><br><br>
+                    Select a player hat to join a team!
+                </div>`, 'center');
+            }
+        }, 1000);
+    };
+
+    setTimeout(checkInit, 400);
+
+    window.addEventListener('resize', fitDesktopToScreen);
+    if (window.ResizeObserver) {
+        new ResizeObserver(fitDesktopToScreen).observe(document.body);
+    }
 };
- 
+
 // ============================================================================
-// GLOBAL ROUTERS (Pathfinding & Command Queuing logic ported back cleanly)
+// GLOBAL ROUTERS (Object & Item Click Handlers)
 // ============================================================================
- 
+
 window.objdown = function(code) {
-   if (window.parent && window.parent.hpop) window.parent.hpop();
-   else if (window.hpop) window.hpop();
- 
-   let itemid = code.substring(0, 2);
-   let itemzStr = code.substring(2, 4);
-   let base = window.CylonGFX ? window.CylonGFX.gfxZBase : 10;
-   let itemz = window.CylonGFX ? window.CylonGFX.decodeZ(itemzStr, base) : (parseInt(itemzStr, base) || parseInt(itemzStr, 10));
-   let uniqueid = code.length >= 8 ? code.substring(4, 8) : "";
-   
-   let cmd = "OD" + itemid + itemzStr;
-   if (itemid === "Xt") {
-       cmd = "Xt" + (code.length >= 8 ? code.substring(4, 8) : code.substring(4));
-   }
- 
-   if (itemid >= 'Sa' && itemid <= 'Sd') {
-       if (window.playerItem === "Za" || !window.playerItem) {
-           window.CylonGFX.walkToZ(itemz, () => {
-               if (window.gfxDo === "RF") window.gfxDo = "";
-               window.gfxDo += cmd;
-           });
-           return;
-       }
- 
-       if (itemid === window.playerItem && (uniqueid === window.playerId || !window.playerId)) {
-           if (window.gfxDo === "RF") window.gfxDo = "";
-           window.gfxDo += "Vi"; 
-       } else {
-           if (window.gfxDo === "RF") window.gfxDo = "";
-           window.gfxDo += "Xt" + uniqueid; 
-       }
-       return;
-   }
- 
-   window.CylonGFX.walkToZ(itemz, () => {
-       if (window.gfxDo === "RF") window.gfxDo = "";
-       window.gfxDo += cmd;
-   });
+    if (window.parent && window.parent.hpop) window.parent.hpop();
+    else if (window.hpop) window.hpop();
+
+    let gfx = window.CylonGFX;
+    let itemid = code.substring(0, 2);
+    let itemzStr = code.substring(2, 4);
+    let itemz = gfx.decodeZ(itemzStr, gfx.gfxZBase);
+    let uniqueid = code.length >= 8 ? code.substring(4, 8) : "";
+
+    let cmd = (itemid === "Xt")
+        ? ("Xt" + (uniqueid || code.substring(4)))
+        : ("OD" + itemid + itemzStr);
+
+    // Clicking a player sprite (8+ chars)
+    if (itemid >= 'Sa' && itemid <= 'Sd' && uniqueid) {
+        if (itemid === window.playerItem && uniqueid === window.playerId) {
+            if (window.gfxDo === "RF") window.gfxDo = "";
+            window.gfxDo += "Vi";
+        } else {
+            if (window.gfxDo === "RF") window.gfxDo = "";
+            window.gfxDo += "Xt" + uniqueid;
+        }
+        return;
+    }
+
+    // Ghost player clicking a static team hat (6 chars) executes immediately
+    if (window.playerItem === "Za" || !window.playerItem) {
+        if (window.gfxDo === "RF") window.gfxDo = "";
+        window.gfxDo += cmd;
+        return;
+    }
+
+    gfx.walkToZ(itemz, cmd);
 };
- 
+
 window.itemdown = function(code) {
-   if (window.parent && window.parent.hpop) window.parent.hpop();
-   else if (window.hpop) window.hpop();
- 
-   let itemid = code.substring(0, 2);
-   let itemzStr = code.substring(2, 4);
-   let base = window.CylonGFX ? window.CylonGFX.gfxZBase : 10;
-   let itemz = window.CylonGFX ? window.CylonGFX.decodeZ(itemzStr, base) : (parseInt(itemzStr, base) || parseInt(itemzStr, 10));
-   let uniqueid = code.length >= 8 ? code.substring(4, 8) : "";
- 
-   if (itemid === "VA") return;
- 
-   window.CylonGFX.walkToZ(itemz, () => {
-       if (window.gfxDo === "RF") window.gfxDo = "";
-       window.gfxDo += "ID" + itemid + itemzStr;
-   });
+    if (window.parent && window.parent.hpop) window.parent.hpop();
+    else if (window.hpop) window.hpop();
+
+    let gfx = window.CylonGFX;
+    let itemid = code.substring(0, 2);
+    let itemzStr = code.substring(2, 4);
+    let itemz = gfx.decodeZ(itemzStr, gfx.gfxZBase);
+
+    if (itemid === "VA") return;
+
+    gfx.walkToZ(itemz, "ID" + itemid + itemzStr);
 };
- 
+
 function fitDesktopToScreen() {
-  if (!window.CylonGFX) return;
-  const wrapper = document.getElementById('desktop-wrapper');
-  const screenW = window.innerWidth;
-  const screenH = wrapper.clientHeight;
-  const cols = window.CylonGFX.gridWide;
-  const rows = window.CylonGFX.gridTall;
-  if (!cols || !rows || screenW === 0 || screenH === 0) return;
-  let w, h;
-  if (window.CylonGFX.gfxGridStretch) {
-      const aspect = cols / rows;
-      w = screenW;
-      h = screenW / aspect;
-      if (h > screenH) { h = screenH; w = screenH * aspect; }
-      w = Math.floor(w * 0.98); h = Math.floor(h * 0.98);
-  } else {
-      w = cols * window.CylonGFX.gfxTileSize; h = rows * window.CylonGFX.gfxTileSize;
-  }
-  wrapper.style.width = w + 'px';
-  wrapper.style.height = h + 'px';
-  wrapper.style.margin = '0 auto';
+    if (!window.CylonGFX) return;
+    const wrapper = document.getElementById('desktop-wrapper');
+    const screenW = window.innerWidth;
+    const screenH = document.body.clientHeight - 60;
+    const cols = window.CylonGFX.gridWide;
+    const rows = window.CylonGFX.gridTall;
+    if (!cols || !rows || screenW <= 0 || screenH <= 0) return;
+
+    let w, h;
+    if (window.CylonGFX.gfxGridStretch) {
+        const aspect = cols / rows;
+        w = screenW;
+        h = screenW / aspect;
+        if (h > screenH) { h = screenH; w = screenH * aspect; }
+        w = Math.floor(w * 0.98);
+        h = Math.floor(h * 0.98);
+    } else {
+        w = cols * window.CylonGFX.gfxTileSize;
+        h = rows * window.CylonGFX.gfxTileSize;
+    }
+    wrapper.style.width = w + 'px';
+    wrapper.style.height = h + 'px';
+    wrapper.style.margin = '0 auto';
 }
- 
+
 </script>
 </body>
 </html>

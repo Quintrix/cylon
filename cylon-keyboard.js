@@ -268,7 +268,9 @@ function keyboard() {
         var taView = document.getElementById('kb-textarea-view');
         if (!render1 || !render2) return;
 
-        var text = inputBuffer;
+        var text = (window.proxyInputMask && (osMode === 'app-edit' || osMode === 'app-textarea'))
+            ? '*'.repeat(inputBuffer.length)
+            : inputBuffer;
 
         // Render multi-line logic
         if (osMode === 'app-textarea') {
@@ -292,7 +294,6 @@ function keyboard() {
         }
 
         var geom = measureLineGeometry();
-
 
         lastCharW = geom.charW; lastPromptWidth = geom.promptWidth; lastCharsPerLine = geom.charsPerLine;
         if (indent) indent.style.width = geom.promptWidth + 'px';
@@ -331,6 +332,21 @@ function keyboard() {
         cursorPos = Math.max(0, Math.min(inputBuffer.length, lineStart + idx));
         selAnchor = null;
         renderInputLine();
+    }
+
+    function sendProxyInput(type) {
+        if (typeof window.applyProxyInputToTarget === 'function') {
+            window.applyProxyInputToTarget(type, proxyInputId, inputBuffer);
+            return;
+        }
+        var activeFrame = document.querySelector('.page-frame.active');
+        if (activeFrame && activeFrame.contentWindow) {
+            activeFrame.contentWindow.postMessage({
+                type: type,
+                id: proxyInputId,
+                value: inputBuffer
+            }, (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
+        }
     }
 
     window.updateOverlayInput = function() {
@@ -445,7 +461,7 @@ function keyboard() {
         if (!document.body.classList.contains('kb-open')) {
             window.showFullKeyboard();
         }
-        window.focus(); // NEW: Explicitly pull hardware keyboard focus back to the parent OS
+        window.focus(); // Explicitly pull hardware keyboard focus back to the parent OS
     });
     
     function clampCursor(pos) { return Math.max(0, Math.min(inputBuffer.length, pos)); }
@@ -474,17 +490,9 @@ function keyboard() {
         renderInputLine();
         
         if (osMode === 'app-edit' || osMode === 'app-textarea') {
-            var activeFrame = document.querySelector('.page-frame.active');
-            if (activeFrame) {
-                activeFrame.contentWindow.postMessage({
-                    type: 'QANDY_UPDATE_INPUT',
-                    id: proxyInputId,
-                    value: inputBuffer
-                }, (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
-            }
+            sendProxyInput('QANDY_UPDATE_INPUT');
         }
     };
-
 
     window.press = function(e) {
         var shiftHeld = (typeof e.shift !== 'undefined') ? e.shift : !!window.shift;
@@ -556,14 +564,7 @@ function keyboard() {
         } else if (e.id === 'enter') {
             if (osMode === 'app') { window.sendVirtualKey('Enter'); return; }
             if (osMode === 'app-edit') {
-                var activeFrame = document.querySelector('.page-frame.active');
-                if (activeFrame) {
-                    activeFrame.contentWindow.postMessage({
-                        type: 'QANDY_COMMIT_INPUT',
-                        id: proxyInputId,
-                        value: inputBuffer
-                    }, (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
-                }
+                sendProxyInput('QANDY_COMMIT_INPUT');
                 window.setOSMode('app');
                 window.hideFullKeyboard();
             } else if (osMode === 'app-textarea') {
@@ -571,15 +572,7 @@ function keyboard() {
                 if (insertMode) { inputBuffer = inputBuffer.slice(0, cursorPos) + '\n' + inputBuffer.slice(cursorPos); }
                 else { inputBuffer = inputBuffer.slice(0, cursorPos) + '\n' + inputBuffer.slice(cursorPos + 1); }
                 cursorPos++;
-                
-                var activeFrame = document.querySelector('.page-frame.active');
-                if (activeFrame) {
-                    activeFrame.contentWindow.postMessage({
-                        type: 'QANDY_UPDATE_INPUT',
-                        id: proxyInputId,
-                        value: inputBuffer
-                    }, (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
-                }
+                sendProxyInput('QANDY_UPDATE_INPUT');
             } else {
                 command(inputBuffer);
                 inputBuffer = "";
@@ -593,24 +586,24 @@ function keyboard() {
                     var activeFrame = document.querySelector('.page-frame.active');
                     if (activeFrame) activeFrame.focus();
                 }
- 
                 
                 hideFullKeyboard();
             }
         } else if (e.id === 'tab') {
             if (typeof window.toggleAppFocus === 'function') window.toggleAppFocus();
         } else if (e.id === 'esc') {
-            // Priority 1: Close Popup / Shield if active
-            let shield = document.getElementById('qandy-popup-shield');
-            if (shield && shield.style.display !== 'none') {
-                if (typeof window.hpop === 'function') window.hpop();
-                return; // Stop here (Staggered behavior)
-            }
-
-            // Priority 2: Hide Virtual Keyboard if open
+            // Priority 1: Hide Virtual Keyboard if open
             if (window.isVirtualKeyboardOpen && window.isVirtualKeyboardOpen()) {
                 window.hideFullKeyboard();
                 return; // Stop here
+            }
+
+            // Priority 2: Close Popup / Shield if active (unless forced visible)
+            let shield = document.getElementById('qandy-popup-shield');
+            let isMenu = window.CylonPopManager && window.CylonPopManager.isMenuOpen;
+            if (shield && shield.style.display !== 'none' && (window.PopForce !== 'visible' || isMenu)) {
+                if (typeof window.hpop === 'function') window.hpop();
+                return; // Stop here (Staggered behavior)
             }
 
             // Priority 3: Clear the Input Buffer if it has text
@@ -622,14 +615,7 @@ function keyboard() {
                 
                 // If we are actively typing into an app field, clear it on the app side too
                 if (osMode === 'app-edit' || osMode === 'app-textarea') {
-                    var activeFrame = document.querySelector('.page-frame.active');
-                    if (activeFrame) {
-                        activeFrame.contentWindow.postMessage({
-                            type: 'QANDY_UPDATE_INPUT',
-                            id: proxyInputId,
-                            value: inputBuffer
-                        }, (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
-                    }
+                    sendProxyInput('QANDY_UPDATE_INPUT');
                 }
                 return; // Stop here
             }
@@ -654,15 +640,8 @@ function keyboard() {
         // after every single keystroke, backspace, or deletion.
         if (osMode === 'app-edit' || osMode === 'app-textarea') {
             if (e.id !== 'enter') {
-                var activeFrame = document.querySelector('.page-frame.active');
-                if (activeFrame) {
-                    activeFrame.contentWindow.postMessage({
-                        type: 'QANDY_UPDATE_INPUT',
-                        id: proxyInputId,
-                        value: inputBuffer
-                    }, (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
-                }
+                sendProxyInput('QANDY_UPDATE_INPUT');
             }
         }
     };
- }
+}
