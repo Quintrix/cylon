@@ -1,0 +1,964 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cylon GFX Tileset</title>
+<script src="cylon-sdk.js"></script>
+<script src="cylon-gfx-itemid.js"></script>
+<style>
+    * { box-sizing: border-box; }
+
+    body, html {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        background-color: var(--bg-color, #000);
+        color: var(--fg-color, #0f0);
+        font-family: var(--font-face, monospace);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+
+    /* Top Toolbar */
+    .toolbar {
+        background-color: var(--menu-bg, #111);
+        color: var(--menu-fg, #aaa);
+        border-bottom: 2px solid var(--fg-color, #0f0);
+        padding: 6px 10px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        user-select: none;
+        flex-shrink: 0;
+    }
+
+    .toolbar-title {
+        font-weight: bold;
+        color: var(--fg-color, #0f0);
+        font-size: 14px;
+        margin-right: auto;
+        white-space: nowrap;
+    }
+
+    button {
+        padding: 4px 10px;
+        cursor: pointer;
+        background: var(--sel-bg, #333);
+        color: var(--sel-fg, #0f0);
+        border: 1px solid var(--fg-color, #0f0);
+        font-weight: bold;
+        font-family: inherit;
+        font-size: 12px;
+        border-radius: 3px;
+        white-space: nowrap;
+    }
+    button:hover { filter: brightness(1.2); }
+    button.active {
+        background: var(--fg-color, #0f0);
+        color: var(--bg-color, #000);
+    }
+
+    #filter-input {
+        background: var(--input-bg, #000);
+        color: var(--input-fg, var(--fg-color, #0f0));
+        border: 1px solid var(--fg-color, #0f0);
+        padding: 4px 8px;
+        font-family: monospace;
+        font-size: 13px;
+        width: 140px;
+        border-radius: 3px;
+    }
+
+    /* Category Tabs & Sub-range Pills */
+    .tab-bar {
+        display: flex;
+        gap: 6px;
+        padding: 6px 10px;
+        background: var(--case-bg, #080808);
+        border-bottom: 1px solid var(--sel-bg, #333);
+        flex-wrap: wrap;
+        flex-shrink: 0;
+        user-select: none;
+    }
+
+    .sub-bar {
+        display: flex;
+        gap: 6px;
+        padding: 6px 10px;
+        background: var(--bg-color, #000);
+        border-bottom: 1px solid var(--sel-bg, #333);
+        flex-wrap: wrap;
+        align-items: center;
+        flex-shrink: 0;
+        user-select: none;
+    }
+
+    .sub-pill {
+        padding: 3px 8px;
+        font-size: 12px;
+        background: var(--menu-bg, #111);
+        color: var(--menu-fg, #aaa);
+        border: 1px solid var(--sel-bg, #444);
+    }
+    .sub-pill.active {
+        background: var(--sel-bg, #333);
+        color: var(--sel-fg, #0f0);
+        border-color: var(--fg-color, #0f0);
+    }
+
+    /* Range Description Banner */
+    #range-header {
+        padding: 6px 10px;
+        font-size: 12px;
+        background: var(--menu-bg, #111);
+        border-bottom: 1px dashed var(--sel-bg, #333);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        flex-shrink: 0;
+    }
+
+    /* Character Stack Previewer */
+    #char-preview-bar {
+        display: none;
+        align-items: center;
+        gap: 14px;
+        padding: 8px 12px;
+        background: var(--case-bg, #080808);
+        border-bottom: 1px solid var(--sel-bg, #333);
+        flex-shrink: 0;
+        flex-wrap: wrap;
+    }
+
+    #char-stage {
+        position: relative;
+        width: 48px;
+        height: 96px;
+        border: 1px solid var(--fg-color, #0f0);
+        flex-shrink: 0;
+        overflow: hidden;
+    }
+    #char-stage img {
+        position: absolute;
+        left: 0;
+        bottom: 0;
+        width: 100%;
+        height: 100%;
+        object-fit: contain;
+        image-rendering: pixelated;
+    }
+    #char-stage-body { z-index: 1; }
+    #char-stage-head { z-index: 2; }
+
+    .char-preview-info {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        font-size: 12px;
+    }
+    .char-preview-code {
+        font-size: 15px;
+        font-weight: bold;
+        color: var(--fg-color, #0f0);
+    }
+
+    /* Main Matrix Scroll Area */
+    #matrix-scroll {
+        flex: 1;
+        overflow: auto;
+        padding: 10px;
+    }
+
+    .matrix-table {
+        border-collapse: separate;
+        border-spacing: 3px;
+    }
+
+    .matrix-th-col {
+        font-size: 12px;
+        font-weight: bold;
+        color: var(--menu-fg, #aaa);
+        text-align: center;
+        padding: 2px 4px;
+        position: sticky;
+        top: 0;
+        background: var(--bg-color, #000);
+        z-index: 5;
+    }
+
+    .matrix-th-row {
+        font-size: 12px;
+        font-weight: bold;
+        color: var(--fg-color, #0f0);
+        text-align: right;
+        padding: 2px 6px 2px 2px;
+        position: sticky;
+        left: 0;
+        background: var(--bg-color, #000);
+        z-index: 4;
+        white-space: nowrap;
+    }
+
+    .reg-cell {
+        width: 46px;
+        min-width: 46px;
+        height: 58px;
+        border: 1px solid var(--sel-bg, #333);
+        border-radius: 3px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: space-between;
+        padding: 3px 2px 2px 2px;
+        cursor: pointer;
+        user-select: none;
+        transition: border-color 0.1s, transform 0.08s;
+    }
+
+    .reg-cell.is-char {
+        width: 46px;
+        height: 82px;
+    }
+
+    .reg-cell:hover {
+        border-color: var(--fg-color, #0f0);
+        background-color: rgba(255, 255, 255, 0.08);
+    }
+    .reg-cell:active {
+        transform: scale(0.94);
+    }
+
+    .reg-cell.is-missing {
+        opacity: 0.35;
+        border-style: dashed;
+    }
+    .hide-missing .reg-cell.is-missing {
+        display: none;
+    }
+
+    .reg-thumb {
+        width: 34px;
+        height: 34px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        position: relative;
+        overflow: hidden;
+        border-radius: 2px;
+    }
+
+    .reg-cell.is-char .reg-thumb {
+        width: 32px;
+        height: 60px;
+    }
+
+    .reg-thumb img {
+        max-width: 100%;
+        max-height: 100%;
+        width: auto;
+        height: auto;
+        object-fit: contain;
+        image-rendering: pixelated;
+        display: block;
+    }
+
+    .reg-cell.is-tile .reg-thumb img {
+        width: 32px;
+        height: 32px;
+    }
+
+    /* Backdrop options for transparent sprites */
+    .bg-checker {
+        background-image:
+            linear-gradient(45deg, #222 25%, transparent 25%),
+            linear-gradient(-45deg, #222 25%, transparent 25%),
+            linear-gradient(45deg, transparent 75%, #222 75%),
+            linear-gradient(-45deg, transparent 75%, #222 75%);
+        background-size: 10px 10px;
+        background-position: 0 0, 0 5px, 5px -5px, -5px 0;
+        background-color: #111;
+    }
+    .bg-black { background-color: #000; }
+    .bg-white { background-color: #ddd; }
+
+    .reg-code {
+        font-size: 11px;
+        line-height: 1;
+        color: var(--fg-color, #0f0);
+        letter-spacing: 0.5px;
+    }
+
+    /* Bottom Inspector Bar */
+    #inspector-bar {
+        background: var(--menu-bg, #111);
+        color: var(--menu-fg, #aaa);
+        border-top: 2px solid var(--fg-color, #0f0);
+        padding: 6px 10px;
+        font-size: 12px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 10px;
+        flex-wrap: wrap;
+        flex-shrink: 0;
+    }
+
+    #inspector-text strong {
+        color: var(--fg-color, #0f0);
+    }
+
+    /* Standalone Toast Fallback */
+    #standalone-toast {
+        position: fixed;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: var(--menu-bg, #111);
+        color: var(--fg-color, #0f0);
+        border: 2px solid var(--fg-color, #0f0);
+        padding: 10px 18px;
+        font-weight: bold;
+        border-radius: 4px;
+        box-shadow: 0 4px 18px rgba(0,0,0,0.85);
+        display: none;
+        z-index: 9999;
+        pointer-events: none;
+    }
+</style>
+</head>
+<body>
+
+<div class="toolbar">
+    <div class="toolbar-title">GFX TILESET: <span id="active-source-label">Host Default</span></div>
+    <button onclick="showDriveMenu()">DRIVE</button>
+    <button id="backdrop-btn" onclick="cycleBackdrop()">BG: CHECKER</button>
+    <button id="missing-btn" onclick="toggleMissing()">HIDE EMPTY: OFF</button>
+    <input type="text" id="filter-input" placeholder="Filter code/name..." oninput="renderActiveRange()">
+</div>
+
+<div class="tab-bar" id="category-tabs">
+    <button id="tab-tiles" onclick="selectCategory('tiles')">TILES (/t/)</button>
+    <button id="tab-items" onclick="selectCategory('items')">ITEMS &amp; OBJECTS (/i/)</button>
+    <button id="tab-chars" onclick="selectCategory('chars')">CHARACTERS (/c/)</button>
+</div>
+
+<div class="sub-bar" id="sub-range-bar"></div>
+
+<div id="range-header">
+    <span id="range-desc"></span>
+    <span id="range-stats"></span>
+</div>
+
+<div id="char-preview-bar">
+    <div id="char-stage" class="bg-checker">
+        <img id="char-stage-body" alt="Body">
+        <img id="char-stage-head" alt="Head">
+    </div>
+    <div class="char-preview-info">
+        <div>Character Stack Preview (click head/body cells below to test)</div>
+        <div class="char-preview-code" id="char-combo-label">B0D0</div>
+        <div style="display:flex; gap:6px;">
+            <button onclick="copyCode(currentCharCombo())">COPY STACK CODE</button>
+            <button onclick="swapCharFacing()">FLIP LEFT / RIGHT</button>
+        </div>
+    </div>
+</div>
+
+<div id="matrix-scroll">
+    <div id="matrix-container"></div>
+</div>
+
+<div id="inspector-bar">
+    <div id="inspector-text">Hover any register to inspect, single-click to copy Punch Code.</div>
+    <div id="inspector-path"></div>
+</div>
+
+<div id="standalone-toast"></div>
+
+<script>
+// ============================================================================
+// REGISTER DEFINITIONS
+// ============================================================================
+const LOWER_ALL  = "abcdefghijklmnopqrstuvwxyz";
+const LOWER_16   = "abcdefghijklmnop";           // a-p (16)
+const LOWER_10   = "qrstuvwxyz";                 // q-z (10)
+const DIGITS_10  = "0123456789";                 // 0-9 (10)
+
+const CHAR_ROW_DESCRIPTIONS = {
+    A: "Male Head Left",
+    B: "Male Head Right",
+    C: "Male Body Left",
+    D: "Male Body Right",
+    E: "Female Head Left",
+    F: "Female Head Right",
+    G: "Female Body Left",
+    H: "Female Body Right"
+};
+
+const CATEGORIES = {
+    tiles: {
+        dirKey: 't',
+        ranges: [
+            {
+                id: 't_queville',
+                label: 'Aa–Zp (Queville)',
+                desc: 'Aa–Zp: cylon-queville.htm background tiles (16 per uppercase letter)',
+                rows: "ABCDEFGHIJKLMNOPQRSTUVWXYZ",
+                cols: LOWER_16,
+                mode: 'tile'
+            },
+            {
+                id: 't_desktop',
+                label: 'Aq–Hz (Desktop)',
+                desc: 'Aq–Hz: cylon-desktop.htm background tiles (10 per uppercase letter)',
+                rows: "ABCDEFGH",
+                cols: LOWER_10,
+                mode: 'tile'
+            },
+            {
+                id: 't_ext',
+                label: 'Pq–Zz (Extended)',
+                desc: 'Pq–Zz: cylon-queville.htm extended background tiles',
+                rows: "PQRSTUVWXYZ",
+                cols: LOWER_10,
+                mode: 'tile'
+            }
+        ]
+    },
+    items: {
+        dirKey: 'i',
+        ranges: [
+            {
+                id: 'i_pickup',
+                label: 'Aa–Mp (Items)',
+                desc: 'Aa–Mp: Items players can pick up and drop',
+                rows: "ABCDEFGHIJKLM",
+                cols: LOWER_16,
+                mode: 'item'
+            },
+            {
+                id: 'i_desktop',
+                label: 'Aq–Hz (Desktop Icons)',
+                desc: 'Aq–Hz: Desktop application & system icons',
+                rows: "ABCDEFGH",
+                cols: LOWER_10,
+                mode: 'item'
+            },
+            {
+                id: 'i_attack',
+                label: 'Na–Qz (Attackable)',
+                desc: 'Na–Qz: Items players can attack',
+                rows: "NOPQ",
+                cols: LOWER_ALL,
+                mode: 'item'
+            },
+            {
+                id: 'i_player',
+                label: 'Sa–Sz (Players)',
+                desc: 'Sa–Sz: Player items players can control',
+                rows: "S",
+                cols: LOWER_ALL,
+                mode: 'item'
+            },
+            {
+                id: 'i_large',
+                label: 'Ta–Uz (Large Objects)',
+                desc: 'Ta–Uz: Objects that can be larger than 32x32 pixels',
+                rows: "TU",
+                cols: LOWER_ALL,
+                mode: 'item'
+            },
+            {
+                id: 'i_univac',
+                label: 'Va–Xz (UNIVAC)',
+                desc: 'Va–Xz: UNIVAC codes and registers',
+                rows: "VXW".split('').sort().join(''),
+                cols: LOWER_ALL,
+                mode: 'item'
+            },
+            {
+                id: 'i_server',
+                label: 'Ya–Zz (Server Objects)',
+                desc: 'Ya–Zz: Server objects that can be used',
+                rows: "YZ",
+                cols: LOWER_ALL,
+                mode: 'item'
+            }
+        ]
+    },
+    chars: {
+        dirKey: 'c',
+        ranges: [
+            {
+                id: 'c_parts',
+                label: 'A0–H9 (Heads & Bodies)',
+                desc: 'A0–H9: Male/Female heads & bodies facing left/right',
+                rows: "ABCDEFGH",
+                cols: DIGITS_10,
+                mode: 'char'
+            }
+        ]
+    }
+};
+
+// ============================================================================
+// STATE
+// ============================================================================
+let hostOrigin = '';
+let activeDrive = null;
+let dirPaths = { t: 't/', i: 'i/', c: 'c/' };
+
+let currentCategory = 'tiles';
+let currentRangeId = 't_queville';
+let hideMissing = false;
+
+const BACKDROPS = [
+    { id: 'checker', label: 'BG: CHECKER', cls: 'bg-checker', tile: null },
+    { id: 'black',   label: 'BG: BLACK',   cls: 'bg-black',   tile: null },
+    { id: 'grass',   label: 'BG: GRASS Ga',cls: '',           tile: 'Ga' },
+    { id: 'white',   label: 'BG: LIGHT',   cls: 'bg-white',   tile: null }
+];
+let backdropIdx = 0;
+
+let charHead = 'B0';
+let charBody = 'D0';
+
+let currentRenderGen = 0;
+let popTimer = null;
+
+function getDos() {
+    return (window.parent && window.parent.CylonDOS) ? window.parent.CylonDOS : window.CylonDOS;
+}
+
+// ============================================================================
+// INITIALIZATION & THEME
+// ============================================================================
+async function applyExtendedTheme() {
+    if (window.CylonSDK && window.CylonSDK.applyColors && window.parent) {
+        window.CylonSDK.applyColors(window.parent.CylonColors);
+    }
+
+    const dos = getDos();
+    if (!dos) return;
+
+    const root = document.documentElement;
+    const extraVars = {
+        themeInputFG: '--input-fg',
+        themeInputBG: '--input-bg',
+        themeCaseBG: '--case-bg',
+        themeCaseFG: '--case-fg'
+    };
+
+    for (const [fileKey, cssVar] of Object.entries(extraVars)) {
+        try {
+            if (await dos.exists('cylon:/a/' + fileKey)) {
+                const val = (await dos.load('cylon:/a/' + fileKey)).trim();
+                if (val) root.style.setProperty(cssVar, val);
+            }
+        } catch (e) {}
+    }
+
+    try {
+        if (window.parent && window.parent.cylonHostOrigin) {
+            hostOrigin = window.parent.cylonHostOrigin;
+        } else if (await dos.exists('cylon:/a/cylonHostOrigin')) {
+            hostOrigin = (await dos.load('cylon:/a/cylonHostOrigin')).trim();
+        }
+        if (hostOrigin && !hostOrigin.endsWith('/')) hostOrigin += '/';
+    } catch (e) {}
+}
+
+function resolveAssetDir(relOrUrl) {
+    let val = String(relOrUrl || '').trim();
+    if (!val.endsWith('/')) val += '/';
+    if (!val.match(/^https?:\/\//i) && !val.startsWith('data:') && hostOrigin) {
+        val = hostOrigin + val.replace(/^\/+/, '');
+    }
+    return val;
+}
+
+async function loadDriveDirs(driveName) {
+    activeDrive = driveName || null;
+    let t = 't/', i = 'i/', c = 'c/';
+
+    const dos = getDos();
+    if (dos && activeDrive) {
+        try {
+            if (await dos.exists(`${activeDrive}:/a/gfxTileDir`)) t = (await dos.load(`${activeDrive}:/a/gfxTileDir`)).trim() || t;
+            if (await dos.exists(`${activeDrive}:/a/gfxIconDir`)) i = (await dos.load(`${activeDrive}:/a/gfxIconDir`)).trim() || i;
+            if (await dos.exists(`${activeDrive}:/a/gfxCharDir`)) c = (await dos.load(`${activeDrive}:/a/gfxCharDir`)).trim() || c;
+        } catch (e) {}
+    }
+
+    dirPaths.t = resolveAssetDir(t);
+    dirPaths.i = resolveAssetDir(i);
+    dirPaths.c = resolveAssetDir(c);
+
+    document.getElementById('active-source-label').textContent = activeDrive ? `${activeDrive}:/` : 'Host Default';
+    updateCharPreview();
+    renderActiveRange();
+}
+
+async function showDriveMenu() {
+    const dos = getDos();
+    if (!dos || !window.parent || !window.parent.CylonPopManager) {
+        await loadDriveDirs(null);
+        return;
+    }
+
+    const mounts = await dos.mounts();
+    const gfxDrives = mounts.filter(m => {
+        const src = (m.source || '').toLowerCase();
+        const name = (m.name || '').toLowerCase();
+        return src.endsWith('.gfx') || name.endsWith('.gfx') || name === 'desktop';
+    });
+
+    const items = [
+        {
+            label: 'Host Default (/t/, /i/, /c/)',
+            action: () => loadDriveDirs(null)
+        }
+    ];
+
+    gfxDrives.forEach(m => {
+        items.push({
+            label: `${m.name} [${m.type}]`,
+            action: () => loadDriveDirs(m.name)
+        });
+    });
+
+    window.parent.CylonPopManager.showContextMenu('topleft', items);
+}
+
+window.onload = async function() {
+    await applyExtendedTheme();
+    await loadDriveDirs(null);
+    selectCategory('tiles');
+};
+
+window.addEventListener('message', async (e) => {
+    if (window.location.origin !== "null" && e.origin !== window.location.origin) return;
+    if (e.source !== window && e.source !== window.parent) return;
+
+    if (e.data && e.data.type === 'QANDY_UPDATE_COLORS') {
+        await applyExtendedTheme();
+    }
+});
+
+// ============================================================================
+// TABS & CONTROLS
+// ============================================================================
+function selectCategory(catKey) {
+    currentCategory = catKey;
+    document.getElementById('tab-tiles').classList.toggle('active', catKey === 'tiles');
+    document.getElementById('tab-items').classList.toggle('active', catKey === 'items');
+    document.getElementById('tab-chars').classList.toggle('active', catKey === 'chars');
+
+    const subBar = document.getElementById('sub-range-bar');
+    subBar.innerHTML = '';
+
+    const ranges = CATEGORIES[catKey].ranges;
+    if (!ranges.some(r => r.id === currentRangeId)) {
+        currentRangeId = ranges[0].id;
+    }
+
+    ranges.forEach(r => {
+        const btn = document.createElement('button');
+        btn.className = 'sub-pill' + (r.id === currentRangeId ? ' active' : '');
+        btn.textContent = r.label;
+        btn.onclick = () => {
+            currentRangeId = r.id;
+            Array.from(subBar.children).forEach(b => b.classList.remove('active'));
+            btn.classList.add('active');
+            renderActiveRange();
+        };
+        subBar.appendChild(btn);
+    });
+
+    document.getElementById('char-preview-bar').style.display = (catKey === 'chars') ? 'flex' : 'none';
+    renderActiveRange();
+}
+
+function cycleBackdrop() {
+    backdropIdx = (backdropIdx + 1) % BACKDROPS.length;
+    const bd = BACKDROPS[backdropIdx];
+    document.getElementById('backdrop-btn').textContent = bd.label;
+    updateCharPreview();
+    renderActiveRange();
+}
+
+function toggleMissing() {
+    hideMissing = !hideMissing;
+    document.getElementById('missing-btn').textContent = 'HIDE EMPTY: ' + (hideMissing ? 'ON' : 'OFF');
+    document.getElementById('missing-btn').classList.toggle('active', hideMissing);
+    document.getElementById('matrix-container').classList.toggle('hide-missing', hideMissing);
+}
+
+// ============================================================================
+// CHARACTER STACK PREVIEWER
+// ============================================================================
+function currentCharCombo() {
+    return charHead + charBody;
+}
+
+function updateCharPreview() {
+    const bodyEl = document.getElementById('char-stage-body');
+    const headEl = document.getElementById('char-stage-head');
+    const stage = document.getElementById('char-stage');
+
+    bodyEl.src = `${dirPaths.c}${charBody}.png`;
+    headEl.src = `${dirPaths.c}${charHead}.png`;
+    document.getElementById('char-combo-label').textContent = currentCharCombo();
+
+    applyBackdropToEl(stage);
+}
+
+function swapCharFacing() {
+    const flipMap = { A: 'B', B: 'A', C: 'D', D: 'C', E: 'F', F: 'E', G: 'H', H: 'G' };
+    charHead = (flipMap[charHead.charAt(0)] || charHead.charAt(0)) + charHead.substring(1);
+    charBody = (flipMap[charBody.charAt(0)] || charBody.charAt(0)) + charBody.substring(1);
+    updateCharPreview();
+}
+
+function applyBackdropToEl(el) {
+    const bd = BACKDROPS[backdropIdx];
+    el.classList.remove('bg-checker', 'bg-black', 'bg-white');
+    el.style.backgroundImage = '';
+    el.style.backgroundSize = '';
+
+    if (bd.tile) {
+        el.style.backgroundImage = `url('${dirPaths.t}${bd.tile}.png')`;
+        el.style.backgroundSize = 'cover';
+    } else if (bd.cls) {
+        el.classList.add(bd.cls);
+    }
+}
+
+// ============================================================================
+// CLIPBOARD & POPUP ("<code> Copied!")
+// ============================================================================
+async function copyCode(code) {
+    if (!code) return;
+    let copied = false;
+
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+        try {
+            await navigator.clipboard.writeText(code);
+            copied = true;
+        } catch (e) {}
+    }
+
+    if (!copied) {
+        const ta = document.createElement('textarea');
+        ta.value = code;
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.left = '-9999px';
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); } catch (e) {}
+        document.body.removeChild(ta);
+    }
+
+    if (popTimer) clearTimeout(popTimer);
+
+    if (window.parent !== window && typeof window.popHtm === 'function') {
+        window.popHtm(
+            `<div style="padding:12px 20px; background:var(--menu-bg,#111); border:2px solid var(--fg-color,#0f0); color:var(--fg-color,#0f0); font-family:var(--font-face,monospace); font-weight:bold; text-align:center;">${escapeHTML(code)} Copied!</div>`,
+            'center'
+        );
+        popTimer = setTimeout(() => {
+            if (typeof window.hpop === 'function') window.hpop();
+        }, 900);
+    } else {
+        const toast = document.getElementById('standalone-toast');
+        toast.textContent = `${code} Copied!`;
+        toast.style.display = 'block';
+        popTimer = setTimeout(() => {
+            toast.style.display = 'none';
+        }, 900);
+    }
+}
+
+function escapeHTML(str) {
+    return String(str).replace(/[&<>'"]/g, tag => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+    }[tag] || tag));
+}
+
+function getRegisterLabel(catKey, code) {
+    if (catKey === 'chars') {
+        const rowDesc = CHAR_ROW_DESCRIPTIONS[code.charAt(0)] || 'Character Part';
+        return `${rowDesc} #${code.charAt(1)}`;
+    }
+    if (typeof window.gfxItemID === 'function') {
+        const name = window.gfxItemID(code);
+        if (name && name !== 'Item ' + code) return name;
+    }
+    if (catKey === 'tiles' && code === 'Za') return 'Transparent / Empty';
+    return code;
+}
+
+// ============================================================================
+// MATRIX RENDERER (Active Section Only)
+// ============================================================================
+function renderActiveRange() {
+    const gen = ++currentRenderGen;
+    const cat = CATEGORIES[currentCategory];
+    const range = cat.ranges.find(r => r.id === currentRangeId) || cat.ranges[0];
+
+    const baseDir = dirPaths[cat.dirKey];
+    const filterText = (document.getElementById('filter-input').value || '').trim().toLowerCase();
+
+    document.getElementById('range-desc').textContent = range.desc;
+
+    const container = document.getElementById('matrix-container');
+    container.innerHTML = '';
+    container.classList.toggle('hide-missing', hideMissing);
+
+    const totalSlots = range.rows.length * range.cols.length;
+    let foundCount = 0;
+    let missingCount = 0;
+
+    function updateStats() {
+        if (gen !== currentRenderGen) return;
+        const pending = totalSlots - foundCount - missingCount;
+        document.getElementById('range-stats').textContent =
+            `Found: ${foundCount} | Empty: ${missingCount}` + (pending > 0 ? ` | Checking: ${pending}` : '');
+    }
+    updateStats();
+
+    const table = document.createElement('table');
+    table.className = 'matrix-table';
+
+    // Column Headers
+    const thead = document.createElement('thead');
+    const headRow = document.createElement('tr');
+    const cornerTh = document.createElement('th');
+    cornerTh.className = 'matrix-th-col';
+    cornerTh.textContent = cat.dirKey + '/';
+    headRow.appendChild(cornerTh);
+
+    for (let c = 0; c < range.cols.length; c++) {
+        const th = document.createElement('th');
+        th.className = 'matrix-th-col';
+        th.textContent = range.cols.charAt(c);
+        headRow.appendChild(th);
+    }
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+
+    // Body Rows
+    const tbody = document.createElement('tbody');
+
+    for (let r = 0; r < range.rows.length; r++) {
+        const rowChar = range.rows.charAt(r);
+        const tr = document.createElement('tr');
+
+        const rowTh = document.createElement('th');
+        rowTh.className = 'matrix-th-row';
+        rowTh.textContent = currentCategory === 'chars'
+            ? `${rowChar} (${CHAR_ROW_DESCRIPTIONS[rowChar] || ''})`
+            : rowChar;
+        tr.appendChild(rowTh);
+
+        let visibleInRow = 0;
+
+        for (let c = 0; c < range.cols.length; c++) {
+            const colChar = range.cols.charAt(c);
+            const code = rowChar + colChar;
+            const label = getRegisterLabel(currentCategory, code);
+            const imgSrc = `${baseDir}${code}.png`;
+
+            const td = document.createElement('td');
+
+            if (filterText) {
+                const matches = code.toLowerCase().includes(filterText) || label.toLowerCase().includes(filterText);
+                if (!matches) {
+                    tr.appendChild(td);
+                    missingCount++;
+                    continue;
+                }
+            }
+
+            visibleInRow++;
+
+            const cell = document.createElement('div');
+            cell.className = 'reg-cell ' +
+                (range.mode === 'char' ? 'is-char' : (range.mode === 'tile' ? 'is-tile' : 'is-item'));
+
+            const thumb = document.createElement('div');
+            thumb.className = 'reg-thumb';
+            if (range.mode !== 'tile') {
+                applyBackdropToEl(thumb);
+            }
+
+            const img = document.createElement('img');
+            img.loading = 'lazy';
+            img.alt = code;
+            img.src = imgSrc;
+
+            let naturalDims = '';
+
+            img.onload = function() {
+                if (gen !== currentRenderGen) return;
+                foundCount++;
+                naturalDims = `${this.naturalWidth}x${this.naturalHeight}`;
+                updateStats();
+            };
+
+            img.onerror = function() {
+                if (gen !== currentRenderGen) return;
+                missingCount++;
+                this.style.display = 'none';
+                cell.classList.add('is-missing');
+                updateStats();
+            };
+
+            const codeEl = document.createElement('div');
+            codeEl.className = 'reg-code';
+            codeEl.textContent = code;
+
+            thumb.appendChild(img);
+            cell.appendChild(thumb);
+            cell.appendChild(codeEl);
+
+            cell.onmouseenter = function() {
+                const dims = naturalDims ? ` [${naturalDims}]` : '';
+                document.getElementById('inspector-text').innerHTML =
+                    `<strong>${escapeHTML(code)}</strong> — ${escapeHTML(label)}${escapeHTML(dims)}`;
+                document.getElementById('inspector-path').textContent = imgSrc;
+            };
+
+            cell.onclick = function() {
+                if (currentCategory === 'chars') {
+                    const lead = code.charAt(0);
+                    if ('ABEF'.includes(lead)) charHead = code;
+                    else if ('CDGH'.includes(lead)) charBody = code;
+                    updateCharPreview();
+                }
+                copyCode(code);
+            };
+
+            td.appendChild(cell);
+            tr.appendChild(td);
+        }
+
+        if (!filterText || visibleInRow > 0) {
+            tbody.appendChild(tr);
+        }
+    }
+
+    table.appendChild(tbody);
+    container.appendChild(table);
+    updateStats();
+}
+</script>
+</body>
+</html>

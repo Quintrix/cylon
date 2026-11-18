@@ -19,8 +19,18 @@
         #tiles-layer { z-index: 1; }
         #icons-layer { z-index: 10; }
         .icon-wrap { position: absolute; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; }
-        .icon-img { max-width: 60%; max-height: 55%; image-rendering: pixelated; filter: drop-shadow(2px 2px 2px rgba(0,0,0,0.8)); }
-        .icon-label { font-size: 10px; color: #fff; text-shadow: 1px 1px 1px #000; text-align: center; pointer-events: none; }
+        .icon-img {
+            width: 100% !important;
+            height: 100% !important;
+            max-width: 100% !important;
+            max-height: 100% !important;
+            object-fit: fill !important;
+            image-rendering: pixelated;
+            filter: none !important;
+        }
+        .icon-label {
+            display: none;
+        }
     </style>
 </head>
 <body>
@@ -183,6 +193,11 @@ window.onload = async function() {
 
     // 3. Hook tile clicks & sizing before connecting
     window.CylonGFX.showTargetMenu = handleTileClick;
+    const origGfxRefresh = window.CylonGFX.gfxRefresh.bind(window.CylonGFX);
+    window.CylonGFX.gfxRefresh = async function(sector, zStr, itemsStr) {
+        await origGfxRefresh(sector, zStr, itemsStr);
+        checkAvatarRequired();
+    };
     window.addEventListener('resize', fitDesktopToScreen);
 
     // 4. Connect using the CylonGFX ping/pong multiplayer engine
@@ -217,6 +232,10 @@ window.addEventListener('message', function(e) {
 function handleTileClick(z, clientX, clientY) {
     if (!loggedInUser || (window.playerItem && window.playerItem.startsWith('Za'))) {
         showLoginPopup();
+        return;
+    }
+    if (!window.playerAvatar) {
+        checkAvatarRequired();
         return;
     }
 
@@ -304,6 +323,10 @@ function gfxClick(bytecode) {
         return;
     }
 
+    if (bytecode === 'AVM') { showAvatarHeadPopup('M'); return; }
+    if (bytecode === 'AVF') { showAvatarHeadPopup('F'); return; }
+    if (bytecode === 'AVB') { showAvatarSexPopup(); return; }
+
     const type = bytecode.substring(0, 2);
     const data = bytecode.substring(2);
 
@@ -330,9 +353,12 @@ function gfxClick(bytecode) {
             flushNetworkNow();
             break;
         case 'VA':
+            avatarWizardStep = 'submitting';
+            avatarSubmitTicks = 0;
+            if (typeof setPopForce === 'function') setPopForce('hidden');
             if (typeof hpop === 'function') hpop();
             if (window.gfxDo === 'RF') window.gfxDo = '';
-            window.gfxDo += 'Va' + data;
+            window.gfxDo += 'VA' + (data.endsWith('--') ? data : data + '--');
             flushNetworkNow();
             break;
         default:
@@ -342,6 +368,7 @@ function gfxClick(bytecode) {
 
 // --- Client Event Handlers ---
 window.zdown = function(z) {
+    if (!loggedInUser || !window.playerAvatar) return;
     if (typeof setPopForce === 'function') setPopForce('hidden');
     if (typeof hpop === 'function') hpop();
 
@@ -351,6 +378,7 @@ window.zdown = function(z) {
 };
 
 window.objdown = function(code) {
+    if (!loggedInUser || !window.playerAvatar) return;
     if (typeof hpop === 'function') hpop();
 
     const itemId = code.substring(0, 2);
@@ -375,6 +403,7 @@ window.objdown = function(code) {
 };
 
 window.itemdown = function(code) {
+    if (!loggedInUser || !window.playerAvatar) return;
     if (typeof setPopForce === 'function') setPopForce('hidden');
     if (typeof hpop === 'function') hpop();
 
@@ -412,6 +441,7 @@ window.itemdown = function(code) {
 };
 
 window.invdown = function(code) {
+    if (!loggedInUser || !window.playerAvatar) return;
     if (typeof setPopForce === 'function') setPopForce('hidden');
 
     if (!code) {
@@ -494,6 +524,8 @@ window.invdown = function(code) {
 };
 
 window.serverdown = function(code) {
+    avatarWizardStep = null;
+    avatarSubmitTicks = 0;
     let col = 0;
     while (col < code.length) {
         const verb = code.substring(col, col + 2);
@@ -563,6 +595,12 @@ window.serverdown = function(code) {
 
 // --- Keyboard Input (supports physical keys + Cylon virtual keyboard) ---
 window.keydown = function(key, e) {
+    if (!window.playerAvatar) {
+        if (e) e.preventDefault();
+        checkAvatarRequired();
+        return;
+    }
+
     const keyStr = (typeof e === 'object' && e && e.key) ? e.key : String(key || '');
     const lower = keyStr.toLowerCase();
 
@@ -615,6 +653,86 @@ window.keydown = function(key, e) {
         window.CylonGFX.moveCursor(dx, dy);
     }
 };
+
+let avatarWizardStep = null; // null | 'sex' | 'head' | 'submitting'
+let avatarSubmitTicks = 0;
+
+function needsAvatarSelection() {
+    return Boolean(
+        loggedInUser &&
+        window.playerItem &&
+        !window.playerItem.startsWith('Za') &&
+        !window.playerAvatar
+    );
+}
+
+function checkAvatarRequired() {
+    if (!needsAvatarSelection()) {
+        avatarWizardStep = null;
+        avatarSubmitTicks = 0;
+        return;
+    }
+    if (avatarWizardStep === 'submitting') {
+        avatarSubmitTicks++;
+        if (avatarSubmitTicks < 4) return;
+        avatarWizardStep = null;
+        avatarSubmitTicks = 0;
+    }
+    if (!avatarWizardStep) {
+        showAvatarSexPopup();
+    }
+}
+
+function showAvatarSexPopup() {
+    avatarWizardStep = 'sex';
+    if (typeof setPopForce === 'function') setPopForce('visible');
+    const charDir = (window.CylonGFX && window.CylonGFX.gfxCharDir) ? window.CylonGFX.gfxCharDir : '/c/';
+    const html =
+        `<div style="padding:12px 16px; text-align:center; font-family:var(--font-face,monospace);">` +
+        `<div style="font-weight:bold; margin-bottom:6px;">Select Character</div>` +
+        `<div style="margin-bottom:10px; font-size:12px;">Male or Female?</div>` +
+        `<div style="display:flex; gap:18px; justify-content:center; align-items:flex-end;">` +
+        `<a href="gfx:AVM" style="display:inline-flex; flex-direction:column; align-items:center; text-decoration:none; color:var(--fg-color,#0f0); padding:6px; border:1px solid var(--fg-color,#0f0); border-radius:4px;">` +
+        `<img src="${charDir}B1.png" width="48" height="96" alt="Male" style="image-rendering:pixelated; object-fit:contain;">` +
+        `<span style="margin-top:4px;">Male</span>` +
+        `</a>` +
+        `<a href="gfx:AVF" style="display:inline-flex; flex-direction:column; align-items:center; text-decoration:none; color:var(--fg-color,#0f0); padding:6px; border:1px solid var(--fg-color,#0f0); border-radius:4px;">` +
+        `<img src="${charDir}F1.png" width="48" height="96" alt="Female" style="image-rendering:pixelated; object-fit:contain;">` +
+        `<span style="margin-top:4px;">Female</span>` +
+        `</a>` +
+        `</div>` +
+        `</div>`;
+    if (typeof pop === 'function') pop(html, 'center');
+}
+
+function showAvatarHeadPopup(sex) {
+    avatarWizardStep = 'head';
+    if (typeof setPopForce === 'function') setPopForce('visible');
+    const charDir = (window.CylonGFX && window.CylonGFX.gfxCharDir) ? window.CylonGFX.gfxCharDir : '/c/';
+    const isMale = (sex === 'M');
+    const prefix = isMale ? 'B' : 'F';
+    const body = isMale ? 'D0' : 'H0';
+
+    let headsHtml = '';
+    for (let i = 0; i <= 6; i++) {
+        const head = prefix + i;
+        const avatarCode = head + body;
+        headsHtml +=
+            `<a href="gfx:VA${avatarCode}--" style="display:inline-flex; flex-direction:column; align-items:center; text-decoration:none; padding:4px; border:1px solid var(--fg-color,#0f0); border-radius:4px;">` +
+            `<img src="${charDir}${head}.png" width="40" height="80" alt="${head}" style="image-rendering:pixelated; object-fit:contain;">` +
+            `</a>`;
+    }
+
+    const html =
+        `<div style="padding:12px 14px; text-align:center; font-family:var(--font-face,monospace);">` +
+        `<div style="font-weight:bold; margin-bottom:10px;">Select Head</div>` +
+        `<div style="display:flex; gap:8px; flex-wrap:wrap; justify-content:center; margin-bottom:10px;">` +
+        headsHtml +
+        `</div>` +
+        `<div><a href="gfx:AVB" style="font-size:12px;">Back</a></div>` +
+        `</div>`;
+    if (typeof pop === 'function') pop(html, 'center');
+}
 
 function fitDesktopToScreen() {
     if (!window.CylonGFX) return;

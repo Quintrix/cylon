@@ -1,4 +1,5 @@
 /*
+/*
  * Cylon terminal command layer.
  *
  * This file intentionally contains no IndexedDB code. It translates terminal
@@ -632,9 +633,16 @@ async function handleCylonCommand(line) {
         case 'gfx':
             // Send empty argument down as a request to refresh/reload the engine state
             var gfxCmd = args[0] ? args[0].toLowerCase() : 'refresh';
+            var gfxDriveArg = null;
             var gfxData = '';
-            
-            if (args[0]) {
+
+            if (args[1] && (args[1].toLowerCase() === 'id' || args[1].toLowerCase() === 'mod') &&
+                gfxCmd !== 'id' && gfxCmd !== 'mod') {
+                gfxDriveArg = args[0].replace(/:$/, '');
+                gfxCmd = args[1].toLowerCase();
+                var matchGfx2 = line.match(/^\s*gfx\s+\S+\s+\S+(?:\s+(.*))?$/i);
+                gfxData = (matchGfx2 && matchGfx2[1]) ? matchGfx2[1] : '';
+            } else if (args[0]) {
                 var matchGfx = line.match(/^\s*gfx\s+\S+\s+(.*)$/i);
                 gfxData = matchGfx ? matchGfx[1] : '';
             }
@@ -642,12 +650,23 @@ async function handleCylonCommand(line) {
             var activeFrame = document.querySelector('.page-frame.active');
             var targetWindow = activeFrame ? activeFrame.contentWindow : window;
 
+            if (gfxCmd === 'id' || gfxCmd === 'mod') {
+                var targetGfx = (targetWindow && targetWindow.CylonGFX && typeof targetWindow.CylonGFX.handleGfxId === 'function')
+                    ? targetWindow.CylonGFX
+                    : (global.CylonGFX && typeof global.CylonGFX.handleGfxId === 'function' ? global.CylonGFX : null);
+                if (!targetGfx) {
+                    return { handled: true, ok: false, output: 'Error: [.4]CylonGFX engine is not available.[.]' };
+                }
+                var idRes = await targetGfx.handleGfxId(gfxData, gfxDriveArg);
+                return { handled: true, ok: idRes.ok, output: idRes.output };
+            }
+
             targetWindow.postMessage({
                 type: 'QANDY_GFX_CMD',
                 cmd: gfxCmd,
                 data: gfxData
             }, (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
-            
+
             return { handled: true, output: 'GFX Engine: ' + gfxCmd + (gfxData ? ' ' + gfxData : '') };
 
         case 'krystals':

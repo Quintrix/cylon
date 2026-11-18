@@ -73,6 +73,7 @@ window.CylonGFX = {
     isSyncing: false,
     isLooking: false,
     terrainCache: null,
+    itemIDOverrides: {},
     lastKnownSectors: "",
     lastKnownOpponents: {},
     lookCanvas: null,
@@ -210,6 +211,20 @@ window.CylonGFX = {
             let val = parseFloat(cycleStr.trim());
             if (!isNaN(val)) this.gfxCycle = Math.floor(val * 1000);
         }
+        
+        this.itemIDOverrides = {};
+        let rawItemMods = await this.qdosLoadSafe(dosObj, `${drive}:/a/gfxItemID`);
+        if (rawItemMods && rawItemMods.trim()) {
+            try {
+                let parsedMods = JSON.parse(rawItemMods);
+                if (parsedMods && typeof parsedMods === 'object' && !Array.isArray(parsedMods)) {
+                    this.itemIDOverrides = parsedMods;
+                }
+            } catch (e) {
+                console.warn('Invalid gfxItemID JSON on drive ' + drive, e);
+            }
+        }
+
 
         if (!window.remoteQandylandUrl) {
             if (pItem) window.playerItem = pItem.trim();
@@ -336,6 +351,218 @@ window.CylonGFX = {
             });
             this._bgClickBound = true;
         }
+    },
+    
+    getItemName: function(iconId) {
+        if (this.itemIDOverrides && Object.prototype.hasOwnProperty.call(this.itemIDOverrides, iconId)) {
+            let custom = this.itemIDOverrides[iconId];
+            if (custom !== undefined && custom !== null && String(custom).trim() !== '') {
+                return String(custom);
+            }
+        }
+        return typeof window.gfxItemID === 'function' ? window.gfxItemID(iconId) : iconId;
+    },
+
+    getBaseItemName: async function(dos, itemId) {
+        if (dos) {
+            try {
+                if (await dos.exists('cylon:/cylon-gfx-itemid.js')) {
+                    let code = await dos.load('cylon:/cylon-gfx-itemid.js');
+                    if (code) {
+                        let parsedFn = new Function('window', code + '\nreturn window.gfxItemID;')({});
+                        if (typeof parsedFn === 'function') {
+                            return parsedFn(itemId);
+                        }
+                    }
+                }
+            } catch (e) {}
+        }
+        if (typeof window.baseGfxItemID === 'function') return window.baseGfxItemID(itemId);
+        if (typeof window.gfxItemID === 'function') return window.gfxItemID(itemId);
+        return 'Unknown';
+    },
+
+    resolveGfxDrive: async function(dos, driveName) {
+        if (!dos) return null;
+        let mounts = await dos.mounts();
+
+        if (driveName !== undefined && driveName !== null && String(driveName).trim() !== '') {
+            let clean = String(driveName).trim().replace(/:$/, '');
+            let exact = mounts.find(m => m.name === clean);
+            if (!exact && clean.toLowerCase().endsWith('.gfx')) {
+                let base = clean.slice(0, -4);
+                exact = mounts.find(m => m.name === base);
+            }
+            return exact || null;
+        }
+
+        let isGfxMount = (m) => {
+            if (!m) return false;
+            let src = String(m.source || '').toLowerCase();
+            let name = String(m.name || '').toLowerCase();
+            return src.endsWith('.gfx') || name.endsWith('.gfx') || name === 'desktop';
+        };
+
+        // 1. Drive of the active GFX engine (e.g. desktop:/w/Aa)
+        if (this.currentPath && this.currentPath.indexOf(':') !== -1) {
+            let pathDrive = this.currentPath.split(':')[0];
+            let pathMount = mounts.find(m => m.name === pathDrive);
+            if (isGfxMount(pathMount)) return pathMount;
+        }
+
+        // 2. Current DOS working drive if it is a .gfx drive
+        let pwd = dos.pwd ? dos.pwd() : '';
+        if (pwd && pwd !== '(no drive)' && pwd.indexOf(':') !== -1) {
+            let pwdDrive = pwd.split(':')[0];
+            let pwdMount = mounts.find(m => m.name === pwdDrive);
+            if (isGfxMount(pwdMount)) return pwdMount;
+        }
+
+        // 3. Fallback to mounted desktop or first mounted .gfx drive
+        return mounts.find(m => m.name === 'desktop') || mounts.find(isGfxMount) || null;
+    },
+
+    handleGfxId: async function(rawData, driveName) {
+        let dos = this.getDOS();
+        let trimmed = String(rawData == null ? '' : rawData).trim();
+        if (!trimmed) {
+            return { ok: false, output: 'Usage: gfx [drive] <mod|id> <item> [description]' };
+        }
+
+        let spaceIdx = trimmed.search(/\s/);
+        let itemId = (spaceIdx === -1) ? trimmed : trimmed.substring(0, spaceIdx);
+        let hasDesc = (spaceIdx !== -1);
+        let descRaw = hasDesc ? trimmed.substring(spaceIdx + 1).trim() : '';
+
+        if (!/^[A-Z][a-z0-9]$/.test(itemId)) {
+            return { ok: false, output: 'Error: [.4]Invalid item ID "' + itemId + '" (expected 2 chars: A-Z followed by a-z or 0-9).[.]' };
+        }
+
+        let hasExplicitDrive = (driveName !== undefined && driveName !== null && String(driveName).trim() !== '');
+        let cleanDrive = hasExplicitDrive ? String(driveName).trim().replace(/:$/, '') : '';
+
+        if (hasExplicitDrive && !dos) {
+            return { ok: false, output: 'Error: [.4]CylonDOS is not available.[.]' };
+        }
+
+        let baseName = await this.getBaseItemName(dos, itemId);
+        let gfxMount = await this.resolveGfxDrive(dos, hasExplicitDrive ? cleanDrive : null);
+
+        if (hasExplicitDrive) {
+            if (!gfxMount) {
+                return { ok: false, output: 'Error: [.4]Drive "' + cleanDrive + '" is not mounted.[.]' };
+            }
+            if (gfxMount.type === 'idb' || gfxMount.name === 'cylon') {
+                return { ok: false, output: 'Error: [.4]Drive ' + gfxMount.name + ':/ is not a .gfx drive.[.]' };
+            }
+        }
+
+        // Display mode: gfx [drive] <mod|id> <item>
+        if (!hasDesc) {
+            let modName = null;
+            if (gfxMount && dos) {
+                try {
+                    let modPath = gfxMount.name + ':/a/gfxItemID';
+                    if (await dos.exists(modPath)) {
+                        let raw = await dos.load(modPath);
+                        if (raw && raw.trim()) {
+                            let parsed = JSON.parse(raw);
+                            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                                let v = parsed[itemId];
+                                if (v !== undefined && v !== null && String(v).trim() !== '') {
+                                    modName = String(v).trim();
+                                }
+                            }
+                        }
+                    }
+                } catch (e) {}
+            }
+            let prefix = gfxMount ? (gfxMount.name + ':/ ') : '';
+            let out = prefix + itemId + ' = ' + baseName;
+            if (modName !== null) out += ', mod = ' + modName;
+            return { ok: true, output: out };
+        }
+
+        // Modify mode: gfx [drive] <mod|id> <item> <description>
+        if (!dos) {
+            return { ok: false, output: 'Error: [.4]CylonDOS is not available.[.]' };
+        }
+        if (!gfxMount) {
+            return { ok: false, output: 'Error: [.4]No .gfx drive mounted.[.]' };
+        }
+        if (gfxMount.readOnly || gfxMount.type === 'idb') {
+            return { ok: false, output: 'Error: [.4]Drive ' + gfxMount.name + ':/ is read-only.[.]' };
+        }
+
+        // Strip matching outer quotes (supports "Magic Slippers" or "" to clear)
+        let desc = descRaw;
+        if (desc.length >= 2 &&
+            ((desc.startsWith('"') && desc.endsWith('"')) || (desc.startsWith("'") && desc.endsWith("'")))) {
+            desc = desc.slice(1, -1);
+        }
+        desc = desc.trim();
+
+        if (/[\x00-\x1F\x7F]/.test(desc) || desc.length > 64) {
+            return { ok: false, output: 'Error: [.4]Invalid description (max 64 printable characters).[.]' };
+        }
+
+        let modPath = gfxMount.name + ':/a/gfxItemID';
+        let mods = {};
+        try {
+            if (await dos.exists(modPath)) {
+                let raw = await dos.load(modPath);
+                if (raw && raw.trim()) {
+                    let parsed = JSON.parse(raw);
+                    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                        mods = parsed;
+                    }
+                }
+            }
+        } catch (e) {
+            mods = {};
+        }
+
+        if (desc === '') {
+            delete mods[itemId];
+        } else {
+            mods[itemId] = desc;
+        }
+
+        try {
+            if (Object.keys(mods).length === 0) {
+                if (await dos.exists(modPath)) {
+                    await dos.delete(modPath);
+                }
+            } else {
+                let aDir = gfxMount.name + ':/a';
+                if (!(await dos.exists(aDir))) {
+                    await dos.mkdir(aDir);
+                }
+                await dos.save(modPath, JSON.stringify(mods));
+            }
+        } catch (e) {
+            return { ok: false, output: 'Error: [.4]' + (e && e.message ? e.message : String(e)) + '[.]' };
+        }
+
+        // Refresh live engine state if currently attached to this drive
+        let curDrive = (this.currentPath && this.currentPath.indexOf(':') !== -1) ? this.currentPath.split(':')[0] : null;
+        if (curDrive === gfxMount.name || window.desktopDrive === gfxMount.name) {
+            this.itemIDOverrides = mods;
+            if (typeof window.reloadItemIDMods === 'function') {
+                await window.reloadItemIDMods();
+            }
+            if (window.remoteQandylandUrl) {
+                if (window.map) this.renderSectorStaticObjects(window.map);
+                this.lastRenderedItems = null;
+                if (!this.isSyncing) await this.networkTick();
+            } else if (document.getElementById('icons-layer')) {
+                await this.renderScreen();
+            }
+        }
+
+        let out = gfxMount.name + ':/ ' + itemId + ' = ' + baseName;
+        if (desc !== '') out += ', mod = ' + desc;
+        return { ok: true, output: out };
     },
 
     // ========================================================================
@@ -664,7 +891,7 @@ window.CylonGFX = {
 
             let x = z % this.gridWide;
             let y = Math.floor(z / this.gridWide);
-            let labelText = typeof window.gfxItemID === 'function' ? window.gfxItemID(iconId) : iconId;
+            let labelText = this.getItemName(iconId);
             let fullPath = `${drive}:/w/${sector}/${fname}`;
 
             let wrap = this.buildSprite(iconId, x, y, z, labelText, fullPath, "");
@@ -833,7 +1060,8 @@ window.CylonGFX = {
 
             let x = renderZ % this.gridWide;
             let y = Math.floor(renderZ / this.gridWide);
-            let labelText = typeof window.gfxItemID === 'function' ? window.gfxItemID(iId) : iId;
+            let labelText = this.getItemName(iId); // was: this.getItemName(iconId)
+
             let fullDosPath = `${drive}:/w/${sector}/${entry}`;
 
             let wrap = this.buildSprite(iId, x, y, renderZ, labelText, fullDosPath, avatar);
@@ -1018,6 +1246,22 @@ window.CylonGFX = {
     // ========================================================================
 
     handleGfxCommand: async function(cmd, data) {
+        let cmdStr = String(cmd || '').trim();
+        let cmdLower = cmdStr.toLowerCase();
+        let dataStr = String(data == null ? '' : data);
+
+        // Support: gfx <drive> <mod|id> <item> [description]
+        let subMatch = dataStr.match(/^\s*(id|mod)(?:\s+(.*))?$/i);
+        if (subMatch && cmdLower !== 'id' && cmdLower !== 'mod') {
+            let res = await this.handleGfxId(subMatch[2] || '', cmdStr);
+            if (window.parent && typeof window.parent.printDOS === 'function') {
+                window.parent.printDOS(res.output + '\n');
+            } else if (window.parent && window.parent.print) {
+                window.parent.print(res.output + '\n');
+            }
+            return;
+        }
+
         switch (cmd) {
             case 'list': {
                 let output = "[.2]Available GFX Servers:[.]\n\n";
@@ -1209,6 +1453,18 @@ window.CylonGFX = {
                     }
                 }
                 break;
+            
+            case 'id':
+            case 'mod': {
+                let res = await this.handleGfxId(data, null);
+                if (window.parent && typeof window.parent.printDOS === 'function') {
+                    window.parent.printDOS(res.output + '\n');
+                } else if (window.parent && window.parent.print) {
+                    window.parent.print(res.output + '\n');
+                }
+                break;
+            }
+
         }
     },
 
@@ -1402,7 +1658,7 @@ window.CylonGFX = {
                     continue;
                 }
 
-                let labelText = typeof window.gfxItemID === 'function' ? window.gfxItemID(iconId) : iconId;
+                let labelText = this.getItemName(iconId);
                 let z = this.decodeZ(zHex, this.gfxZBase);
                 if (isNaN(z)) continue;
 
@@ -1923,7 +2179,9 @@ window.CylonGFX = {
         let scriptData = await window.qdosLoad(filePath);
         if (!scriptData) return;
         await window.CylonScript(scriptData);
-        this.renderScreen();
+        if (!window.remoteQandylandUrl) {
+            this.renderScreen();
+        }
     },
 
     removeScript: async function(filePath) {

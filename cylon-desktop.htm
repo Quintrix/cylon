@@ -118,46 +118,144 @@ body, html {
 </div>
 <script>
 // ============================================================================
-// SYSTEM APP ROUTING
+// SYSTEM APP ROUTING (Batch File Execution)
 // ============================================================================
-window.ObjDown = function(iconId) {
-    const parent = window.parent;
-    switch(iconId) {
-        case 'Aq': // command
-            if (parent && typeof parent.showTerminal === 'function') parent.showTerminal();
-            return true;
-        case 'Ar': // files
-            if (parent && typeof parent.PageOpen === 'function') parent.PageOpen('cylon-files.htm');
-            return true;
-        case 'As': // compiler
-            if (parent && typeof parent.PageOpen === 'function') parent.PageOpen('gfx-compiler.htm');
-            return true;
-        case 'At': // desktop
-            if (parent && typeof parent.PageOpen === 'function') parent.PageOpen('cylon-desktop.htm');
-            return true;
-        case 'Au': // Files
-            if (parent && typeof parent.PageOpen === 'function') parent.PageOpen('cylon-files.htm');
-            return true;
-        case 'Av': // create
-            if (parent && typeof parent.PageOpen === 'function') parent.PageOpen('gfx-create.htm');
-            return true;
-        case 'Aw': // theme
-            if (parent && typeof parent.PageOpen === 'function') parent.PageOpen('cylon-theme.htm');
-            return true;
-        case 'Ax': // calc
-            if (parent && typeof parent.PageOpen === 'function') parent.PageOpen('cylon-calc.htm');
-            return true;
-        case 'Az': // trash
-          if (parent && typeof parent.popHtm === 'function') {
-              parent.popHtm("<div style='padding:20px; text-align:center; font-weight:bold; line-height:1.6;'>There is no trash<br>on a Qandy Pocket Computer!</div>");
-          }
-          return true;
-        case 'Se': // black flag
-            if (parent && typeof parent.PageOpen === 'function') parent.PageOpen('cylon-capflag.htm');
-            return true;
+window.ObjDown = async function(filePath) {
+    if (!filePath || !window.CylonGFX) return false;
+
+    let scriptData = null;
+    try {
+        if (typeof window.qdosLoad === 'function') {
+            scriptData = await window.qdosLoad(filePath);
+        } else {
+            const dos = window.CylonGFX.getDOS ? window.CylonGFX.getDOS() : null;
+            if (dos) scriptData = await dos.load(filePath);
+        }
+    } catch (err) {
+        console.warn('ObjDown load failed:', filePath, err);
+        return false;
     }
-    return false; // Icon wasn't a recognized core app, fallback to executing script / server object
+
+    if (typeof scriptData !== 'string' || !scriptData.trim()) return false;
+
+    // Only treat the file as an executable batch if it contains non-comment lines
+    const hasCommands = scriptData.replace(/\\n/g, '\n').split('\n').some(line => {
+        const cmd = line.trim();
+        return cmd && !cmd.startsWith('//') && !cmd.startsWith(';');
+    });
+    if (!hasCommands) return false;
+
+    if (typeof window.CylonScript === 'function') {
+        await window.CylonScript(scriptData);
+    } else if (typeof window.CylonGFX.executeScript === 'function') {
+        await window.CylonGFX.executeScript(filePath);
+    }
+
+    if (!window.remoteQandylandUrl && typeof window.CylonGFX.renderScreen === 'function') {
+        await window.CylonGFX.renderScreen();
+    }
+    return true;
 };
+
+// ============================================================================
+// ITEMID MODS LOADER (cylon:/cylon-gfx-itemid.js + ${drive}:/a/gfxItemID)
+// ============================================================================
+const defaultGfxItemID = (typeof window.gfxItemID === 'function') ? window.gfxItemID : (() => 'Unknown');
+let baseGfxItemID = defaultGfxItemID;
+let itemIDOverrides = {};
+let lastItemModSignature = null;
+let desktopReady = false;
+
+async function loadItemIDMods(jdos, drive) {
+    let nextBase = defaultGfxItemID;
+    let nextOverrides = {};
+    let baseSig = '';
+    let ovSig = '';
+
+    if (jdos) {
+        // 1. Load DevTeam edits from cylon:/cylon-gfx-itemid.js if present
+        try {
+            if (await jdos.exists('cylon:/cylon-gfx-itemid.js')) {
+                const code = await jdos.load('cylon:/cylon-gfx-itemid.js');
+                if (code) {
+                    const parsedFn = new Function('window', code + '\nreturn window.gfxItemID;')({});
+                    if (typeof parsedFn === 'function') {
+                        nextBase = parsedFn;
+                        baseSig = code;
+                    }
+                }
+            }
+        } catch (err) {
+            console.warn('Could not load cylon:/cylon-gfx-itemid.js:', err);
+        }
+
+        // 2. Load per-drive .gfx overrides from ${drive}:/a/gfxItemID
+        const modDrive = drive || window.desktopDrive || 'desktop';
+        try {
+            const modPath = `${modDrive}:/a/gfxItemID`;
+            if (await jdos.exists(modPath)) {
+                const raw = await jdos.load(modPath);
+                if (raw && raw.trim()) {
+                    const parsed = JSON.parse(raw);
+                    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                        nextOverrides = parsed;
+                        ovSig = raw;
+                    }
+                }
+            }
+        } catch (err) {
+            console.warn(`Could not load ${modDrive}:/a/gfxItemID:`, err);
+        }
+    }
+
+    baseGfxItemID = nextBase;
+    window.baseGfxItemID = nextBase;
+    itemIDOverrides = nextOverrides;
+
+    if (window.CylonGFX) {
+        window.CylonGFX.itemIDOverrides = nextOverrides;
+    }
+
+    window.gfxItemID = function(id) {
+        const ov = (window.CylonGFX && window.CylonGFX.itemIDOverrides) || itemIDOverrides;
+        if (ov && Object.prototype.hasOwnProperty.call(ov, id)) {
+            const custom = ov[id];
+            if (custom !== undefined && custom !== null && String(custom).trim() !== '') {
+                return String(custom);
+            }
+        }
+        return baseGfxItemID(id);
+    };
+
+    window.reloadItemIDMods = function() {
+        return loadItemIDMods(jdos, window.desktopDrive || 'desktop');
+    };
+
+    const sig = baseSig + '\0' + ovSig;
+    const changed = (lastItemModSignature !== null && sig !== lastItemModSignature);
+    lastItemModSignature = sig;
+    return changed;
+}
+
+// Re-apply modified tags and re-render when returning to the Desktop tab
+window.addEventListener('message', async (e) => {
+    if (window.location.origin !== 'null' && e.origin !== window.location.origin) return;
+    if (e.source !== window && e.source !== window.parent) return;
+
+    if (e.data && e.data.type === 'QANDY_PAGE_ACTIVATED' && desktopReady) {
+        const jdos = window.parent && window.parent.CylonDOS ? window.parent.CylonDOS : window.CylonDOS;
+        const changed = await loadItemIDMods(jdos, window.desktopDrive || 'desktop');
+        if (changed && window.CylonGFX) {
+            if (window.remoteQandylandUrl) {
+                if (window.map) window.CylonGFX.renderSectorStaticObjects(window.map);
+                window.CylonGFX.lastRenderedItems = null;
+                if (!window.CylonGFX.isSyncing) await window.CylonGFX.networkTick();
+            } else {
+                await window.CylonGFX.renderScreen();
+            }
+        }
+    }
+});
 
 // ============================================================================
 // DESKTOP CONFIG PARSING & VALIDATION
@@ -280,11 +378,11 @@ window.onload = async function() {
             let fullPath = wrap.getAttribute('data-path');
             if (labelText && fullPath) {
 
-                items.push({ label: 'Open ' + labelText, action: () => {
+                items.push({ label: 'Open ' + labelText, action: async () => {
                     let filename = fullPath.substring(fullPath.lastIndexOf('/') + 1);
                     let iconId = filename.substring(0, 2);
 
-                    if (window.ObjDown && window.ObjDown(iconId)) {
+                    if (window.ObjDown && await window.ObjDown(fullPath)) {
                         return;
                     }
 
@@ -296,7 +394,7 @@ window.onload = async function() {
                         if (window.gfxDo === 'RF') window.gfxDo = '';
                         window.gfxDo += plug;
                     } else {
-                        this.executeScript(fullPath);
+                        await this.executeScript(fullPath);
                     }
                 }});
 
@@ -435,6 +533,7 @@ window.onload = async function() {
                 await CylonCommand(`mount ${gfxUrl} ram desktop`);
             }
 
+            await loadItemIDMods(jdos, 'desktop');
             const startSector = await resolveStartSector(jdos, 'desktop');
             await window.CylonGFX.gfxConnect(qandylandUrl, 'desktop', desktopCfg.gfxFile, startSector);
         } else {
@@ -458,6 +557,7 @@ window.onload = async function() {
             window.remoteQandylandUrl = null;
             if (window.CylonGFX.stopNetworkTick) window.CylonGFX.stopNetworkTick();
 
+            await loadItemIDMods(jdos, 'desktop');
             const startSector = await resolveStartSector(jdos, 'desktop');
             await window.CylonGFX.init(`desktop:/w/${startSector}`);
         }
@@ -485,6 +585,7 @@ window.onload = async function() {
         }
 
         window.cylonHostOrigin = `${baseUrl}/`;
+        desktopReady = true;
 
     } catch (err) {
         console.error('Cylon Desktop startup failed:', err);

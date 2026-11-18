@@ -353,6 +353,7 @@ window.activeDrive = null;
 let hostOrigin = '';
 let driveIconDir = 'i/';
 let driveTileDir = 't/';
+let driveItemOverrides = {};
 
 // Strict QPC tag rule: >= 3 chars, lowercase letters and numerals only
 const VALID_QPC_TAG_RE = /^[a-z0-9]{3,}$/;
@@ -502,6 +503,14 @@ async function showDriveMenu() {
     window.parent.CylonPopManager.showContextMenu('topleft', items);
 }
 
+function resolveItemName(code) {
+    if (driveItemOverrides && Object.prototype.hasOwnProperty.call(driveItemOverrides, code)) {
+        const custom = String(driveItemOverrides[code] || '').trim();
+        if (custom) return custom;
+    }
+    return (typeof gfxItemID === 'function') ? gfxItemID(code) : 'Unknown';
+}
+
 async function preloadQpcTags() {
     qpcCache.clear();
     const dos = getDos();
@@ -562,6 +571,21 @@ async function selectDrive(driveName, opts) {
     }
     if (!driveIconDir.endsWith('/')) driveIconDir += '/';
     if (!driveTileDir.endsWith('/')) driveTileDir += '/';
+
+    driveItemOverrides = {};
+    if (dos) {
+        try {
+            if (await dos.exists(`${driveName}:/a/gfxItemID`)) {
+                const raw = await dos.load(`${driveName}:/a/gfxItemID`);
+                if (raw && raw.trim()) {
+                    const parsed = JSON.parse(raw);
+                    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                        driveItemOverrides = parsed;
+                    }
+                }
+            }
+        } catch (e) {}
+    }
 
     await preloadQpcTags();
 

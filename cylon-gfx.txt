@@ -1,8 +1,11 @@
 
-Cylon Graphics & Physics Co-Processor 
-Quintrix and Crew Software
+_______________________________________________________________________________
 
-"Everything is a file. The filesystem is the physics engine."
+                       Quintrix and Crew Software           
+                 Cylon Graphics & Physics Co-Processor 
+
+      "Everything is a file. The filesystem is the physics engine."
+_______________________________________________________________________________
 
 
 
@@ -14,9 +17,6 @@ The /t/ directory has the .png images of the 2d background tiles.
 The /i/ directory has the .png images of the 'items' (and objects).
 The /m/ directory has the .png images of the background tiles at 4x4 pixels for world maps.
 The /c/ directory has the .png images of the player avatars.
-
-The cylon-gfx-itemid.js file is the master list of the name of every item code in the game. 
-
 
 ________________________________________________________________________________________
 
@@ -150,10 +150,8 @@ ________________________________________________________________________________
      Legend:     $$ = byte code (Aa-Zz or A0-Z0)
                  $* = *wildcard (A*-Z*)
                  ## = numeral 00-99
-                 
                  %% = text validated: A-Za-z0-9 !@#$%^&*()-+=;:?,."'
-                 -- = used by some codes as quotes for --strings-- 
-                      (some codes only use it as an end-quote to terminate the input)
+                 -- = used by some codes to terminate string input, ie: Vhstrings-- 
                  
                (NA) = not implemented yet, code's purpose reserved
 
@@ -177,7 +175,7 @@ ________________________________________________________________________________
                  player file, change the Za to the $$ item and remove the item from the map
                  sector directory
                  
-       Vh 
+       Vh Vh%%--
        
        Vi Vi     inventory - outputs a server plug with the player item's inventory file.
 

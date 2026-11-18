@@ -1,0 +1,944 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cylon GFX Mods</title>
+<script src="cylon-sdk.js"></script>
+<script src="cylon-gfx-itemid.js"></script>
+<style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+        width: 100%;
+        height: 100%;
+        background-color: var(--bg-color, #000);
+        color: var(--fg-color, #0f0);
+        font-family: var(--font-face, monospace);
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+
+    /* Top Toolbar */
+    .toolbar {
+        background-color: var(--bg-color, #111);
+        color: var(--menu-fg, #aaa);
+        border-bottom: 2px solid var(--fg-color, #0f0);
+        padding: 8px 10px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        user-select: none;
+        flex-shrink: 0;
+    }
+
+    .toolbar-title {
+        font-weight: bold;
+        color: var(--fg-color, #0f0);
+        font-size: 14px;
+        margin-right: auto;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    button {
+        padding: 5px 10px;
+        cursor: pointer;
+        background: var(--sel-bg, #333);
+        color: var(--sel-fg, #0f0);
+        border: 1px solid var(--fg-color, #0f0);
+        font-weight: bold;
+        font-family: inherit;
+        font-size: 12px;
+        border-radius: 3px;
+    }
+    button:hover { filter: brightness(1.2); }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    button.dev-on {
+        background: var(--text-fg2, #ff0);
+        color: #000;
+        border-color: var(--text-fg2, #ff0);
+    }
+
+    button.danger {
+        border-color: var(--text-fg3, #f44);
+        color: var(--text-fg3, #f44);
+    }
+
+    /* Main Split */
+    #main {
+        display: flex;
+        flex: 1;
+        min-height: 0;
+        overflow: hidden;
+    }
+
+    /* A-Z Sidebar */
+    #sidebar {
+        width: 44px;
+        background: var(--menu-bg, #111);
+        border-right: 1px solid var(--sel-bg, #333);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 4px 0;
+        gap: 2px;
+        overflow-y: auto;
+        flex-shrink: 0;
+    }
+
+    .letter-btn {
+        width: 34px;
+        height: 26px;
+        padding: 0;
+        background: var(--bg-color, #000);
+        color: var(--menu-fg, #aaa);
+        border: 1px solid var(--sel-bg, #333);
+        border-radius: 3px;
+        font-size: 13px;
+        font-weight: bold;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+    }
+    .letter-btn.has-js  { border-color: var(--fg-color, #0f0); }
+    .letter-btn.has-mod { border-color: var(--text-fg2, #ff0); color: var(--text-fg2, #ff0); }
+    .letter-btn.active  { background: var(--sel-bg, #333); color: var(--sel-fg, #0f0); border-color: var(--fg-color, #0f0); }
+
+    /* Content Area */
+    #content {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        overflow: hidden;
+    }
+
+    #col-headers {
+        display: grid;
+        grid-template-columns: 36px 36px 1fr 1fr;
+        gap: 8px;
+        padding: 6px 10px;
+        background: var(--menu-bg, #111);
+        color: var(--menu-fg, #aaa);
+        border-bottom: 1px solid var(--sel-bg, #333);
+        font-size: 12px;
+        font-weight: bold;
+        text-transform: uppercase;
+        flex-shrink: 0;
+    }
+
+    #item-list {
+        flex: 1;
+        overflow-y: auto;
+        padding-bottom: 24px;
+    }
+
+    .item-row {
+        display: grid;
+        grid-template-columns: 36px 36px 1fr 1fr;
+        gap: 8px;
+        align-items: center;
+        padding: 5px 10px;
+        border-bottom: 1px dashed var(--sel-bg, #333);
+    }
+    .item-row.has-js-edit  { background: rgba(0, 255, 0, 0.06); }
+    .item-row.has-gfx-edit { background: rgba(255, 255, 0, 0.06); }
+    .item-row.has-both     { background: rgba(0, 200, 255, 0.08); }
+
+    .item-img-wrap {
+        width: 32px;
+        height: 32px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: var(--case-bg, #080808);
+        border: 1px solid var(--sel-bg, #333);
+    }
+    .item-img {
+        width: 32px;
+        height: 32px;
+        image-rendering: pixelated;
+        object-fit: contain;
+        display: block;
+    }
+
+    .item-id {
+        font-weight: bold;
+        font-size: 13px;
+        color: var(--fg-color, #0f0);
+        text-align: center;
+    }
+
+    .field-wrap {
+        display: flex;
+        flex-direction: column;
+        min-width: 0;
+    }
+    .field-tag {
+        display: none;
+        font-size: 10px;
+        opacity: 0.7;
+        margin-bottom: 2px;
+    }
+
+    .item-row input[type="text"] {
+        width: 100%;
+        min-width: 0;
+        background: var(--input-bg, #000);
+        color: var(--input-fg, var(--fg-color, #0f0));
+        border: 1px solid var(--sel-bg, #333);
+        border-radius: 3px;
+        padding: 5px 7px;
+        font-family: inherit;
+        font-size: 13px;
+        outline: none;
+    }
+    .item-row input[type="text"]:focus {
+        border-color: var(--fg-color, #0f0);
+    }
+    .item-row input.js-field.edited {
+        border-color: var(--fg-color, #0f0);
+    }
+    .item-row input.gfx-field.edited {
+        border-color: var(--text-fg2, #ff0);
+        color: var(--text-fg2, #ff0);
+    }
+    .item-row input.invalid {
+        border-color: var(--text-fg3, #f44) !important;
+    }
+
+    /* Locked states prevent cylon-sdk from opening the virtual keyboard */
+    body.devteam-off .js-field {
+        pointer-events: none;
+        opacity: 0.65;
+        background: var(--case-bg, #080808);
+        color: var(--menu-fg, #aaa);
+    }
+    body.gfx-locked .gfx-field {
+        pointer-events: none;
+        opacity: 0.45;
+        background: var(--case-bg, #080808);
+    }
+
+    #empty-state {
+        padding: 32px 16px;
+        text-align: center;
+        opacity: 0.75;
+        font-size: 13px;
+        line-height: 1.6;
+    }
+
+    /* Status Footer */
+    #status-bar {
+        background: var(--menu-bg, #111);
+        color: var(--menu-fg, #aaa);
+        border-top: 1px solid var(--sel-bg, #333);
+        padding: 5px 10px;
+        font-size: 12px;
+        display: flex;
+        justify-content: space-between;
+        gap: 10px;
+        flex-shrink: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    /* Responsive Narrow / Portrait Pocket Layout */
+    @media (max-width: 560px) {
+        #col-headers { display: none; }
+        .item-row {
+            grid-template-columns: 36px 36px 1fr;
+            grid-template-rows: auto auto;
+        }
+        .item-img-wrap { grid-row: 1 / span 2; }
+        .item-id       { grid-row: 1 / span 2; }
+        .field-wrap    { grid-column: 3; }
+        .field-tag     { display: block; }
+    }
+</style>
+</head>
+<body class="devteam-off gfx-locked">
+
+<div class="toolbar">
+    <div class="toolbar-title">GFX MODS: <span id="active-drive-label">(No Drive)</span></div>
+    <button onclick="showDriveMenu()">DRIVE</button>
+    <button id="save-gfx-btn" onclick="saveGfxMods()" disabled>SAVE .GFX</button>
+    <button id="clear-mods-btn" class="danger" onclick="promptClearMods()" disabled>CLEAR MODS</button>
+    <button id="devteam-btn" onclick="toggleDevTeam()">DEVTEAM: OFF</button>
+    <button id="save-js-btn" onclick="saveItemIdJS()" style="display:none;" disabled>SAVE JS</button>
+    <button id="copy-js-btn" onclick="copyItemIdJS()" style="display:none;">COPY JS</button>
+</div>
+
+<div id="main">
+    <div id="sidebar" role="navigation" aria-label="Item group"></div>
+    <div id="content">
+        <div id="col-headers">
+            <span>IMG</span>
+            <span>ID</span>
+            <span>cylon-gfx-itemid.js</span>
+            <span>.gfx override</span>
+        </div>
+        <div id="item-list">
+            <div id="empty-state">
+                Select a mounted <b>.gfx</b> drive (or choose a letter A–Z on the left) to browse and edit item names.
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="status-bar">
+    <span id="status-text">Ready</span>
+    <span id="mod-count">0 drive mods</span>
+</div>
+
+<script>
+const MAX_DESC = 64;
+const CONTROL_CHARS_RE = /[\x00-\x1F\x7F]/;
+
+const ALL_KEYS = [];
+for (let cap = 65; cap <= 90; cap++) {
+    const C = String.fromCharCode(cap);
+    for (let low = 97; low <= 122; low++) ALL_KEYS.push(C + String.fromCharCode(low));
+    for (let d = 0; d <= 9; d++) ALL_KEYS.push(C + d);
+}
+
+const CATEGORY_NAMES = {
+    A: 'Travel Items',      B: 'Tools / Utilities',   C: 'Game Items',
+    D: 'Quest Items',       E: 'Stacked Items',       F: 'Food',
+    G: 'Plant Foods',       H: 'Cooked Foods',        I: 'Raw Fish',
+    J: 'Cooked Fish',       K: 'Mining Items',        L: 'Hats',
+    M: 'Weapons',           N: 'Armour',              O: 'Misc',
+    P: 'Enemies',           Q: 'NPCs',                R: 'Resources',
+    S: 'Player Items',      T: 'Buildings (32px+)',   U: 'Structures',
+    V: 'UI / Verb Commands',W: 'Registers',           X: 'Logic / Scripting',
+    Y: 'Events',            Z: 'Game States / Actions'
+};
+
+window.activeDrive = null;
+let activeDriveReadOnly = false;
+let cylonDriveReadOnly = false;
+let cylonDriveMounted = false;
+
+let hostOrigin = '';
+let driveIconDir = 'i/';
+let currentLetter = null;
+let devTeamMode = false;
+
+let baseData = {};   // Original loaded from cylon:/cylon-gfx-itemid.js (or <script>)
+let jsData   = {};   // Editable base map (DevTeam mode)
+let gfxBase  = {};   // Saved overrides from ${drive}:/a/gfxItemID
+let gfxData  = {};   // Current overrides in editor
+
+let jsDirty  = false;
+let gfxDirty = false;
+
+function getDos() {
+    return (window.parent && window.parent.CylonDOS) ? window.parent.CylonDOS : window.CylonDOS;
+}
+
+function setStatus(msg) {
+    document.getElementById('status-text').textContent = msg;
+}
+
+function showToast(htmlMsg, ms) {
+    if (window.popHtm) {
+        window.popHtm(
+            `<div style="padding:12px 18px; background:var(--menu-bg,#111); border:1px solid var(--fg-color,#0f0); color:var(--fg-color,#0f0); text-align:center;">${htmlMsg}</div>`,
+            'center'
+        );
+        if (ms) {
+            setTimeout(() => { if (window.hpop) window.hpop(); }, ms);
+        }
+    }
+}
+
+async function applyExtendedTheme() {
+    if (window.CylonSDK && window.CylonSDK.applyColors) {
+        window.CylonSDK.applyColors(window.parent ? window.parent.CylonColors : null);
+    }
+    const dos = getDos();
+    if (!dos) return;
+
+    const root = document.documentElement;
+    const extraVars = {
+        themeInputFG: '--input-fg',
+        themeInputBG: '--input-bg',
+        themeCaseBG: '--case-bg',
+        themeCaseFG: '--case-fg',
+        themeTextFg2: '--text-fg2',
+        themeTextFg3: '--text-fg3'
+    };
+
+    for (const [fileKey, cssVar] of Object.entries(extraVars)) {
+        try {
+            if (await dos.exists('cylon:/a/' + fileKey)) {
+                const val = (await dos.load('cylon:/a/' + fileKey)).trim();
+                if (val) root.style.setProperty(cssVar, val);
+            }
+        } catch (e) {}
+    }
+
+    try {
+        if (window.parent && window.parent.cylonHostOrigin) {
+            hostOrigin = window.parent.cylonHostOrigin;
+        } else if (await dos.exists('cylon:/a/cylonHostOrigin')) {
+            hostOrigin = (await dos.load('cylon:/a/cylonHostOrigin')).trim();
+        }
+        if (hostOrigin && !hostOrigin.endsWith('/')) hostOrigin += '/';
+        if (!window.activeDrive) {
+            driveIconDir = hostOrigin ? (hostOrigin + 'i/') : 'i/';
+        }
+    } catch (e) {}
+}
+
+window.onload = async function() {
+    await applyExtendedTheme();
+    await loadBaseData();
+    buildSidebar();
+    updateToolbarState();
+    await showDriveMenu();
+};
+
+window.addEventListener('message', async (e) => {
+    if (window.location.origin !== 'null' && e.origin !== window.location.origin) return;
+    if (e.source !== window && e.source !== window.parent) return;
+
+    if (e.data && e.data.type === 'QANDY_UPDATE_COLORS') {
+        await applyExtendedTheme();
+    } else if (e.data && e.data.type === 'QANDY_PAGE_ACTIVATED') {
+        await applyExtendedTheme();
+        if (!window.activeDrive) await showDriveMenu();
+    }
+});
+
+// ============================================================================
+// LOAD MASTER ITEMID DATA (cylon:/cylon-gfx-itemid.js -> fallback <script>)
+// ============================================================================
+async function loadBaseData() {
+    baseData = {};
+    jsData = {};
+
+    const dos = getDos();
+    let itemFn = (typeof window.gfxItemID === 'function') ? window.gfxItemID : null;
+    let sourceLabel = 'script fallback';
+
+    if (dos) {
+        try {
+            const mounts = await dos.mounts();
+            const cylonMount = mounts.find(m => m.name === 'cylon');
+            cylonDriveMounted = !!cylonMount;
+            cylonDriveReadOnly = !!(cylonMount && cylonMount.readOnly);
+
+            if (cylonMount && await dos.exists('cylon:/cylon-gfx-itemid.js')) {
+                const code = await dos.load('cylon:/cylon-gfx-itemid.js');
+                if (code) {
+                    const sandbox = {};
+                    const parsedFn = new Function('window', code + '\nreturn window.gfxItemID;')(sandbox);
+                    if (typeof parsedFn === 'function') {
+                        itemFn = parsedFn;
+                        sourceLabel = 'cylon:/cylon-gfx-itemid.js';
+                    }
+                }
+            }
+        } catch (err) {
+            console.warn('Could not parse cylon:/cylon-gfx-itemid.js:', err);
+        }
+    }
+
+    if (typeof itemFn === 'function') {
+        for (const key of ALL_KEYS) {
+            const val = itemFn(key);
+            if (val && val !== 'Unknown') {
+                baseData[key] = String(val);
+                jsData[key] = String(val);
+            }
+        }
+    }
+
+    jsDirty = false;
+    setStatus(`Loaded ${Object.keys(baseData).length} base items (${sourceLabel})`);
+}
+
+// ============================================================================
+// DRIVE SELECTION & LOADING ${drive}:/a/gfxItemID
+// ============================================================================
+async function showDriveMenu() {
+    const dos = getDos();
+    if (!dos || !window.parent || !window.parent.CylonPopManager) return;
+
+    const mounts = await dos.mounts();
+    const gfxDrives = mounts.filter(m => {
+        const src = (m.source || '').toLowerCase();
+        const name = (m.name || '').toLowerCase();
+        return src.endsWith('.gfx') || name.endsWith('.gfx') || name === 'desktop';
+    });
+
+    const items = [];
+    if (gfxDrives.length === 0) {
+        items.push({
+            label: '(No .gfx drives mounted)',
+            action: () => {
+                setStatus('Mount a .gfx drive first (e.g. mount cylon-desktop.gfx ram)');
+            }
+        });
+    } else {
+        gfxDrives.forEach(m => {
+            items.push({
+                label: `${m.name} [${m.type}${m.readOnly ? ', ro' : ''}]`,
+                action: () => selectDrive(m.name)
+            });
+        });
+    }
+
+    window.parent.CylonPopManager.showContextMenu({ pos: 'topleft', view: window }, items);
+
+}
+
+
+async function selectDrive(driveName) {
+    if (!driveName) return;
+    const dos = getDos();
+    if (!dos) return;
+
+    const mounts = await dos.mounts();
+    const mInfo = mounts.find(m => m.name === driveName);
+    activeDriveReadOnly = !!(mInfo && mInfo.readOnly);
+    window.activeDrive = driveName;
+
+    document.getElementById('active-drive-label').textContent =
+        driveName + ':/' + (activeDriveReadOnly ? ' [RO]' : '');
+
+    // Resolve icon directory for this drive
+    driveIconDir = 'i/';
+    try {
+        if (await dos.exists(`${driveName}:/a/gfxIconDir`)) {
+            const v = (await dos.load(`${driveName}:/a/gfxIconDir`)).trim();
+            if (v) driveIconDir = v;
+        }
+    } catch (e) {}
+
+    if (hostOrigin && !driveIconDir.match(/^https?:\/\//i) && !driveIconDir.startsWith('data:')) {
+        driveIconDir = hostOrigin + driveIconDir.replace(/^\/+/, '');
+    }
+    if (!driveIconDir.endsWith('/')) driveIconDir += '/';
+
+    // Load overrides from ${drive}:/a/gfxItemID
+    gfxBase = {};
+    gfxData = {};
+    let loadedCount = 0;
+
+    try {
+        const modPath = `${driveName}:/a/gfxItemID`;
+        if (await dos.exists(modPath)) {
+            const raw = await dos.load(modPath);
+            if (raw && raw.trim()) {
+                const parsed = JSON.parse(raw);
+                if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                    for (const key of Object.keys(parsed)) {
+                        if (!ALL_KEYS.includes(key)) continue;
+                        const desc = String(parsed[key] || '').trim();
+                        if (desc) {
+                            gfxBase[key] = desc;
+                            gfxData[key] = desc;
+                            loadedCount++;
+                        }
+                    }
+                }
+            }
+        }
+    } catch (err) {
+        setStatus(`Warning: could not parse ${driveName}:/a/gfxItemID`);
+    }
+
+    gfxDirty = false;
+    updateToolbarState();
+    refreshSidebarState();
+
+    if (!currentLetter) currentLetter = 'A';
+    selectLetter(currentLetter);
+    setStatus(`Loaded ${driveName}:/ (${loadedCount} override(s))`);
+}
+
+// ============================================================================
+// SIDEBAR & ITEM LIST
+// ============================================================================
+function buildSidebar() {
+    const sb = document.getElementById('sidebar');
+    sb.innerHTML = '';
+    for (let cap = 65; cap <= 90; cap++) {
+        const C = String.fromCharCode(cap);
+        const btn = document.createElement('button');
+        btn.className = 'letter-btn';
+        btn.id = `lbtn-${C}`;
+        btn.textContent = C;
+        btn.title = CATEGORY_NAMES[C] || `Group ${C}`;
+        btn.onclick = () => selectLetter(C);
+        sb.appendChild(btn);
+    }
+    refreshSidebarState();
+}
+
+function refreshSidebarState() {
+    for (let cap = 65; cap <= 90; cap++) {
+        const C = String.fromCharCode(cap);
+        const btn = document.getElementById(`lbtn-${C}`);
+        if (!btn) continue;
+        const hasJs = ALL_KEYS.some(k => k[0] === C && (jsData[k] || '') !== (baseData[k] || ''));
+        const hasMod = ALL_KEYS.some(k => k[0] === C && gfxData[k] && gfxData[k].trim() !== '');
+        btn.classList.remove('has-js', 'has-mod', 'active');
+        if (hasMod) btn.classList.add('has-mod');
+        else if (hasJs) btn.classList.add('has-js');
+        if (C === currentLetter) btn.classList.add('active');
+    }
+    const modTotal = Object.keys(gfxData).filter(k => gfxData[k] && gfxData[k].trim() !== '').length;
+    document.getElementById('mod-count').textContent = `${modTotal} drive mod${modTotal === 1 ? '' : 's'}`;
+}
+
+function selectLetter(C) {
+    currentLetter = C;
+    refreshSidebarState();
+    renderItemList(C);
+}
+
+function renderItemList(C) {
+    const list = document.getElementById('item-list');
+    list.innerHTML = '';
+
+    const keys = ALL_KEYS.filter(k => k[0] === C);
+    for (const key of keys) {
+        const row = document.createElement('div');
+        row.className = 'item-row';
+        row.id = `row-${key}`;
+        updateRowClass(row, key);
+
+        // Icon
+        const imgWrap = document.createElement('div');
+        imgWrap.className = 'item-img-wrap';
+        const img = document.createElement('img');
+        img.className = 'item-img';
+        img.src = `${driveIconDir}${key}.png`;
+        img.alt = key;
+        img.onerror = function() { this.style.opacity = '0.2'; };
+        imgWrap.appendChild(img);
+
+        // ID
+        const idCell = document.createElement('div');
+        idCell.className = 'item-id';
+        idCell.textContent = key;
+
+        // Base itemid.js field
+        const jsWrap = document.createElement('div');
+        jsWrap.className = 'field-wrap';
+        const jsTag = document.createElement('div');
+        jsTag.className = 'field-tag';
+        jsTag.textContent = 'cylon-gfx-itemid.js';
+        const jsInput = document.createElement('input');
+        jsInput.type = 'text';
+        jsInput.id = `js-field-${key}`;
+        jsInput.className = 'js-field';
+        jsInput.maxLength = MAX_DESC;
+        jsInput.readOnly = !devTeamMode;
+        jsInput.value = jsData[key] || '';
+        jsInput.placeholder = baseData[key] ? baseData[key] : '(undefined)';
+        jsInput.dataset.key = key;
+        jsInput.dataset.type = 'js';
+        jsInput.addEventListener('input', onFieldInput);
+        if ((jsData[key] || '') !== (baseData[key] || '')) jsInput.classList.add('edited');
+        jsWrap.appendChild(jsTag);
+        jsWrap.appendChild(jsInput);
+
+        // .gfx override field
+        const gfxWrap = document.createElement('div');
+        gfxWrap.className = 'field-wrap';
+        const gfxTag = document.createElement('div');
+        gfxTag.className = 'field-tag';
+        gfxTag.textContent = '.gfx override';
+        const gfxInput = document.createElement('input');
+        gfxInput.type = 'text';
+        gfxInput.id = `gfx-field-${key}`;
+        gfxInput.className = 'gfx-field';
+        gfxInput.maxLength = MAX_DESC;
+        gfxInput.readOnly = !window.activeDrive || activeDriveReadOnly;
+        gfxInput.value = gfxData[key] || '';
+        gfxInput.placeholder = window.activeDrive ? '(no override)' : '(select drive)';
+        gfxInput.dataset.key = key;
+        gfxInput.dataset.type = 'gfx';
+        gfxInput.addEventListener('input', onFieldInput);
+        if (gfxData[key] && gfxData[key].trim() !== '') gfxInput.classList.add('edited');
+        gfxWrap.appendChild(gfxTag);
+        gfxWrap.appendChild(gfxInput);
+
+        row.appendChild(imgWrap);
+        row.appendChild(idCell);
+        row.appendChild(jsWrap);
+        row.appendChild(gfxWrap);
+        list.appendChild(row);
+    }
+}
+
+function updateRowClass(row, key) {
+    const hasJs = (jsData[key] || '') !== (baseData[key] || '');
+    const hasGfx = !!(gfxData[key] && gfxData[key].trim() !== '');
+    row.classList.remove('has-js-edit', 'has-gfx-edit', 'has-both');
+    if (hasJs && hasGfx) row.classList.add('has-both');
+    else if (hasJs) row.classList.add('has-js-edit');
+    else if (hasGfx) row.classList.add('has-gfx-edit');
+}
+
+function mapsEqual(a, b) {
+    const keysA = Object.keys(a).filter(k => a[k] && a[k].trim() !== '');
+    const keysB = Object.keys(b).filter(k => b[k] && b[k].trim() !== '');
+    if (keysA.length !== keysB.length) return false;
+    return keysA.every(k => a[k] === b[k]);
+}
+
+function onFieldInput(e) {
+    const input = e.target;
+    const key = input.dataset.key;
+    const type = input.dataset.type;
+    const raw = input.value;
+
+    if (type === 'js' && !devTeamMode) {
+        input.value = jsData[key] || '';
+        return;
+    }
+    if (type === 'gfx' && (!window.activeDrive || activeDriveReadOnly)) {
+        input.value = gfxData[key] || '';
+        return;
+    }
+
+    const valid = !CONTROL_CHARS_RE.test(raw) && raw.length <= MAX_DESC;
+    input.classList.toggle('invalid', !valid);
+    if (!valid) {
+        setStatus(`Invalid character or length > ${MAX_DESC} on ${key}`);
+        return;
+    }
+
+    if (type === 'js') {
+        if (raw.trim() === '') delete jsData[key];
+        else jsData[key] = raw;
+        input.classList.toggle('edited', (jsData[key] || '') !== (baseData[key] || ''));
+        jsDirty = !mapsEqual(jsData, baseData);
+    } else {
+        if (raw.trim() === '') delete gfxData[key];
+        else gfxData[key] = raw;
+        input.classList.toggle('edited', !!(gfxData[key] && gfxData[key].trim() !== ''));
+        gfxDirty = !mapsEqual(gfxData, gfxBase);
+    }
+
+    const row = document.getElementById(`row-${key}`);
+    if (row) updateRowClass(row, key);
+
+    updateToolbarState();
+    refreshSidebarState();
+    setStatus(`${key} updated`);
+}
+
+// ============================================================================
+// SAVE / CLEAR / DEVTEAM ACTIONS
+// ============================================================================
+function updateToolbarState() {
+    const gfxWritable = !!window.activeDrive && !activeDriveReadOnly;
+    document.body.classList.toggle('gfx-locked', !gfxWritable);
+    document.body.classList.toggle('devteam-off', !devTeamMode);
+
+    document.getElementById('save-gfx-btn').disabled = !gfxWritable || !gfxDirty;
+
+    const hasAnyMods = Object.keys(gfxData).some(k => gfxData[k] && gfxData[k].trim() !== '');
+    document.getElementById('clear-mods-btn').disabled = !gfxWritable || !hasAnyMods;
+
+    const devBtn = document.getElementById('devteam-btn');
+    devBtn.textContent = devTeamMode ? 'DEVTEAM: ON' : 'DEVTEAM: OFF';
+    devBtn.classList.toggle('dev-on', devTeamMode);
+
+    const saveJsBtn = document.getElementById('save-js-btn');
+    const copyJsBtn = document.getElementById('copy-js-btn');
+    saveJsBtn.style.display = devTeamMode ? '' : 'none';
+    copyJsBtn.style.display = devTeamMode ? '' : 'none';
+    saveJsBtn.disabled = !devTeamMode || !jsDirty || !cylonDriveMounted || cylonDriveReadOnly;
+}
+
+function toggleDevTeam() {
+    devTeamMode = !devTeamMode;
+    updateToolbarState();
+    if (currentLetter) renderItemList(currentLetter);
+
+    if (devTeamMode) {
+        if (!cylonDriveMounted || cylonDriveReadOnly) {
+            setStatus('DevTeam ON (cylon: is read-only/unmounted — use COPY JS)');
+        } else {
+            setStatus('DevTeam ON — editing cylon:/cylon-gfx-itemid.js unlocked');
+        }
+    } else {
+        setStatus('DevTeam OFF — base itemid.js locked');
+    }
+}
+
+async function saveGfxMods() {
+    if (!window.activeDrive || activeDriveReadOnly) return;
+    const dos = getDos();
+    if (!dos) return;
+
+    const cleanMods = {};
+    for (const key of ALL_KEYS) {
+        if (gfxData[key] && gfxData[key].trim() !== '') {
+            cleanMods[key] = gfxData[key].trim();
+        }
+    }
+
+    const modPath = `${window.activeDrive}:/a/gfxItemID`;
+    try {
+        if (Object.keys(cleanMods).length === 0) {
+            if (await dos.exists(modPath)) {
+                await dos.delete(modPath);
+            }
+        } else {
+            const aDir = `${window.activeDrive}:/a`;
+            if (!(await dos.exists(aDir))) {
+                await dos.mkdir(aDir);
+            }
+            await dos.save(modPath, JSON.stringify(cleanMods));
+        }
+
+        gfxBase = Object.assign({}, cleanMods);
+        gfxData = Object.assign({}, cleanMods);
+        gfxDirty = false;
+        updateToolbarState();
+        refreshSidebarState();
+        setStatus(`Saved ${Object.keys(cleanMods).length} override(s) to ${modPath}`);
+        showToast('<b>Saved .gfx overrides!</b>', 900);
+    } catch (err) {
+        setStatus('Error saving .gfx overrides: ' + (err.message || err));
+    }
+}
+
+function promptClearMods() {
+    if (!window.activeDrive || activeDriveReadOnly) return;
+    const drive = window.activeDrive;
+    if (window.popHtm) {
+        window.popHtm(`
+            <div style="padding:14px 18px; text-align:center; font-family:var(--font-face,monospace); max-width:280px;">
+                <div style="margin-bottom:12px;">Clear all item overrides on <b>${drive}:/</b>?</div>
+                <div style="display:flex; gap:8px; justify-content:center;">
+                    <button onclick="var f=document.querySelector('.page-frame.active'); if(f&&f.contentWindow) f.contentWindow.confirmClearMods(); if(window.hpop) window.hpop();" style="padding:6px 12px; cursor:pointer; background:var(--sel-bg,#333); color:var(--sel-fg,#0f0); border:1px solid var(--fg-color,#0f0); font-weight:bold;">CLEAR</button>
+                    <button onclick="if(window.hpop) window.hpop();" style="padding:6px 12px; cursor:pointer; background:var(--menu-bg,#111); color:var(--menu-fg,#aaa); border:1px solid var(--sel-bg,#333);">CANCEL</button>
+                </div>
+            </div>
+        `, 'center');
+    }
+}
+
+window.confirmClearMods = function() {
+    gfxData = {};
+    gfxDirty = !mapsEqual(gfxData, gfxBase);
+    if (currentLetter) renderItemList(currentLetter);
+    updateToolbarState();
+    refreshSidebarState();
+    setStatus('Overrides cleared (click SAVE .GFX to commit)');
+};
+
+function buildItemIdJSSource() {
+    const groups = {};
+    for (const key of ALL_KEYS) {
+        if (!jsData[key] || jsData[key].trim() === '') continue;
+        const cap = key[0];
+        if (!groups[cap]) groups[cap] = [];
+        groups[cap].push(key);
+    }
+
+    let out = 'window.gfxItemID = function(i) {\n';
+    out += '    var itemMap = {\n';
+
+    let firstGroup = true;
+    for (let cap = 65; cap <= 90; cap++) {
+        const C = String.fromCharCode(cap);
+        if (!groups[C] || groups[C].length === 0) continue;
+        if (!firstGroup) out += '\n';
+        firstGroup = false;
+        out += `        // ${CATEGORY_NAMES[C] || C}\n`;
+        for (const key of groups[C]) {
+            const desc = jsData[key].replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+            out += `        "${key}": "${desc}",\n`;
+        }
+    }
+
+    out += '    };\n\n';
+    out += '    return itemMap[i] || "Unknown"; // Use bracket notation to access properties\n';
+    out += '};\n';
+    return out;
+}
+
+async function saveItemIdJS() {
+    if (!devTeamMode || !cylonDriveMounted || cylonDriveReadOnly) return;
+    const dos = getDos();
+    if (!dos) return;
+
+    const src = buildItemIdJSSource();
+    try {
+        await dos.save('cylon:/cylon-gfx-itemid.js', src);
+        baseData = Object.assign({}, jsData);
+        jsDirty = false;
+        updateToolbarState();
+        refreshSidebarState();
+        if (currentLetter) renderItemList(currentLetter);
+        setStatus('Saved cylon:/cylon-gfx-itemid.js');
+        showToast('<b>Saved cylon-gfx-itemid.js!</b>', 900);
+    } catch (err) {
+        setStatus('Error saving cylon-gfx-itemid.js: ' + (err.message || err));
+    }
+}
+
+async function copyItemIdJS() {
+    try {
+        await navigator.clipboard.writeText(buildItemIdJSSource());
+        setStatus('Copied cylon-gfx-itemid.js to clipboard');
+        showToast('<b>Copied JS to clipboard!</b>', 900);
+    } catch (err) {
+        setStatus('Clipboard write failed');
+    }
+}
+
+// ============================================================================
+// KEYBOARD NAVIGATION (Handled via cylon-sdk.js)
+// ============================================================================
+window.keydown = function(key, e) {
+    if (e && e.target && e.target.tagName === 'INPUT') return;
+
+    if (window.parent && window.parent.CylonPopManager && window.parent.CylonPopManager.isMenuOpen) {
+        if (window.parent.CylonPopManager.handleMenuKey(key)) {
+            if (e) e.preventDefault();
+            return;
+        }
+    }
+
+    if (key.length === 1 && /^[A-Za-z]$/.test(key)) {
+        const C = key.toUpperCase();
+        selectLetter(C);
+        const btn = document.getElementById(`lbtn-${C}`);
+        if (btn) btn.scrollIntoView({ block: 'nearest' });
+        if (e) e.preventDefault();
+        return;
+    }
+
+    if (key === 'ArrowLeft' || key === 'ArrowRight') {
+        const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+        const idx = currentLetter ? letters.indexOf(currentLetter) : -1;
+        const next = (key === 'ArrowLeft')
+            ? (idx <= 0 ? 'Z' : letters[idx - 1])
+            : (idx >= 25 ? 'A' : letters[idx + 1]);
+        selectLetter(next);
+        const btn = document.getElementById(`lbtn-${next}`);
+        if (btn) btn.scrollIntoView({ block: 'nearest' });
+        if (e) e.preventDefault();
+    }
+};
+</script>
+</body>
+</html>
