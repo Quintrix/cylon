@@ -1471,6 +1471,11 @@ function removePlayerFromWorld(player, session) {
   if (player.userKey) {
     saveUserSnapshot(player, session);
   }
+  if (player.chatPath) {
+    fileDelete(player.drive, '/', player.chatPath, session || 'system');
+    player.chatPath = null;
+    player.chatLoc = null;
+  }
   if (player.fullPath) {
     fileDelete(player.drive, '/', player.fullPath, session || 'system');
   }
@@ -1574,6 +1579,40 @@ function plugboard(req, stacker, plugs, drive, session) {
     column += 2; 
 
     switch (code) {
+      case 'Vb': {
+        if (tape) { runtape(tape); tape = ""; }
+        let endChat = plugs.indexOf('--', column);
+        let chatRaw = endChat !== -1 ? plugs.slice(column, endChat) : plugs.slice(column);
+        column = endChat !== -1 ? endChat + 2 : plugs.length;
+
+        if (!player.item || player.item === "" || player.item.startsWith('Za') || !player.pubId) break;
+
+        let cleanText = String(chatRaw || '')
+          .replace(/[\x00-\x1f\x7f]/g, ' ')
+          .replace(/~/g, '-')
+          .replace(/--/g, '-')
+          .trim()
+          .slice(0, 80);
+
+        if (player.chatPath) {
+          fileDelete(drive, '/', player.chatPath, session);
+          player.chatPath = null;
+          player.chatLoc = null;
+        }
+
+        if (cleanText) {
+          let bZStr = encodeZ(parseInt(player.z, 10) || 0, gfxZBase);
+          let bLoc  = player.map + bZStr;
+          let bPath = 'b/' + bLoc + player.pubId;
+          let bExp  = 'X' + futureTimestamp(1);
+          fileSave(drive, '/', bPath, cleanText, session, session, bExp);
+          player.chatPath = bPath;
+          player.chatLoc  = bLoc;
+        }
+        break;
+      }
+    	
+    	
       case 'Vn':
       case 'Vs':
       case 'Ve':
@@ -2060,6 +2099,14 @@ function plugboard(req, stacker, plugs, drive, session) {
     }
 
     if (fileExists(drive, '/', 'w/c').exists) runfile('w/c');
+    
+    let curZStr = encodeZ(parseInt(player.z, 10) || 0, gfxZBase);
+    if (player.chatPath && player.chatLoc !== (player.map + curZStr)) {
+      fileDelete(drive, '/', player.chatPath, session);
+      player.chatPath = null;
+      player.chatLoc  = null;
+    }
+
 
     player.lastSeen = Date.now();
     playerIndex.set(session, player);
@@ -2076,6 +2123,34 @@ function plugboard(req, stacker, plugs, drive, session) {
         }
       });
     }
+    
+    let bList = fileList(drive, 'b/', player.map + '*', session);
+    if (bList.success && bList.listing) {
+      let bFiles = bList.listing.trim().split(/\s+/);
+      for (let bi = 0; bi < bFiles.length; bi++) {
+        let bf = bFiles[bi];
+        if (bf.length !== 8) continue;
+        let bSec  = bf.substring(0, 2);
+        let bZStr = bf.substring(2, 4);
+        let bPub  = bf.substring(4, 8);
+        if (bSec !== player.map) continue;
+
+        let pCheck = fileLoad(drive, '/', 'p/' + bPub, 'system');
+        if (!pCheck.success || !pCheck.content || pCheck.content.substring(0, 4) !== (bSec + bZStr)) {
+          fileDelete(drive, '/', 'b/' + bf, 'system');
+          continue;
+        }
+
+        let bLoad = fileLoad(drive, '/', 'b/' + bf, session);
+        if (bLoad.success && bLoad.content) {
+          let safeMsg = String(bLoad.content).replace(/[\r\n~]/g, ' ').trim();
+          if (safeMsg) {
+            items.push('Vb' + bZStr + bPub + safeMsg);
+          }
+        }
+      }
+    }
+
     
     let numericZ = parseInt(player.z, 10) || 0;
     let z = numericZ < 0 ? encodeZ(0, gfxZBase) : encodeZ(numericZ, gfxZBase);

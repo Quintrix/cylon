@@ -250,9 +250,18 @@
       p(d.getHours()) + ':' + p(d.getMinutes());
   }
 
-  async function checkPageUpdate(file, localEntry) {
+  function toLocalStamp(d) {
+    function p(n) { return String(n).padStart(2, '0'); }
+    return String(d.getFullYear()) + p(d.getMonth() + 1) + p(d.getDate()) +
+      p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
+  }
+
+  async function checkPageUpdate(dos, file, localEntry, verifyContent) {
     var localDate = localEntry ? parseLocalStamp(localEntry.timestamp) : null;
-    var row = { file: file, localDate: localDate, remoteDate: null, needsUpdate: false, reason: '', error: null };
+    var row = {
+      file: file, localDate: localDate, remoteDate: null,
+      needsUpdate: false, reason: '', error: null, fetchedText: null
+    };
 
     var res;
     try {
@@ -265,21 +274,57 @@
       row.error = 'HTTP ' + res.status;
       return row;
     }
+
     row.remoteDate = parseHttpDate(res.headers.get('Last-Modified'));
 
     if (!localEntry) {
       row.needsUpdate = true;
       row.reason = 'new';
-    } else if (!row.remoteDate || !localDate) {
-      row.needsUpdate = true;
-      row.reason = 'unknown';
-    } else if (row.remoteDate.getTime() > localDate.getTime()) {
-      row.needsUpdate = true;
-      row.reason = 'newer';
-    } else {
+      return row;
+    }
+
+    // Fast path: server has Last-Modified and local copy is at least that recent
+    if (row.remoteDate && localDate && row.remoteDate.getTime() <= localDate.getTime()) {
       row.needsUpdate = false;
       row.reason = 'current';
+      return row;
     }
+
+    // If Last-Modified is missing or newer, optionally check actual content on GET
+    if (verifyContent || !row.remoteDate) {
+      try {
+        var getRes = await fetch(file, { cache: 'no-store' });
+        if (!getRes.ok) {
+          row.error = 'HTTP ' + getRes.status;
+          return row;
+        }
+        row.remoteDate = row.remoteDate || parseHttpDate(getRes.headers.get('Last-Modified'));
+        row.fetchedText = await getRes.text();
+
+        var localText = await dos.load(file);
+        if (row.fetchedText === localText) {
+          row.needsUpdate = false;
+          row.reason = 'current';
+          // Sync local timestamp to server Last-Modified so future HEAD checks skip GET
+          if (row.remoteDate && (!localDate || row.remoteDate.getTime() > localDate.getTime())) {
+            await dos.save(file, localText, {
+              timestamp: toLocalStamp(row.remoteDate),
+              readOnly: !!localEntry.readOnly
+            });
+          }
+          return row;
+        }
+        row.needsUpdate = true;
+        row.reason = row.remoteDate ? 'newer' : 'changed';
+        return row;
+      } catch (e) {
+        row.error = 'fetch failed: ' + (e && e.message ? e.message : String(e));
+        return row;
+      }
+    }
+
+    row.needsUpdate = true;
+    row.reason = row.remoteDate ? 'newer' : 'unknown';
     return row;
   }
 
@@ -296,49 +341,85 @@
       if (e.type === 'file') localByName[e.name] = e;
     });
 
-    var rows = [];
-    for (var i = 0; i < files.length; i++) {
-      rows.push(await checkPageUpdate(files[i], localByName[files[i]]));
+    var buffered = [];
+    function emit(line) {
+      if (typeof global.printDOS === 'function') {
+        global.printDOS(line + '\n');
+      } else {
+        buffered.push(line);
+      }
     }
 
     var STATUS_TEXT = {
       new: 'new (not local)',
       newer: 'update available',
+      changed: 'content changed',
       unknown: 'unknown (will refresh)',
       current: 'up to date'
     };
 
+    var colW = 26;
     if (!flags.yes) {
-      var preview = [['File', 'Status', 'Remote modified', 'Local saved']];
+      emit(pad('File', colW) + pad('Status', 24) + pad('Remote modified', 18) + 'Local saved');
       var pending = 0;
-      rows.forEach(function (r) {
-        if (r.error) { preview.push([r.file, 'error: ' + r.error, '-', formatDateShort(r.localDate)]); return; }
+      for (var i = 0; i < files.length; i++) {
+        var r = await checkPageUpdate(dos, files[i], localByName[files[i]], false);
+        if (r.error) {
+          emit(pad(r.file, colW) + pad('error: ' + r.error, 24) + pad('-', 18) + formatDateShort(r.localDate));
+          continue;
+        }
         if (r.needsUpdate) pending++;
-        preview.push([r.file, STATUS_TEXT[r.reason], formatDateShort(r.remoteDate), formatDateShort(r.localDate)]);
-      });
-      var out = [table(preview)];
-      out.push('');
-      out.push(pending ? (pending + ' of ' + rows.length + ' file(s) have updates available. Re-run with -y to apply.')
-        : 'All ' + rows.length + ' file(s) are up to date.');
-      return out.join('\n');
+        emit(pad(r.file, colW) + pad(STATUS_TEXT[r.reason], 24) + pad(formatDateShort(r.remoteDate), 18) + formatDateShort(r.localDate));
+      }
+      emit('');
+      emit(pending
+        ? (pending + ' of ' + files.length + ' file(s) have updates available. Re-run with -y to apply.')
+        : ('All ' + files.length + ' file(s) are up to date.'));
+      return buffered.join('\n');
     }
 
-    var results = [['File', 'Result']];
-    for (var j = 0; j < rows.length; j++) {
-      var r = rows[j];
-      if (r.error) { results.push([r.file, 'skipped: ' + r.error]); continue; }
-      if (!r.needsUpdate) { results.push([r.file, 'unchanged']); continue; }
+    emit(pad('File', colW) + 'Result');
+    var counts = { installed: 0, updated: 0, unchanged: 0, skipped: 0 };
+
+    for (var j = 0; j < files.length; j++) {
+      var r2 = await checkPageUpdate(dos, files[j], localByName[files[j]], true);
+      if (r2.error) {
+        counts.skipped++;
+        emit(pad(r2.file, colW) + 'skipped: ' + r2.error);
+        continue;
+      }
+      if (!r2.needsUpdate) {
+        counts.unchanged++;
+        emit(pad(r2.file, colW) + 'unchanged');
+        continue;
+      }
       try {
-        var res2 = await fetch(r.file, { cache: 'no-store' });
-        if (!res2.ok) { results.push([r.file, 'skipped: HTTP ' + res2.status]); continue; }
-        var text = await res2.text();
-        await dos.save(r.file, text);
-        results.push([r.file, r.reason === 'new' ? 'installed' : 'updated']);
+        var text = r2.fetchedText;
+        if (text === null) {
+          var res2 = await fetch(r2.file, { cache: 'no-store' });
+          if (!res2.ok) {
+            counts.skipped++;
+            emit(pad(r2.file, colW) + 'skipped: HTTP ' + res2.status);
+            continue;
+          }
+          text = await res2.text();
+          r2.remoteDate = r2.remoteDate || parseHttpDate(res2.headers.get('Last-Modified'));
+        }
+        var meta = r2.remoteDate ? { timestamp: toLocalStamp(r2.remoteDate) } : undefined;
+        await dos.save(r2.file, text, meta);
+        var label = r2.reason === 'new' ? 'installed' : 'updated';
+        counts[label]++;
+        emit(pad(r2.file, colW) + label);
       } catch (e) {
-        results.push([r.file, 'failed: ' + (e && e.message ? e.message : String(e))]);
+        counts.skipped++;
+        emit(pad(r2.file, colW) + 'failed: ' + (e && e.message ? e.message : String(e)));
       }
     }
-    return table(results);
+
+    emit('');
+    emit('Done: ' + counts.updated + ' updated, ' + counts.installed + ' installed, ' +
+      counts.unchanged + ' unchanged, ' + counts.skipped + ' skipped.');
+    return buffered.join('\n');
   }
 
   var MOUNT_WHERE = {

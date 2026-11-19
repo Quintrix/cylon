@@ -157,6 +157,46 @@ async function showLoginPopup(errorMsg) {
     if (typeof pop === 'function') pop(html, 'center');
 }
 
+function showSayPopup() {
+    if (typeof setPopForce === 'function') setPopForce('visible');
+
+    const commitScript =
+        `(function(el){` +
+        `var msg=(el.value||'').trim();` +
+        `window.proxyInputInPopup=false;` +
+        `if(window.setOSMode)window.setOSMode('app');` +
+        `if(window.hideFullKeyboard)window.hideFullKeyboard();` +
+        `if(window.setPopForce)window.setPopForce('hidden');` +
+        `if(window.hpop)window.hpop();` +
+        `if(!msg)return;` +
+        `var f=document.querySelector('.page-frame.active');` +
+        `if(f&&f.contentWindow){` +
+        `f.contentWindow.postMessage({type:'QANDY_GFX_CMD',cmd:'say',data:msg},` +
+        `(window.location.origin&&window.location.origin!=='null'?window.location.origin:'*'));` +
+        `}` +
+        `})(this)`;
+
+    const cancelScript =
+        `window.proxyInputInPopup=false;` +
+        `if(window.setOSMode)window.setOSMode('app');` +
+        `if(window.hideFullKeyboard)window.hideFullKeyboard();` +
+        `if(window.setPopForce)window.setPopForce('hidden');` +
+        `if(window.hpop)window.hpop();return false;`;
+
+    const html =
+        `<div style="padding:10px 14px; font-family:var(--font-face,monospace);">` +
+        `<div style="font-weight:bold; margin-bottom:6px;">Say Something</div>` +
+        `<input id="qSayInput" type="text" maxlength="80" placeholder="Type message, press ENTER" ` +
+            `onchange="${commitScript}" ` +
+            `style="width:220px; padding:4px; font-family:inherit; background:var(--input-bg,#000); color:var(--input-fg,#0f0); border:1px solid var(--fg-color,#0f0);">` +
+        `<div style="margin-top:6px; text-align:right; font-size:12px;">` +
+            `<a href="#" onclick="${cancelScript}">Cancel</a>` +
+        `</div>` +
+        `</div>`;
+
+    if (typeof pop === 'function') pop(html, 'topleft');
+}
+
 window.onload = async function() {
     if (!window.CylonCommand || !window.CylonGFX) {
         document.body.innerHTML = "<h3 style='color:red;'>Requires Cylon OS and CylonGFX</h3>";
@@ -274,8 +314,12 @@ function handleTileClick(z, clientX, clientY) {
             label: 'Inventory',
             action: () => gfxClick(`ID${pId}${zStr}`)
         });
+        menuItems.push({
+            label: 'Say Something',
+            action: () => showSayPopup()
+        });
     }
-
+    
     // Empty tile -> walk directly
     if (menuItems.length === 0) {
         window.zdown(z);
@@ -640,10 +684,10 @@ window.keydown = function(key, e) {
     }
 
     let dx = 0, dy = 0;
-    if (keyStr === 'ArrowUp' || lower === 'up' || lower === 'w') dy = -1;
-    else if (keyStr === 'ArrowDown' || lower === 'down' || lower === 's') dy = 1;
-    else if (keyStr === 'ArrowLeft' || lower === 'left' || lower === 'a') dx = -1;
-    else if (keyStr === 'ArrowRight' || lower === 'right' || lower === 'd') dx = 1;
+    if (keyStr === 'ArrowUp' || lower === 'up') dy = -1;
+    else if (keyStr === 'ArrowDown' || lower === 'down') dy = 1;
+    else if (keyStr === 'ArrowLeft' || lower === 'left') dx = -1;
+    else if (keyStr === 'ArrowRight' || lower === 'right') dx = 1;
 
     if (dx !== 0 || dy !== 0) {
         if (e) e.preventDefault();

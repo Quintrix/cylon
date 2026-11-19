@@ -1,0 +1,119 @@
+
+
+Looking across `cylon-command.js`, `cylon-dos.js`, `qandyland.js`, and `qandyland-univac.js`, the two systems share the same filesystem concepts (`_dir.sys!`, `qandy-ramdrive` v2 JSON, `<dir>` tokens, `X`-prefixed TTL timestamps), so bringing them closer together is very natural.
+
+---
+
+### 1. Adding `save`, `copy`, and `<c>` Clipboard to `qandyland.js`
+
+#### `save` and `copy`
+`qandyland.js` already has `fileSave(driveName, cwd, name, content, session, owner)` internally—it just isn't wired into the console `switch (cmd)` block.
+* **`save <file> <text>`**: Wire directly to `fileSave(_serverMountedDrive, _serverCwd, target, text, 'console', 'console')`.
+* **`copy <src> <dst>`**: Currently `qandyland.js` only has `rename`. Adding `copy` (reading via `fileLoad` and writing via `fileSave`) also gives you a clean place to attach `<c>`.
+
+#### How `<c>` works in Node (`qandyland.js`)
+`cylon-command.js` uses `navigator.clipboard`, which only exists in the browser. In `qandyland.js`, `<c>` can shell out synchronously with `child_process.execFileSync` / `spawnSync` based on `process.platform`:
+* **Windows (`win32`)**: write via `clip`, read via `powershell -NoProfile -Command Get-Clipboard`
+* **macOS (`darwin`)**: `pbcopy` / `pbpaste`
+* **Linux (`linux`)**: `wl-copy` / `wl-paste` (Wayland) or `xclip -selection clipboard` / `xsel -b` (X11)
+* **Headless/cloud (e.g., Render)**: wrap in `try/catch` and return a clear error (`Clipboard unavailable in headless environment`) so `<c>` works locally for DevTeam without crashing remote deployments.
+
+#### Two small REPL cleanups you'll want while touching `qandyland.js`:
+1. **`return;` vs `break;` bug**: In `qandyland.js`'s `rl.on('line')` `switch (cmd)`, many cases (`export`, `import`, `mount`, `unmount`, `dir`, `ls`, `mkdir`, `cd`, `rmdir`, `rename`, `exam`, `type`, `delete`) use `return;` instead of `break;`, which skips `rl.prompt()` at the end of the handler.
+2. **Flush debounced `_dir.sys!` on exit**: `fileSave` uses `_debounceSaveManifestToStorage` (50ms timer). If you run `save` then `exit` quickly (or programmatically save right before shutdown), flush any pending `_manifestDebounceTimers` inside the `exit`/`shutdown` handler before closing.
+3. **Argument parsing**: `parseQuotedArgs` in `qandyland.js` only handles double quotes and joins `arg` back into a single space-delimited string. Switching to `cylon-command.js`'s `parseArgs` (which supports `'...'`, `"..."`, and `\"` escapes) makes `save <file> <text>` and `copy <src> <dst>` work cleanly.
+
+---
+
+### 2. Cross-Pollination: Cylon DOS $\leftrightarrow$ `qandyland.js`
+
+#### What `qandyland.js` would benefit from in `cylon-dos.js` / `cylon-command.js`
+* **`alpha [dir]`**: In `cylon-command.js`, `alpha` dumps every variable file in `/a/` (or any directory) as `name = value`. In `qandyland.js`, checking `a/gfxSpawn`, `a/gfxZBase`, `a/gfxOdometer`, etc. currently requires `ls` + multiple `type` commands.
+* **Wildcards in `dir`, `ls`, and `delete`**: `qandyland.js` already has `matchPattern()` and `fileSearch()`, and `dirList()` even accepts a `pattern` parameter, but the console `dir`, `ls`, and `delete` cases don't pass wildcard arguments to them. `cylon-dos.js`'s `extractWildcard()` pattern lets `delete w/Bc/Va*` or `dir *.gfx` work uniformly.
+* **Drive-prefixed paths (`drive:/path`) and `drive:` switching**: `cylon-dos.js`'s `ref()` allows cross-drive `copy` (e.g. `copy cylon-queville.gfx:/q/log cylon-capflag.gfx:/q/log`) and keeps per-drive `cwd`, instead of having a single `_serverMountedDrive`.
+* **`importDrive` replace vs. merge mode**: In `cylon-dos.js`, `importDrive` supports both replacing a drive cleanly and merging (`mode: 'merge'`). In `qandyland.js`, `importDrive` only merges, leaving deleted entries behind if re-importing over an existing drive.
+* **Clean `X`-timestamp GC everywhere**: `qandyland.js` only expires `X`-prefixed files inside `fileList()`. If `fileLoad()` or `dirList()` hits an expired entry before `fileList()` runs, it will still return it. Checking `X` expiration inside `fileLoad` and `dirList` (or running a light sweep) matches `cylon-dos.js` behavior.
+
+
+
+
+
+
+Here is a breakdown of the unfinished or broken areas across the files you shared, a recommended order for your next tasks, and desktop app ideas that fit the Qandy/Cylon stack.
+
+---
+
+### 1. Unfinished & Broken Areas in the Current Code
+
+#### High-Priority Bugs / Runtime Errors
+1. **`window.cycleActivePage` throws a `ReferenceError` (`cylon-command.js`)**
+   - `window.cycleActivePage` is defined *outside* the `(function (global) { ... })` IIFE at the bottom of `cylon-command.js`, but it references `openPages`, `activePage`, and `global` which are scoped inside the IIFE.
+   - Pressing `` ` `` or `~` in `cylon.htm` will fail when cycling windows.
+
+2. **`cylon-desktop.htm` is missing `serverdown()` and `renderInventory()` for multiplayer mode**
+   - `cylon-gfx.js` calls `window.serverdown(sPlugs)` (for `S^LE..`, `S^LI..`, `S^LG..`, `S^LO--`, `S^Vh..`, `S^Vr..`) and `window.renderInventory()` (for `S^Vi..`), but neither function exists in `cylon-desktop.htm`.
+   - In remote mode (`<server>//<file.gfx>`), login/account responses, errors, inventory updates, and server-pushed popups are silently dropped.
+   - Also in `cylon-desktop.htm`, `showTargetMenu` overrides `CylonGFX.showTargetMenu` and omits `"Walk Here"` in remote mode—so clicking an empty tile while connected to `qandyland.js` does nothing.
+
+3. **`bigbang()` tile/exit slice mismatch (`qandyland.js`)**
+   - `bigbang()` slices `var tiles = mapData.substring(0, 280)` (140 tiles) and `var exitStr = mapData.substring(280)`, whereas the header comment mentions `96 tiles = 192 chars` and `qandyland-univac.js` defaults to `8×12` (96 tiles = 192 chars) and `cylon-gfx.js` defaults to `8×4` (32 tiles = 64 chars). On any legacy `.gfx` map with fewer than 140 tiles, `substring(0, 280)` swallows the exit codes into `tiles` and leaves `/w/<sector>/e` empty.
+
+4. **Remote `.gfx` mount format trap (`cylon-desktop.htm` & `qandyland.js`)**
+   - `cylon-desktop.htm` runs `mount ${desktopCfg.serverUrl}/${desktopCfg.gfxFile} ram desktop`, which goes through `CylonDOS.decodeArchive()` (`JSON.parse`). If the server serves a legacy plain-text `.gfx` file instead of a `qandy-ramdrive` JSON archive, booting a remote desktop fails at `mount`.
+
+---
+
+#### Unfinished Features & Wiring Gaps
+5. **`cylon-gfx-compiler.htm` unfinished polish**
+   - **`resolveItemName()` is dead code:** It checks `driveItemOverrides` (`/a/gfxItemID`), but `getFileVisualInfo()`, `formatTargetHeadline()`, and `getCodeDescription()` still call `gfxItemID()` directly, ignoring custom item names.
+   - **No delete/rename/clone** for `/q/<tag>` or `/w/` files in the UI (only `+ TAG` create and save).
+   - **No tap-to-jump on `[tag]` blocks:** Clicking an expanded `.punchcode-macro` block in `#decompiler-view` doesn't open `/q/<tag>` for editing, and hover tooltips rely on `mousemove` (which doesn't work well on touchscreens).
+   - **Local-only:** It edits the local `CylonDOS` mount (`ram`/`ls`), with no mechanism to push changes to a running `qandyland.js` server (nor an authenticated upload endpoint on `qandyland.js`).
+   - **Stale desktop cache:** Switching back from `cylon-gfx-compiler.htm` to `cylon-desktop.htm` triggers `QANDY_PAGE_ACTIVATED`, which only reloads `gfxItemID` mods—it doesn't re-render modified `/w/` sector files or tiles.
+
+6. **Minor bugs / leftovers in `cylon.htm`, `cylon-command.js`, and `qandyland.js`**
+   - **`cylon.htm`:**
+     - Line 502 calls `print("Error: [.4]Unknown command: ...")` instead of `printDOS(...)`, printing `[.4]` and `[.]` literally.
+     - `toggleAppFocus()` and `QANDY_APP_CLICKED` post `QANDY_COMMIT_INPUT` directly to `activeFrame` instead of calling `window.applyProxyInputToTarget(...)`, so popup inputs (`window.proxyInputInPopup`) don't commit on focus switch/click-away.
+     - `applyThemeFromAlpha()` populates `window.CylonColors.TextFg0` / `TextBg5` from `vars.themeTextFg0` / `vars.themeTextBg5`, which are never loaded in `vars`.
+   - **`cylon-command.js`:**
+     - `install` has `// ... (skip size calculation code) ...` and leaves `payloadStr` undefined, always printing `Estimated download size: Unknown`.
+     - `HELP_MAIN` documents `delete <file|pattern> [-y]`, but `case 'delete':` deletes immediately without a confirmation step.
+   - **`qandyland.js`:**
+     - There are **two** adjacent `setInterval(..., 30000)` idle-eviction loops (lines 1054 and 1078): the first evicts *all* idle players (including guests), and the second evicts only `p.userKey` players.
+     - `case 'ST':` generates a random 4-letter `pubId`, then immediately overwrites it via `runtape("XaZa")` → `tickOdometer()`.
+     - `sysopOffline`, `sysopCardWidth`, and `sysopGfx` are declared at the top but never enforced/used anywhere.
+
+---
+
+### 2. Recommended Next Task
+
+**Priority 1 — Quick Bugfix Pass (30–60 mins):**
+- Move `window.cycleActivePage` inside the IIFE in `cylon-command.js` (assigning `global.cycleActivePage = ...`).
+- Fix `printDOS` on unknown commands and `applyProxyInputToTarget` in `cylon.htm`.
+- Remove the duplicate idle-logout `setInterval` in `qandyland.js`.
+- Switch `cylon-gfx-compiler.htm` to use `resolveItemName()` everywhere.
+
+**Priority 2 — Make `cylon-gfx-compiler.htm` ↔ `cylon-desktop.htm` ↔ `qandyland.js` a Complete Loop:**
+- **In `cylon-desktop.htm`:** Implement `window.serverdown()` (login/guest/register popups, error display, `Vh` popups) and `window.renderInventory()`, plus `"Walk Here"` on empty-tile clicks in remote mode.
+- **In `cylon-gfx-compiler.htm`:** Add file **Delete / Rename** actions, tap-to-open `[tag]` blocks in `#decompiler-view`, and have `cylon-desktop.htm` refresh on `QANDY_PAGE_ACTIVATED` when `/w/` or `/q/` changed.
+- Decide how you want server sync to work: either a JSON export/import workflow, or a dev/sysop sync endpoint on `qandyland.js` so `cylon-gfx-compiler.htm` can push `/q/` and `/w/` edits live.
+
+---
+
+### 3. Desktop Apps to Include in the Next Release
+
+Based on `PAGES` in `cylon.htm` (which already includes Theme, Files, Calc, Piano, Krystals, GFX Mods/Tileset/Create/Compiler), here are the highest-value apps still missing for a self-contained pocket computer:
+
+1. **Text & Batch Script Editor (`cylon-edit.htm`)**
+   - `cylon-gfx-compiler.htm` only browses `.gfx` drives. You need a general editor for `cylon.cfg`, `/a/` config variables, `.txt` docs, and desktop batch scripts (`ObjDown` / `CylonScript` files) on `cylon:`/`ram:`, ideally with a **Run** button for testing batch scripts.
+2. **Disk & Mount Manager (`cylon-disks.htm`)**
+   - A touch-friendly GUI over `fdisk`, `mount`, `umount`, `export`, `import`, and `install`/`update` so users on mobile don't have to type `fdisk new ...` or `mount ...` on the small virtual keyboard.
+3. **32×32 Pixel Sprite & Tile Editor (`cylon-paint.htm`)**
+   - Since GFX icons (`i/`), tiles (`t/`), and character layers (`c/`) are 32×32 pixel art, a tiny grid pixel editor (saving PNG data URLs or files to a drive) pairs directly with `cylon-gfx-create.htm` and `cylon-gfx-compiler.htm`.
+4. **Qandyland World Browser / Account Launcher (`cylon-lobby.htm`)**
+   - Queries `SYS:DRIVES` and `SYS:KRYSTALS_LIST`, lets the user switch `cylon:/a/cylonDesktop` between local `.gfx` drives and remote `<server>//<world.gfx>` worlds, and opens `cylon-desktop.htm`.
+5. **Pocket Manual / Opcode Reference (`cylon-manual.htm`)**
+   - Searchable quick reference for DOS commands, `[.1]`–`[.9]` color tags, and the UNIVAC 2-character opcodes (`Vn`/`Vs`/`Ve`/`Vw`, `Xi`, `Xe`, `Xl`, `Xm`, `Xd`, `Xs`, `Vx`, `Vy`, `Vz`, `Xz`, `S^`, `Vh`, `Vi`, `Vd`) right beside `cylon-gfx-compiler.htm`.
+6. **Pocket Notes / Clipboard Pad (`cylon-notes.htm`)**
+   - Simple scratchpad saving to `/docs/` that showcases multiline `QANDY_REQ_INPUT` and `<c>` clipboard integration.

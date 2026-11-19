@@ -1,0 +1,1349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Cylon Drives</title>
+<script src="cylon-sdk.js"></script>
+<style>
+    * { box-sizing: border-box; }
+    html, body {
+        margin: 0; padding: 0; height: 100%; width: 100%;
+        background-color: var(--bg-color, #000);
+        color: var(--fg-color, #0f0);
+        font-family: var(--font-face, monospace);
+        overflow: hidden;
+    }
+
+    #drives-app {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        width: 100%;
+    }
+
+    /* Top Toolbar */
+    .drv-toolbar {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 6px;
+        padding: 8px 10px;
+        background-color: var(--menu-bg, #111);
+        color: var(--menu-fg, #aaa);
+        border-bottom: 2px solid var(--fg-color, #0f0);
+        flex: 0 0 auto;
+    }
+    .drv-title-group {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-weight: bold;
+        font-size: 15px;
+        color: var(--fg-color, #0f0);
+    }
+    .drv-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+    }
+
+    .drv-btn {
+        background: var(--menu-bg, #111);
+        color: var(--fg-color, #0f0);
+        border: 1px solid var(--fg-color, #0f0);
+        border-radius: 3px;
+        padding: 4px 9px;
+        font-family: inherit;
+        font-size: 12px;
+        font-weight: bold;
+        cursor: pointer;
+        user-select: none;
+    }
+    .drv-btn:hover, .drv-btn.active {
+        background: var(--sel-bg, #333);
+        color: var(--sel-fg, #0f0);
+    }
+    .drv-btn:active {
+        transform: scale(0.97);
+    }
+    .drv-btn.danger {
+        border-color: var(--text-fg3, #ff4444);
+        color: var(--text-fg3, #ff4444);
+    }
+
+    /* Quota & Status Bars */
+    .drv-quota-bar {
+        padding: 6px 10px;
+        background: rgba(255, 255, 255, 0.03);
+        border-bottom: 1px dashed var(--sel-bg, #333);
+        font-size: 12px;
+        flex: 0 0 auto;
+    }
+    .drv-quota-text {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        gap: 6px;
+        margin-bottom: 4px;
+    }
+    .drv-status {
+        padding: 5px 10px;
+        font-size: 12px;
+        border-bottom: 1px solid var(--sel-bg, #333);
+        background: var(--menu-bg, #111);
+        color: var(--fg-color, #0f0);
+        display: none;
+        flex: 0 0 auto;
+    }
+    .drv-status.visible { display: block; }
+    .drv-status.error { color: var(--text-fg3, #ff5555); }
+    .drv-status.warn { color: var(--text-fg2, #ffff00); }
+
+    /* Main Scroll Area */
+    #drv-scroll {
+        flex: 1 1 auto;
+        overflow-y: auto;
+        padding: 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 14px;
+    }
+
+    .drv-section-hdr {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        font-size: 13px;
+        font-weight: bold;
+        letter-spacing: 1px;
+        padding-bottom: 4px;
+        border-bottom: 1px solid var(--fg-color, #0f0);
+        margin-bottom: 6px;
+        color: var(--fg-color, #0f0);
+    }
+
+    .drv-list {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    .drv-row {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 8px 10px;
+        border: 1px solid var(--sel-bg, #333);
+        border-radius: 4px;
+        background: rgba(255, 255, 255, 0.02);
+        cursor: pointer;
+    }
+    .drv-row:hover {
+        background: var(--sel-bg, #1a1a1a);
+    }
+    .drv-row.current {
+        border-color: var(--fg-color, #0f0);
+    }
+
+    .drv-row-main {
+        flex: 1 1 200px;
+        min-width: 0;
+    }
+    .drv-row-top {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 4px;
+    }
+    .drv-name {
+        font-weight: bold;
+        font-size: 14px;
+        color: var(--fg-color, #0f0);
+    }
+    .drv-badge {
+        font-size: 10px;
+        padding: 1px 5px;
+        border: 1px solid var(--menu-fg, #666);
+        border-radius: 3px;
+        color: var(--menu-fg, #aaa);
+        text-transform: uppercase;
+    }
+    .drv-badge.accent {
+        border-color: var(--fg-color, #0f0);
+        color: var(--fg-color, #0f0);
+    }
+    .drv-badge.warn {
+        border-color: var(--text-fg2, #ff0);
+        color: var(--text-fg2, #ff0);
+    }
+    .drv-meta {
+        font-size: 12px;
+        opacity: 0.85;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        word-break: break-all;
+    }
+
+    .drv-meter-wrap {
+        width: 120px;
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        flex: 0 0 auto;
+    }
+    .drv-meter {
+        width: 100%;
+        height: 6px;
+        background: var(--menu-bg, #111);
+        border: 1px solid var(--sel-bg, #444);
+        border-radius: 3px;
+        overflow: hidden;
+    }
+    .drv-meter-fill {
+        height: 100%;
+        background: var(--fg-color, #0f0);
+        width: 0%;
+        transition: width 0.2s;
+    }
+    .drv-meter-label {
+        font-size: 11px;
+        text-align: right;
+        opacity: 0.85;
+    }
+
+    .drv-empty {
+        padding: 10px;
+        font-size: 12px;
+        opacity: 0.65;
+        font-style: italic;
+        border: 1px dashed var(--sel-bg, #333);
+        border-radius: 4px;
+    }
+
+    /* In-App Modal (works cleanly with cylon-sdk.js virtual keyboard proxy) */
+    #drv-modal-backdrop {
+        display: none;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.82);
+        z-index: 50;
+        align-items: center;
+        justify-content: center;
+        padding: 12px;
+    }
+    #drv-modal-backdrop.open {
+        display: flex;
+    }
+    #drv-modal {
+        width: 100%;
+        max-width: 440px;
+        max-height: 92vh;
+        overflow-y: auto;
+        background: var(--menu-bg, #111);
+        color: var(--fg-color, #0f0);
+        border: 2px solid var(--fg-color, #0f0);
+        border-radius: 5px;
+        padding: 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+    .modal-title {
+        font-size: 15px;
+        font-weight: bold;
+        border-bottom: 1px solid var(--sel-bg, #333);
+        padding-bottom: 6px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .modal-field {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+    }
+    .modal-field label {
+        font-size: 12px;
+        color: var(--menu-fg, #aaa);
+    }
+    .modal-input, .modal-textarea {
+        width: 100%;
+        background: var(--bg-color, #000);
+        color: var(--fg-color, #0f0);
+        border: 1px solid var(--fg-color, #0f0);
+        border-radius: 3px;
+        padding: 6px 8px;
+        font-family: inherit;
+        font-size: 14px;
+    }
+    .modal-textarea {
+        min-height: 76px;
+        resize: vertical;
+    }
+    .chip-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+    }
+    .modal-note {
+        font-size: 12px;
+        line-height: 1.35;
+        color: var(--menu-fg, #ccc);
+    }
+    .modal-note.warn {
+        color: var(--text-fg2, #ffff00);
+    }
+    .modal-footer {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        padding-top: 6px;
+        border-top: 1px solid var(--sel-bg, #333);
+    }
+</style>
+</head>
+<body>
+
+<div id="drives-app">
+    <div class="drv-toolbar">
+        <div class="drv-title-group">
+            <span>DRIVE MANAGER</span>
+            <span id="os-mode-badge" class="drv-badge">...</span>
+        </div>
+        <div class="drv-actions">
+            <button class="drv-btn" id="btn-mount-wizard">+ Mount / Import</button>
+            <button class="drv-btn" id="btn-new-part">+ Partition</button>
+            <button class="drv-btn" id="btn-open-files">Files</button>
+            <button class="drv-btn" id="btn-refresh">Refresh</button>
+        </div>
+    </div>
+
+    <div class="drv-quota-bar">
+        <div class="drv-quota-text">
+            <span id="quota-summary">Scanning storage...</span>
+            <span id="quota-browser"></span>
+        </div>
+        <div class="drv-meter" style="width:100%;">
+            <div class="drv-meter-fill" id="quota-meter-fill"></div>
+        </div>
+    </div>
+
+    <div id="drv-status" class="drv-status"></div>
+
+    <div id="drv-scroll">
+        <section>
+            <div class="drv-section-hdr">
+                <span>MOUNTED DRIVES</span>
+                <span id="mounts-count" style="font-size:11px;opacity:0.8;"></span>
+            </div>
+            <div id="mounts-list" class="drv-list"></div>
+        </section>
+
+        <section>
+            <div class="drv-section-hdr">
+                <span>INDEXEDDB PARTITIONS (FDISK)</span>
+                <span id="parts-count" style="font-size:11px;opacity:0.8;"></span>
+            </div>
+            <div id="parts-list" class="drv-list"></div>
+        </section>
+
+        <section>
+            <div class="drv-section-hdr">
+                <span>LOCALSTORAGE DRIVES (LS)</span>
+                <span id="ls-count" style="font-size:11px;opacity:0.8;"></span>
+            </div>
+            <div id="ls-list" class="drv-list"></div>
+        </section>
+    </div>
+</div>
+
+<!-- In-app Modal -->
+<div id="drv-modal-backdrop">
+    <div id="drv-modal"></div>
+</div>
+
+<script>
+(function() {
+    'use strict';
+
+    let dos = null;
+    let state = {
+        mounts: [],
+        disks: [],
+        partitions: [],
+        lsDrives: []
+    };
+
+    function setStatus(msg, level) {
+        const el = document.getElementById('drv-status');
+        if (!msg) {
+            el.className = 'drv-status';
+            el.textContent = '';
+            return;
+        }
+        el.textContent = msg;
+        el.className = 'drv-status visible' + (level ? ' ' + level : '');
+    }
+
+    function syncParentPrompt() {
+        if (window.parent && typeof window.parent.updatePrompt === 'function') {
+            window.parent.updatePrompt();
+        }
+    }
+
+    function logToTerminal(msg) {
+        if (window.parent && typeof window.parent.printDOS === 'function') {
+            window.parent.printDOS(msg + '\n');
+        }
+    }
+
+    function scanLocalStorageDrives(mountedRows) {
+        const map = Object.create(null);
+        if (typeof localStorage !== 'undefined') {
+            for (let i = 0; i < localStorage.length; i++) {
+                const k = localStorage.key(i);
+                if (!k || !k.startsWith('cylon:')) continue;
+                const rest = k.slice(6);
+                const colon = rest.indexOf(':');
+                if (colon <= 0) continue;
+                const drive = rest.slice(0, colon);
+                if (!map[drive]) {
+                    map[drive] = { name: drive, count: 0, used: 0, mountedAs: [] };
+                }
+                map[drive].count++;
+                const raw = localStorage.getItem(k) || '';
+                try {
+                    const parsed = JSON.parse(raw);
+                    map[drive].used += (parsed && parsed.type === 'file') ? (parsed.size || 0) : 0;
+                } catch (e) {
+                    map[drive].used += raw.length;
+                }
+            }
+        }
+        mountedRows.forEach(m => {
+            if (m.type === 'ls') {
+                if (!map[m.name]) map[m.name] = { name: m.name, count: m.count, used: m.used, mountedAs: [] };
+                map[m.name].mountedAs.push(m.name);
+            }
+        });
+        return Object.keys(map).sort().map(k => map[k]);
+    }
+
+    async function refreshAll() {
+        if (!dos) return;
+        try {
+            const [mounts, disks] = await Promise.all([dos.mounts(), dos.disks()]);
+            const partitions = (disks[0] && disks[0].partitions) ? disks[0].partitions : await dos.partitions();
+            const lsDrives = scanLocalStorageDrives(mounts);
+            state = { mounts, disks, partitions, lsDrives };
+            renderAll();
+        } catch (err) {
+            setStatus(err.message || String(err), 'error');
+        }
+    }
+
+    function renderAll() {
+        renderHeaderQuota();
+        renderMounts();
+        renderPartitions();
+        renderLsDrives();
+    }
+
+    function renderHeaderQuota() {
+        const disk = state.disks[0] || { used: 0, allocated: 0, browserQuota: null, browserUsage: null };
+        const installed = state.partitions.some(p => p.name === 'cylon' || p.name === 'cylon.json');
+        const badge = document.getElementById('os-mode-badge');
+        badge.textContent = installed ? 'IDB INSTALLED' : 'RAM SESSION';
+        badge.className = 'drv-badge ' + (installed ? 'accent' : 'warn');
+
+        document.getElementById('quota-summary').textContent =
+            `IDB: ${dos.formatSize(disk.used)} used / ${dos.formatSize(disk.allocated)} allocated`;
+
+        const bEl = document.getElementById('quota-browser');
+        const fill = document.getElementById('quota-meter-fill');
+        if (disk.browserQuota) {
+            const pct = Math.min(100, Math.round(((disk.browserUsage || disk.used) / disk.browserQuota) * 100));
+            bEl.textContent = `Browser: ${dos.formatSize(disk.browserUsage || 0)} / ${dos.formatSize(disk.browserQuota)}`;
+            fill.style.width = pct + '%';
+        } else {
+            const pct = disk.allocated ? Math.min(100, Math.round((disk.used / disk.allocated) * 100)) : 0;
+            bEl.textContent = '';
+            fill.style.width = pct + '%';
+        }
+    }
+
+    function createMeter(used, quota) {
+        const wrap = document.createElement('div');
+        wrap.className = 'drv-meter-wrap';
+        const pct = quota ? Math.min(100, Math.round((used / quota) * 100)) : 100;
+        wrap.innerHTML = `
+            <div class="drv-meter"><div class="drv-meter-fill" style="width:${pct}%"></div></div>
+            <div class="drv-meter-label">${dos.formatSize(used)}${quota ? ' / ' + dos.formatSize(quota) : ''}</div>
+        `;
+        return wrap;
+    }
+
+    function renderMounts() {
+        const container = document.getElementById('mounts-list');
+        document.getElementById('mounts-count').textContent = `${state.mounts.length} mounted`;
+        container.innerHTML = '';
+
+        if (!state.mounts.length) {
+            container.innerHTML = '<div class="drv-empty">No drives mounted.</div>';
+            return;
+        }
+
+        state.mounts.forEach(m => {
+            const row = document.createElement('div');
+            row.className = 'drv-row' + (m.current ? ' current' : '');
+
+            const main = document.createElement('div');
+            main.className = 'drv-row-main';
+
+            const top = document.createElement('div');
+            top.className = 'drv-row-top';
+
+            const nameEl = document.createElement('span');
+            nameEl.className = 'drv-name';
+            nameEl.textContent = (m.current ? '* ' : '') + m.name + ':';
+            top.appendChild(nameEl);
+
+            const bType = document.createElement('span');
+            bType.className = 'drv-badge accent';
+            bType.textContent = m.type.toUpperCase();
+            top.appendChild(bType);
+
+            const bMode = document.createElement('span');
+            bMode.className = 'drv-badge' + (m.readOnly ? ' warn' : '');
+            bMode.textContent = m.readOnly ? 'RO' : 'RW';
+            top.appendChild(bMode);
+
+            const meta = document.createElement('div');
+            meta.className = 'drv-meta';
+            meta.textContent = `cwd: ${m.cwd}  |  entries: ${m.count}  |  src: ${m.source}`;
+
+            main.appendChild(top);
+            main.appendChild(meta);
+            row.appendChild(main);
+            row.appendChild(createMeter(m.used, m.quota));
+
+            const btn = document.createElement('button');
+            btn.className = 'drv-btn';
+            btn.textContent = 'Actions';
+            btn.onclick = (e) => { e.stopPropagation(); openMountMenu(e, m); };
+            row.appendChild(btn);
+
+            row.onclick = (e) => openMountMenu(e, m);
+            container.appendChild(row);
+        });
+    }
+
+    function renderPartitions() {
+        const container = document.getElementById('parts-list');
+        document.getElementById('parts-count').textContent = `${state.partitions.length} partition(s)`;
+        container.innerHTML = '';
+
+        if (!state.partitions.length) {
+            container.innerHTML = '<div class="drv-empty">No IndexedDB partitions. Use "+ Partition" to create one.</div>';
+            return;
+        }
+
+        state.partitions.forEach(p => {
+            const row = document.createElement('div');
+            row.className = 'drv-row';
+
+            const main = document.createElement('div');
+            main.className = 'drv-row-main';
+
+            const top = document.createElement('div');
+            top.className = 'drv-row-top';
+
+            const nameEl = document.createElement('span');
+            nameEl.className = 'drv-name';
+            nameEl.textContent = `${p.boot ? '* ' : ''}${p.name} (${p.device})`;
+            top.appendChild(nameEl);
+
+            if (p.boot) {
+                const bBoot = document.createElement('span');
+                bBoot.className = 'drv-badge accent';
+                bBoot.textContent = 'BOOT';
+                top.appendChild(bBoot);
+            }
+
+            const bMounted = document.createElement('span');
+            bMounted.className = 'drv-badge' + (p.mountedAs.length ? ' accent' : '');
+            bMounted.textContent = p.mountedAs.length ? `MOUNTED: ${p.mountedAs.join(',')}` : 'UNMOUNTED';
+            top.appendChild(bMounted);
+
+            const meta = document.createElement('div');
+            meta.className = 'drv-meta';
+            meta.textContent = `entries: ${p.count}  |  fs: ${p.fs}`;
+
+            main.appendChild(top);
+            main.appendChild(meta);
+            row.appendChild(main);
+            row.appendChild(createMeter(p.used, p.quota));
+
+            const btn = document.createElement('button');
+            btn.className = 'drv-btn';
+            btn.textContent = 'Actions';
+            btn.onclick = (e) => { e.stopPropagation(); openPartitionMenu(e, p); };
+            row.appendChild(btn);
+
+            row.onclick = (e) => openPartitionMenu(e, p);
+            container.appendChild(row);
+        });
+    }
+
+    function renderLsDrives() {
+        const container = document.getElementById('ls-list');
+        document.getElementById('ls-count').textContent = `${state.lsDrives.length} drive(s)`;
+        container.innerHTML = '';
+
+        if (!state.lsDrives.length) {
+            container.innerHTML = '<div class="drv-empty">No localStorage drives found.</div>';
+            return;
+        }
+
+        state.lsDrives.forEach(ls => {
+            const row = document.createElement('div');
+            row.className = 'drv-row';
+
+            const main = document.createElement('div');
+            main.className = 'drv-row-main';
+
+            const top = document.createElement('div');
+            top.className = 'drv-row-top';
+
+            const nameEl = document.createElement('span');
+            nameEl.className = 'drv-name';
+            nameEl.textContent = ls.name;
+            top.appendChild(nameEl);
+
+            const bMounted = document.createElement('span');
+            bMounted.className = 'drv-badge' + (ls.mountedAs.length ? ' accent' : '');
+            bMounted.textContent = ls.mountedAs.length ? `MOUNTED: ${ls.mountedAs.join(',')}` : 'UNMOUNTED';
+            top.appendChild(bMounted);
+
+            const meta = document.createElement('div');
+            meta.className = 'drv-meta';
+            meta.textContent = `entries: ${ls.count}  |  size: ${dos.formatSize(ls.used)}  |  prefix: cylon:${ls.name}:`;
+
+            main.appendChild(top);
+            main.appendChild(meta);
+            row.appendChild(main);
+
+            const btn = document.createElement('button');
+            btn.className = 'drv-btn';
+            btn.textContent = 'Actions';
+            btn.onclick = (e) => { e.stopPropagation(); openLsMenu(e, ls); };
+            row.appendChild(btn);
+
+            row.onclick = (e) => openLsMenu(e, ls);
+            container.appendChild(row);
+        });
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Context Menus                                                      */
+    /* ------------------------------------------------------------------ */
+
+    function showMenu(e, items) {
+        if (window.parent && window.parent.CylonPopManager && typeof window.parent.CylonPopManager.showContextMenu === 'function') {
+            window.parent.CylonPopManager.showContextMenu(e, items);
+        } else if (items[0] && items[0].action) {
+            items[0].action();
+        }
+    }
+
+    function openMountMenu(e, m) {
+        const items = [];
+
+        if (!m.current) {
+            items.push({ label: `Switch to ${m.name}:`, action: () => {
+                try {
+                    dos.setDrive(m.name);
+                    syncParentPrompt();
+                    setStatus(`Current drive: ${dos.pwd()}`);
+                    refreshAll();
+                } catch (err) { setStatus(err.message, 'error'); }
+            }});
+        }
+
+        items.push({ label: `Browse in Files`, action: () => {
+            try {
+                dos.setDrive(m.name);
+                syncParentPrompt();
+                if (window.parent && window.parent.PageOpen) {
+                    window.parent.PageOpen('cylon-files.htm', 'Files');
+                }
+            } catch (err) { setStatus(err.message, 'error'); }
+        }});
+
+        items.push({ label: `Export JSON File`, action: () => downloadExport(m.name) });
+        items.push({ label: `Copy JSON to Clipboard`, action: () => copyExport(m.name) });
+
+        if (!m.readOnly) {
+            items.push({ label: `Import / Merge JSON...`, action: () => openMountWizard({ targetDrive: m.name }) });
+        }
+
+        items.push({ label: `Clone to New Drive...`, action: async () => {
+            try {
+                const json = await dos.exportDrive(m.name);
+                openMountWizard({ cloneJson: json, cloneFrom: m.name });
+            } catch (err) { setStatus(err.message, 'error'); }
+        }});
+
+        items.push({ label: `Unmount ${m.name}:`, action: () => {
+            const warn = m.type === 'ram'
+                ? `Unmounting RAM drive "${m.name}:" will permanently lose all unsaved files on it.`
+                : `Unmount drive "${m.name}:"?`;
+            openConfirmModal(`Unmount ${m.name}:`, warn, 'Unmount', true, async () => {
+                await dos.umount(m.name);
+                syncParentPrompt();
+                logToTerminal(`Unmounted: ${m.name}`);
+                setStatus(`Unmounted ${m.name}:`);
+                await refreshAll();
+            });
+        }});
+
+        showMenu(e, items);
+    }
+
+    function openPartitionMenu(e, p) {
+        const items = [];
+        const isMounted = p.mountedAs.length > 0;
+
+        if (!isMounted) {
+            items.push({ label: `Mount ${p.name} (RW)`, action: async () => {
+                try {
+                    const name = await dos.mount('idb:' + p.name);
+                    syncParentPrompt();
+                    setStatus(`Mounted ${name}:/ (idb)`);
+                    await refreshAll();
+                } catch (err) { setStatus(err.message, 'error'); }
+            }});
+            items.push({ label: `Mount ${p.name} (Read-Only)`, action: async () => {
+                try {
+                    const name = await dos.mount('idb:' + p.name, null, { readOnly: true });
+                    syncParentPrompt();
+                    setStatus(`Mounted ${name}:/ (idb, read-only)`);
+                    await refreshAll();
+                } catch (err) { setStatus(err.message, 'error'); }
+            }});
+        } else {
+            items.push({ label: `Unmount ${p.mountedAs[0]}:`, action: async () => {
+                try {
+                    await dos.umount(p.mountedAs[0]);
+                    syncParentPrompt();
+                    setStatus(`Unmounted ${p.mountedAs[0]}:`);
+                    await refreshAll();
+                } catch (err) { setStatus(err.message, 'error'); }
+            }});
+        }
+
+        items.push({ label: p.boot ? `Clear Boot Flag` : `Set as Boot Partition`, action: async () => {
+            try {
+                const res = await dos.setBootPartition(p.boot ? 'none' : p.name);
+                setStatus(res ? `Boot partition: ${res}` : 'Boot flag cleared.');
+                await refreshAll();
+            } catch (err) { setStatus(err.message, 'error'); }
+        }});
+
+        items.push({ label: `Resize (${dos.formatSize(p.quota)})...`, action: () => openResizeModal(p) });
+
+        items.push({ label: `Format Partition...`, action: () => {
+            const msg = `Erase all ${p.count} entries (${dos.formatSize(p.used)}) on "${p.name}"?` +
+                (isMounted ? ` (${p.mountedAs.join(', ')} will be unmounted first.)` : '');
+            openConfirmModal(`Format ${p.name}`, msg, 'Format', true, async () => {
+                for (const mName of p.mountedAs) await dos.umount(mName);
+                const res = await dos.formatPartition(p.name);
+                syncParentPrompt();
+                setStatus(`Formatted ${p.name} (${res.erased} entries erased).`);
+                await refreshAll();
+            });
+        }});
+
+        items.push({ label: `Delete Partition...`, action: () => {
+            const msg = `Permanently delete partition "${p.name}" and all its data?` +
+                (isMounted ? ` (${p.mountedAs.join(', ')} will be unmounted first.)` : '');
+            openConfirmModal(`Delete ${p.name}`, msg, 'Delete', true, async () => {
+                for (const mName of p.mountedAs) await dos.umount(mName);
+                await dos.deletePartition(p.name);
+                syncParentPrompt();
+                setStatus(`Deleted partition ${p.name}.`);
+                await refreshAll();
+            });
+        }});
+
+        showMenu(e, items);
+    }
+
+    function openLsMenu(e, ls) {
+        const items = [];
+        const isMounted = ls.mountedAs.length > 0;
+
+        if (!isMounted) {
+            items.push({ label: `Mount ls:${ls.name}`, action: async () => {
+                try {
+                    const name = await dos.mount('ls:' + ls.name);
+                    syncParentPrompt();
+                    setStatus(`Mounted ${name}:/ (ls)`);
+                    await refreshAll();
+                } catch (err) { setStatus(err.message, 'error'); }
+            }});
+        } else {
+            items.push({ label: `Export JSON File`, action: () => downloadExport(ls.mountedAs[0]) });
+            items.push({ label: `Unmount ${ls.mountedAs[0]}:`, action: async () => {
+                try {
+                    await dos.umount(ls.mountedAs[0]);
+                    syncParentPrompt();
+                    setStatus(`Unmounted ${ls.mountedAs[0]}:`);
+                    await refreshAll();
+                } catch (err) { setStatus(err.message, 'error'); }
+            }});
+        }
+
+        items.push({ label: `Wipe localStorage Drive...`, action: () => {
+            const msg = `Delete all ${ls.count} localStorage keys for "${ls.name}"?` +
+                (isMounted ? ` (${ls.mountedAs.join(', ')} will be unmounted first.)` : '');
+            openConfirmModal(`Wipe ls:${ls.name}`, msg, 'Wipe', true, async () => {
+                for (const mName of ls.mountedAs) await dos.umount(mName);
+                const prefix = `cylon:${ls.name}:`;
+                const keys = [];
+                for (let i = 0; i < localStorage.length; i++) {
+                    const k = localStorage.key(i);
+                    if (k && k.startsWith(prefix)) keys.push(k);
+                }
+                keys.forEach(k => localStorage.removeItem(k));
+                syncParentPrompt();
+                setStatus(`Wiped localStorage drive "${ls.name}" (${keys.length} keys).`);
+                await refreshAll();
+            });
+        }});
+
+        showMenu(e, items);
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Export Helpers                                                     */
+    /* ------------------------------------------------------------------ */
+
+    async function downloadExport(driveName) {
+        try {
+            const json = await dos.exportDrive(driveName);
+            const m = state.mounts.find(x => x.name === driveName);
+            const ext = (m && String(m.source).toLowerCase().includes('.gfx')) || driveName === 'desktop' ? '.gfx' : '.json';
+            const filename = driveName + ext;
+            const blob = new Blob([json], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            a.click();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+            setStatus(`Exported ${driveName}: to ${filename}`);
+        } catch (err) {
+            setStatus(err.message || String(err), 'error');
+        }
+    }
+
+    async function copyExport(driveName) {
+        try {
+            if (!navigator.clipboard) throw new Error('Clipboard API not available.');
+            const json = await dos.exportDrive(driveName);
+            await navigator.clipboard.writeText(json);
+            setStatus(`Copied ${driveName}: JSON to clipboard.`);
+        } catch (err) {
+            setStatus(err.message || String(err), 'error');
+        }
+    }
+
+    /* ------------------------------------------------------------------ */
+    /* Modals                                                             */
+    /* ------------------------------------------------------------------ */
+
+    const backdrop = document.getElementById('drv-modal-backdrop');
+    const modal = document.getElementById('drv-modal');
+
+    function closeModal() {
+        backdrop.classList.remove('open');
+        modal.innerHTML = '';
+    }
+
+    backdrop.addEventListener('click', (e) => {
+        if (e.target === backdrop) closeModal();
+    });
+
+    function openConfirmModal(title, message, okLabel, isDanger, onConfirm) {
+        modal.innerHTML = `
+            <div class="modal-title"><span>${escapeHtml(title)}</span></div>
+            <div class="modal-note">${escapeHtml(message)}</div>
+            <div class="modal-footer">
+                <button class="drv-btn" id="m-cancel">Cancel</button>
+                <button class="drv-btn ${isDanger ? 'danger' : ''}" id="m-ok">${escapeHtml(okLabel)}</button>
+            </div>
+        `;
+        backdrop.classList.add('open');
+        document.getElementById('m-cancel').onclick = closeModal;
+        document.getElementById('m-ok').onclick = async () => {
+            try {
+                await onConfirm();
+                closeModal();
+            } catch (err) {
+                setStatus(err.message || String(err), 'error');
+                closeModal();
+            }
+        };
+    }
+
+    function openNewPartitionModal() {
+        modal.innerHTML = `
+            <div class="modal-title"><span>Create IndexedDB Partition</span></div>
+            <div class="modal-field">
+                <label>Partition Name</label>
+                <input type="text" class="modal-input" id="np-name" placeholder="e.g. work">
+            </div>
+            <div class="modal-field">
+                <label>Quota Size (thin-provisioned)</label>
+                <input type="text" class="modal-input" id="np-size" value="32M">
+                <div class="chip-row" id="np-presets"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="drv-btn" id="m-cancel">Cancel</button>
+                <button class="drv-btn" id="m-ok">Create &amp; Mount</button>
+            </div>
+        `;
+        const presets = document.getElementById('np-presets');
+        ['512K', '4M', '10M', '32M', '64M'].forEach(sz => {
+            const b = document.createElement('button');
+            b.className = 'drv-btn';
+            b.textContent = sz;
+            b.onclick = () => { document.getElementById('np-size').value = sz; };
+            presets.appendChild(b);
+        });
+        backdrop.classList.add('open');
+        document.getElementById('m-cancel').onclick = closeModal;
+        document.getElementById('m-ok').onclick = async () => {
+            try {
+                const name = document.getElementById('np-name').value.trim();
+                const sizeText = document.getElementById('np-size').value.trim() || '32M';
+                if (!name) throw new Error('Partition name is required.');
+                const bytes = dos.parseSize(sizeText);
+                const created = await dos.createPartition(name, bytes);
+                await dos.mount('idb:' + created.partition.name);
+                syncParentPrompt();
+                const warn = created.warnings.length ? ' (' + created.warnings.join(' ') + ')' : '';
+                setStatus(`Created & mounted ${created.partition.name}:/${warn}`, created.warnings.length ? 'warn' : '');
+                closeModal();
+                await refreshAll();
+            } catch (err) {
+                setStatus(err.message || String(err), 'error');
+            }
+        };
+    }
+
+    function openResizeModal(p) {
+        modal.innerHTML = `
+            <div class="modal-title"><span>Resize ${escapeHtml(p.name)}</span></div>
+            <div class="modal-note">Current: ${dos.formatSize(p.quota)} (${dos.formatSize(p.used)} used)</div>
+            <div class="modal-field">
+                <label>New Size Limit</label>
+                <input type="text" class="modal-input" id="rs-size" value="${escapeHtml(dos.formatSize(p.quota).replace(/\s+/g, ''))}">
+                <div class="chip-row" id="rs-presets"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="drv-btn" id="m-cancel">Cancel</button>
+                <button class="drv-btn" id="m-ok">Resize</button>
+            </div>
+        `;
+        const presets = document.getElementById('rs-presets');
+        ['1M', '10M', '32M', '64M', '128M'].forEach(sz => {
+            const b = document.createElement('button');
+            b.className = 'drv-btn';
+            b.textContent = sz;
+            b.onclick = () => { document.getElementById('rs-size').value = sz; };
+            presets.appendChild(b);
+        });
+        backdrop.classList.add('open');
+        document.getElementById('m-cancel').onclick = closeModal;
+        document.getElementById('m-ok').onclick = async () => {
+            try {
+                const bytes = dos.parseSize(document.getElementById('rs-size').value.trim());
+                const res = await dos.resizePartition(p.name, bytes);
+                setStatus(`Resized ${p.name} to ${dos.formatSize(res.partition.quota)}.`);
+                closeModal();
+                await refreshAll();
+            } catch (err) {
+                setStatus(err.message || String(err), 'error');
+            }
+        };
+    }
+
+    function openMountWizard(opts) {
+        opts = opts || {};
+        const isImportInto = !!opts.targetDrive;
+        const isClone = !!opts.cloneJson;
+
+        let sourceMode = isClone ? 'paste' : (isImportInto ? 'file' : 'blank');
+        let backendType = 'ram';
+        let importMode = 'replace';
+        let readOnly = false;
+        let uploadedText = opts.cloneJson || null;
+        let uploadedFilename = '';
+
+        modal.innerHTML = `
+            <div class="modal-title">
+                <span>${isImportInto ? 'Import into ' + escapeHtml(opts.targetDrive) + ':' : (isClone ? 'Clone ' + escapeHtml(opts.cloneFrom) + ':' : 'Mount / Import Drive')}</span>
+            </div>
+
+            <div class="modal-field">
+                <label>Source</label>
+                <div class="chip-row" id="mw-sources"></div>
+            </div>
+
+            <div class="modal-field" id="mw-file-wrap" style="display:none;">
+                <label>Select .json or .gfx File</label>
+                <input type="file" id="mw-file" accept=".json,.gfx,application/json">
+                <div class="modal-note" id="mw-file-info"></div>
+            </div>
+
+            <div class="modal-field" id="mw-url-wrap" style="display:none;">
+                <label>DOS File Path or URL (e.g. cylon.json, cylon-desktop.gfx, https://...)</label>
+                <input type="text" class="modal-input" id="mw-url" placeholder="cylon.json">
+            </div>
+
+            <div class="modal-field" id="mw-paste-wrap" style="display:none;">
+                <label>Archive JSON</label>
+                <textarea class="modal-textarea" id="mw-paste" placeholder='{"format":"qandy-ramdrive",...}'></textarea>
+            </div>
+
+            ${isImportInto ? `
+            <div class="modal-field">
+                <label>Import Mode</label>
+                <div class="chip-row" id="mw-imp-modes"></div>
+            </div>` : `
+            <div class="modal-field">
+                <label>Target Drive Name</label>
+                <input type="text" class="modal-input" id="mw-drive" placeholder="e.g. ram, work, desktop" value="${isClone ? escapeHtml(opts.cloneFrom + '_copy') : ''}">
+            </div>
+            <div class="modal-field">
+                <label>Backend Storage</label>
+                <div class="chip-row" id="mw-backends"></div>
+            </div>
+            <div class="modal-field" id="mw-quota-wrap">
+                <label>Quota (optional, e.g. 32M)</label>
+                <input type="text" class="modal-input" id="mw-quota" value="32M">
+            </div>
+            <div class="chip-row" id="mw-ro-wrap"></div>
+            `}
+
+            <div class="modal-note warn" id="mw-guard-note" style="display:none;"></div>
+
+            <div class="modal-footer">
+                <button class="drv-btn" id="m-cancel">Cancel</button>
+                <button class="drv-btn" id="m-ok">${isImportInto ? 'Import' : 'Mount'}</button>
+            </div>
+        `;
+
+        const srcDefs = isImportInto || isClone
+            ? [['file', 'Host File'], ['url', 'DOS Path / URL'], ['paste', 'Paste / Clipboard']]
+            : [['blank', 'Blank RAM'], ['file', 'Host File'], ['url', 'DOS Path / URL'], ['paste', 'Paste JSON']];
+
+        const srcRow = document.getElementById('mw-sources');
+        function renderSourceControls() {
+            srcRow.innerHTML = '';
+            srcDefs.forEach(([id, label]) => {
+                const b = document.createElement('button');
+                b.className = 'drv-btn' + (sourceMode === id ? ' active' : '');
+                b.textContent = label;
+                b.onclick = () => {
+                    sourceMode = id;
+                    if (id === 'blank') backendType = 'ram';
+                    renderSourceControls();
+                    updateWizardVisibility();
+                };
+                srcRow.appendChild(b);
+            });
+        }
+
+        function renderBackendControls() {
+            if (isImportInto) return;
+            const bRow = document.getElementById('mw-backends');
+            bRow.innerHTML = '';
+            const defs = sourceMode === 'blank'
+                ? [['ram', 'RAM'], ['idb', 'IndexedDB']]
+                : [['ram', 'RAM'], ['rom', 'ROM (RO)'], ['idb', 'IndexedDB'], ['ls', 'LocalStorage']];
+            if (!defs.some(d => d[0] === backendType)) backendType = defs[0][0];
+
+            defs.forEach(([id, label]) => {
+                const b = document.createElement('button');
+                b.className = 'drv-btn' + (backendType === id ? ' active' : '');
+                b.textContent = label;
+                b.onclick = () => {
+                    backendType = id;
+                    if (id === 'rom') readOnly = true;
+                    renderBackendControls();
+                    renderRoToggle();
+                    updateWizardVisibility();
+                };
+                bRow.appendChild(b);
+            });
+        }
+
+        function renderRoToggle() {
+            if (isImportInto) return;
+            const wrap = document.getElementById('mw-ro-wrap');
+            wrap.innerHTML = '';
+            const b = document.createElement('button');
+            b.className = 'drv-btn' + (readOnly ? ' active' : '');
+            b.textContent = readOnly ? '[X] Read-Only' : '[ ] Read-Only';
+            b.onclick = () => {
+                if (backendType === 'rom') return;
+                readOnly = !readOnly;
+                renderRoToggle();
+            };
+            wrap.appendChild(b);
+        }
+
+        if (isImportInto) {
+            const impRow = document.getElementById('mw-imp-modes');
+            const renderImpModes = () => {
+                impRow.innerHTML = '';
+                [['replace', 'Replace All Files'], ['merge', 'Merge (Keep Existing)']].forEach(([m, lbl]) => {
+                    const b = document.createElement('button');
+                    b.className = 'drv-btn' + (importMode === m ? ' active' : '');
+                    b.textContent = lbl;
+                    b.onclick = () => { importMode = m; renderImpModes(); };
+                    impRow.appendChild(b);
+                });
+            };
+            renderImpModes();
+        }
+
+        function updateWizardVisibility() {
+            document.getElementById('mw-file-wrap').style.display = sourceMode === 'file' ? 'flex' : 'none';
+            document.getElementById('mw-url-wrap').style.display = sourceMode === 'url' ? 'flex' : 'none';
+            document.getElementById('mw-paste-wrap').style.display = sourceMode === 'paste' ? 'flex' : 'none';
+            if (!isImportInto) {
+                renderBackendControls();
+                const qWrap = document.getElementById('mw-quota-wrap');
+                if (qWrap) qWrap.style.display = (backendType === 'rom') ? 'none' : 'flex';
+            }
+            checkSecurityGuard();
+        }
+
+        function checkSecurityGuard() {
+            const guard = document.getElementById('mw-guard-note');
+            const drv = isImportInto ? opts.targetDrive : (document.getElementById('mw-drive') ? document.getElementById('mw-drive').value.trim() : '');
+            const urlVal = document.getElementById('mw-url') ? document.getElementById('mw-url').value.trim() : '';
+            const srcName = (sourceMode === 'file' ? uploadedFilename : urlVal).toLowerCase();
+            const targetMount = isImportInto ? state.mounts.find(m => m.name === opts.targetDrive) : null;
+            const effectiveType = targetMount ? targetMount.type : backendType;
+
+            let warnMsg = '';
+            if (effectiveType === 'idb' && (srcName.endsWith('.gfx') || drv.toLowerCase() === 'desktop')) {
+                warnMsg = 'Security rule: .gfx files and the "desktop" drive cannot be mounted/imported to IndexedDB.';
+            } else if (effectiveType === 'ls' && (srcName.endsWith('.json') || drv.toLowerCase() === 'cylon')) {
+                warnMsg = 'Security rule: .json files and the "cylon" OS drive cannot be mounted/imported to localStorage.';
+            }
+            guard.textContent = warnMsg;
+            guard.style.display = warnMsg ? 'block' : 'none';
+        }
+
+        const fileInput = document.getElementById('mw-file');
+        fileInput.onchange = async () => {
+            const f = fileInput.files && fileInput.files[0];
+            if (!f) return;
+            uploadedFilename = f.name;
+            uploadedText = await f.text();
+            document.getElementById('mw-file-info').textContent = `Loaded ${f.name} (${dos.formatSize(uploadedText.length)})`;
+            const drvEl = document.getElementById('mw-drive');
+            if (drvEl && !drvEl.value.trim()) {
+                drvEl.value = f.name.replace(/\.(json|gfx)$/i, '');
+            }
+            if (!isImportInto && f.name.toLowerCase().endsWith('.gfx') && backendType === 'idb') {
+                backendType = 'ram';
+            }
+            updateWizardVisibility();
+        };
+
+        if (isClone && opts.cloneJson) {
+            document.getElementById('mw-paste').value = opts.cloneJson;
+        }
+
+        const urlEl = document.getElementById('mw-url');
+        if (urlEl) urlEl.addEventListener('input', checkSecurityGuard);
+        const drvInputEl = document.getElementById('mw-drive');
+        if (drvInputEl) drvInputEl.addEventListener('input', checkSecurityGuard);
+
+        renderSourceControls();
+        renderBackendControls();
+        renderRoToggle();
+        updateWizardVisibility();
+        backdrop.classList.add('open');
+
+        document.getElementById('m-cancel').onclick = closeModal;
+        document.getElementById('m-ok').onclick = async () => {
+            try {
+                let archiveText = null;
+                let sourceRef = '';
+
+                if (sourceMode === 'file') {
+                    if (!uploadedText) throw new Error('Select a .json or .gfx file first.');
+                    archiveText = uploadedText;
+                    sourceRef = uploadedFilename || 'upload.json';
+                } else if (sourceMode === 'paste') {
+                    const txt = document.getElementById('mw-paste').value.trim();
+                    if (!txt) throw new Error('Paste archive JSON first.');
+                    archiveText = txt;
+                    sourceRef = 'inline.json';
+                } else if (sourceMode === 'url') {
+                    const path = document.getElementById('mw-url').value.trim();
+                    if (!path) throw new Error('Enter a DOS file path or URL.');
+                    sourceRef = path;
+                    let loadedFromDos = false;
+                    try {
+                        if (await dos.exists(path)) {
+                            archiveText = await dos.load(path);
+                            loadedFromDos = true;
+                        }
+                    } catch (e) {}
+                    if (!loadedFromDos) {
+                        const res = await fetch(path, { cache: 'no-store' });
+                        if (!res.ok) throw new Error(`Cannot fetch ${path}: HTTP ${res.status}`);
+                        archiveText = await res.text();
+                    }
+                }
+
+                if (isImportInto) {
+                    const srcLower = sourceRef.toLowerCase();
+                    const mObj = state.mounts.find(x => x.name === opts.targetDrive);
+                    if (mObj && mObj.type === 'idb' && srcLower.endsWith('.gfx')) {
+                        throw new Error('Security Violation: .gfx files cannot be imported to IndexedDB.');
+                    }
+                    if (mObj && mObj.type === 'ls' && srcLower.endsWith('.json')) {
+                        throw new Error('Security Violation: .json files cannot be imported to localStorage.');
+                    }
+                    await dos.importDrive(archiveText, { drive: opts.targetDrive, mode: importMode });
+                    setStatus(`Imported into ${opts.targetDrive}:/ (${importMode} mode).`);
+                } else {
+                    const driveName = (document.getElementById('mw-drive').value || '').trim();
+                    const quotaVal = (document.getElementById('mw-quota').value || '').trim();
+                    const mountOpts = { type: backendType, readOnly };
+                    if (quotaVal && backendType !== 'rom') mountOpts.quota = dos.parseSize(quotaVal);
+
+                    if (sourceMode === 'blank') {
+                        const targetName = driveName || 'ram';
+                        if (backendType === 'idb') {
+                            const parts = await dos.partitions();
+                            if (!parts.some(p => p.name === targetName)) {
+                                await dos.createPartition(targetName, mountOpts.quota || dos.constants.DEFAULT_QUOTA);
+                            }
+                            await dos.mount('idb:' + targetName, targetName, { readOnly });
+                        } else {
+                            await dos.mount('ram:', targetName, mountOpts);
+                        }
+                        setStatus(`Mounted blank ${targetName}:/ (${backendType})`);
+                    } else {
+                        const targetName = driveName || sourceRef.replace(/^.*\//, '').replace(/\.(json|gfx)$/i, '') || 'drive';
+                        const srcLower = sourceRef.toLowerCase();
+                        if (backendType === 'idb' && (srcLower.endsWith('.gfx') || targetName.toLowerCase() === 'desktop')) {
+                            throw new Error('Security Violation: .gfx files (and desktop) cannot be mounted to IndexedDB.');
+                        }
+                        if (backendType === 'ls' && (srcLower.endsWith('.json') || targetName.toLowerCase() === 'cylon')) {
+                            throw new Error('Security Violation: .json files (and cylon) cannot be mounted to localStorage.');
+                        }
+
+                        if (backendType === 'idb') {
+                            const parts = await dos.partitions();
+                            if (!parts.some(p => p.name === targetName)) {
+                                await dos.createPartition(targetName, mountOpts.quota || dos.constants.DEFAULT_QUOTA);
+                            }
+                            if (!state.mounts.some(m => m.name === targetName)) {
+                                await dos.mount('idb:' + targetName, targetName, { readOnly });
+                            }
+                            await dos.importDrive(archiveText, { drive: targetName, mode: 'replace' });
+                        } else if (backendType === 'ls') {
+                            if (!state.mounts.some(m => m.name === targetName)) {
+                                await dos.mount('ls:' + targetName, targetName, mountOpts);
+                            }
+                            await dos.importDrive(archiveText, { drive: targetName, mode: 'replace' });
+                        } else {
+                            mountOpts.data = archiveText;
+                            await dos.mount(backendType + ':' + sourceRef, targetName, mountOpts);
+                        }
+                        setStatus(`Mounted ${targetName}:/ (${backendType})`);
+                    }
+                    syncParentPrompt();
+                }
+
+                closeModal();
+                await refreshAll();
+            } catch (err) {
+                setStatus(err.message || String(err), 'error');
+            }
+        };
+    }
+
+    function escapeHtml(str) {
+        return String(str == null ? '' : str).replace(/[&<>'"]/g, t => ({
+            '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+        }[t] || t));
+    }
+
+    window.addEventListener('message', (e) => {
+        if (window.location.origin !== 'null' && e.origin !== window.location.origin) return;
+        if (e.source !== window && e.source !== window.parent) return;
+        if (!e.data || typeof e.data !== 'object') return;
+
+        if (e.data.type === 'QANDY_UPDATE_COLORS' && window.CylonSDK) {
+            window.CylonSDK.applyColors(e.data.colors);
+        } else if (e.data.type === 'QANDY_PAGE_ACTIVATED') {
+            refreshAll();
+        }
+    });
+
+    window.onload = async function() {
+        if (window.CylonSDK && window.CylonSDK.injectDesktopStyles) {
+            window.CylonSDK.injectDesktopStyles();
+        }
+
+        dos = (window.parent && window.parent.CylonDOS) ? window.parent.CylonDOS : window.CylonDOS;
+        if (!dos) {
+            document.getElementById('drv-scroll').innerHTML =
+                '<div class="drv-empty" style="color:#f55;">Error: CylonDOS is not connected.</div>';
+            return;
+        }
+
+        document.getElementById('btn-mount-wizard').onclick = () => openMountWizard();
+        document.getElementById('btn-new-part').onclick = () => openNewPartitionModal();
+        document.getElementById('btn-open-files').onclick = () => {
+            if (window.parent && typeof window.parent.PageOpen === 'function') {
+                window.parent.PageOpen('cylon-files.htm', 'Files');
+            }
+        };
+        document.getElementById('btn-refresh').onclick = async () => {
+            setStatus('Refreshed.');
+            await refreshAll();
+        };
+
+        window.keydown = function(key, e) {
+            if (key === 'Escape' && backdrop.classList.contains('open')) {
+                closeModal();
+                if (e) e.preventDefault();
+            }
+        };
+
+        await refreshAll();
+    };
+})();
+</script>
+</body>
+</html>

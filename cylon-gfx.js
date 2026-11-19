@@ -876,6 +876,11 @@ window.CylonGFX = {
 
     renderSectorStaticObjects: function(sector) {
         const iconsLayer = document.getElementById('icons-layer');
+
+        if (iconsLayer) {
+          iconsLayer.querySelectorAll('.dyn-sprite, .chat-bubble').forEach(el => el.remove());
+        }
+
         if (!iconsLayer) return;
 
         iconsLayer.querySelectorAll('.static-obj').forEach(el => el.remove());
@@ -963,12 +968,27 @@ window.CylonGFX = {
             iconsLayer.querySelectorAll('.dyn-sprite').forEach(el => el.remove());
         }
 
+
         let entries = itemsStr ? itemsStr.split('~').filter(Boolean) : [];
         let hasStaticObjs = new Set(this.mapObjs[sector] || []);
+        let chatBubbles = [];
 
         for (let entry of entries) {
             if (entry.length < 4) continue;
             let iId = entry.substring(0, 2);
+
+            // --- 0. CHAT BUBBLES (Vb[zStr][pubId][text]) ---
+            if (iId === 'Vb') {
+                if (entry.length > 8) {
+                    let bZ = this.decodeZ(entry.substring(2, 4), this.gfxZBase);
+                    let bPubId = entry.substring(4, 8);
+                    let bText = entry.substring(8);
+                    if (!isNaN(bZ) && bText) {
+                        chatBubbles.push({ z: bZ, pubId: bPubId, text: bText });
+                    }
+                }
+                continue;
+            }
 
             // --- 1. PUNCH CODE MARKER INTERCEPTION (Vx, Vy, Xz) ---
             if (entry.length === 6 && (iId.charAt(0) === 'V' || iId.charAt(0) === 'X')) {
@@ -1074,6 +1094,8 @@ window.CylonGFX = {
 
         window.movingItems = nextMovingItems;
         this.renderCursor();
+        this.renderChatBubbles(chatBubbles);
+        
     },
 
     // ========================================================================
@@ -1464,6 +1486,30 @@ window.CylonGFX = {
                 }
                 break;
             }
+            
+            case 'say': {
+                if (!window.remoteQandylandUrl) {
+                    if (window.parent && window.parent.print) window.parent.print(`[.4]GFX Error: Not connected to a Qandyland server.[.]\n`);
+                    break;
+                }
+                let msg = String(data == null ? '' : data)
+                    .replace(/[\x00-\x1f\x7f]/g, ' ')
+                    .replace(/~/g, '-')
+                    .replace(/--/g, '-')
+                    .trim()
+                    .slice(0, 80);
+                if (!msg) break;
+                if (!window.cylonGfxSession || !window.playerItem || window.playerItem.startsWith('Za')) {
+                    if (window.parent && window.parent.print) window.parent.print(`[.4]Login first before chatting.[.]\n`);
+                    break;
+                }
+                if (window.gfxDo === 'RF') window.gfxDo = '';
+                window.gfxDo += 'Vb' + msg + '--';
+                if (!this.networkInterval) this.startNetworkTick();
+                else if (!this.isSyncing) await this.networkTick();
+                break;
+            }
+
 
         }
     },
@@ -1769,6 +1815,68 @@ window.CylonGFX = {
 
         cursorEl.innerHTML = '';
         this.buildAvatarOrIcon(cursorEl, window.playerItem || 'Za', window.playerAvatar);
+        
+        if (window.playerId) {
+            iconsLayer.querySelectorAll(`.chat-bubble[data-pubid="${window.playerId}"]`).forEach(el => {
+                if (parseInt(el.getAttribute('data-z'), 10) !== z) el.remove();
+            });
+        }
+
+    },
+
+    renderChatBubbles: function(bubbles) {
+        const iconsLayer = document.getElementById('icons-layer');
+        if (!iconsLayer || !bubbles || bubbles.length === 0) return;
+
+        for (let b of bubbles) {
+            let x = b.z % this.gridWide;
+            let y = Math.floor(b.z / this.gridWide);
+
+            let el = document.createElement('div');
+            el.className = 'chat-bubble';
+            el.setAttribute('data-z', b.z);
+            el.setAttribute('data-pubid', b.pubId);
+            el.textContent = b.text; // XSS-safe
+
+            let isTopRows = (y < 2);
+            let tx = '-50%';
+            let ty = isTopRows ? '0%' : '-100%';
+
+            el.style.position = 'absolute';
+            el.style.pointerEvents = 'none';
+            el.style.zIndex = '1500';
+            el.style.maxWidth = '180px';
+            el.style.padding = '3px 6px';
+            el.style.borderRadius = '4px';
+            el.style.background = 'rgba(0, 0, 0, 0.85)';
+            el.style.color = '#ffffff';
+            el.style.border = '1px solid var(--fg-color, #0f0)';
+            el.style.fontFamily = 'var(--font-face, monospace)';
+            el.style.fontSize = '11px';
+            el.style.lineHeight = '1.2';
+            el.style.textAlign = 'center';
+            el.style.wordWrap = 'break-word';
+            el.style.boxShadow = '0 2px 4px rgba(0, 0, 0, 0.8)';
+
+            if (x === 0) {
+                el.style.left = '2px';
+                tx = '0%';
+            } else if (x === this.gridWide - 1) {
+                el.style.right = '2px';
+                tx = '0%';
+            } else {
+                el.style.left = (((x + 0.5) / this.gridWide) * 100) + '%';
+            }
+
+            if (isTopRows) {
+                el.style.top = (((y + 0.95) / this.gridTall) * 100) + '%';
+            } else {
+                el.style.top = (((y - 1.05) / this.gridTall) * 100) + '%';
+            }
+
+            el.style.transform = `translate(${tx}, ${ty})`;
+            iconsLayer.appendChild(el);
+        }
     },
 
     // ========================================================================

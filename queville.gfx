@@ -2,7 +2,7 @@
   "format": "qandy-ramdrive",
   "version": 2,
   "drive": "queville",
-  "created": "2026-11-14T01:34:16.086Z",
+  "created": "2026-11-19T03:22:28.724Z",
   "entries": [
     {
       "name": "a",
@@ -109,6 +109,15 @@
       "content": "32",
       "size": 2,
       "timestamp": "20261113203304",
+      "owner": "",
+      "session": "",
+      "readOnly": false
+    },
+    {
+      "name": "b",
+      "type": "directory",
+      "size": 0,
+      "timestamp": "20261118222210",
       "owner": "",
       "session": "",
       "readOnly": false

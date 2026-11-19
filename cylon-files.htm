@@ -129,13 +129,13 @@
 <div id="file-manager">
     <!-- Static Header -->
     <div class="fm-grid fm-header">
-        <div>Name</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+            <span>Name</span>
+            <button id="fm-drives-btn" style="background:var(--menu-bg,#111);color:var(--fg-color,#0f0);border:1px solid var(--fg-color,#0f0);border-radius:3px;padding:2px 8px;font-family:inherit;font-size:12px;cursor:pointer;">Drives</button>
+        </div>
         <div>Size</div>
         <div>Date Modified</div>
     </div>
-    
-    <!-- Dynamic Root Container -->
-    <div id="fm-root"></div>
 </div>
 
 <script>
@@ -151,6 +151,16 @@
         const hostOrigin = window.parent.cylonHostOrigin || '';
         const iconBase = hostOrigin + 'i/';
         const rootContainer = document.getElementById('fm-root');
+
+        const drivesBtn = document.getElementById('fm-drives-btn');
+        if (drivesBtn) {
+            drivesBtn.onclick = (e) => {
+                e.stopPropagation();
+                if (window.parent && typeof window.parent.PageOpen === 'function') {
+                    window.parent.PageOpen('cylon-drives.htm', 'Drives');
+                }
+            };
+        }
 
         // Map extensions to known Cylon GFX Icon Codes, defaulting to Au (Folder)
         function getIconCode(isDir, name) {
@@ -292,16 +302,29 @@
         // Trigger context menu for file interactions
         function showContextMenu(e, name, fullPath, rowWrapper) {
             if (!window.parent.CylonPopManager) return;
-            
+
+            let lower = name.toLowerCase();
             let items = [
                 { label: `Open: ${name}`, action: () => {
                     window.parent.injectAndExecute(`load "${fullPath}"`);
-                }},
-                { label: `Delete`, action: () => {
-                    window.parent.injectAndExecute(`delete "${fullPath}" -y`);
-                    rowWrapper.style.display = 'none'; // Visually remove immediately for UX
                 }}
             ];
+
+            if (lower.endsWith('.json') || lower.endsWith('.gfx')) {
+                items.push({ label: `Mount as RAM`, action: async () => {
+                    await window.parent.injectAndExecute(`mount "${fullPath}" ram`);
+                    initFilesystem();
+                }});
+                items.push({ label: `Mount as ROM`, action: async () => {
+                    await window.parent.injectAndExecute(`mount "${fullPath}" rom`);
+                    initFilesystem();
+                }});
+            }
+
+            items.push({ label: `Delete`, action: () => {
+                window.parent.injectAndExecute(`delete "${fullPath}" -y`);
+                rowWrapper.style.display = 'none'; // Visually remove immediately for UX
+            }});
 
             window.parent.CylonPopManager.showContextMenu(e, items);
         }
