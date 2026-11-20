@@ -1,87 +1,67 @@
-
-//
 //
 // ──── Qandyland Server v2 ────────────────────────────────────────────────────
-//
-// Storage structure: drive.storage = Map<key, value>
-//   Files:       "path/to/file.txt" → "file content"
-//   Directories: "<path/to/dir>"    → ""
-//   Manifest:    "_dir.sys!"        → "name|size|timestamp|owner|session\n..."
 //
 
 'use strict';
 
 // Sysop Variables
-var sysopOffline=true;        // only serves files to localHost
-var sysopCardWidth = 160;     // "Front-and-back punch card" limit
+var sysopOffline = true;            // only serves files to localHost
+var sysopCardWidth = 160;           // "Front-and-back punch card" limit
 var sysopGfx = 'cylon-desktop.gfx'; // default .gfx file
 
-const UNIVAC = require('./qandyland-univac.js');
-const Krystals = require('./qandyland-krystals.js'); // <-- NEW: Import Krystals Protocol
+const UNIVAC   = require('./qandyland-univac.js');
+const Krystals = require('./qandyland-krystals.js');
+const DOS      = require('./qandyland-dos.js');
+const Command  = require('./qandyland-command.js');
 
-UNIVAC.inject({ fileLoad,
-                fileSave,
-                fileDelete,
-                fileList,
-                fileRename,
-                futureTimestamp
-              });
+UNIVAC.inject({
+  fileLoad:        DOS.fileLoad,
+  fileSave:        DOS.fileSave,
+  fileDelete:      DOS.fileDelete,
+  fileList:        DOS.fileList,
+  fileRename:      DOS.fileRename,
+  futureTimestamp: DOS.futureTimestamp
+});
 
-var exec = require('child_process').exec;
-var http = require('http');
-var path = require('path');
-var fs   = require('fs');
+var http   = require('http');
+var path   = require('path');
+var fs     = require('fs');
 var crypto = require('crypto');
 
-// ── Configuration ─────────────────────────────────────────────────────────────
+// ── CLI Arguments & Configuration ─────────────────────────────────────────────
 
-var PORT = process.env.PORT || 8080;  
+function parseCliArgs(argv) {
+  var cfg = {
+    port: process.env.PORT ? parseInt(process.env.PORT, 10) : 8080,
+    serverId: process.env.SERVER_ID || null,
+    cfgFile: process.env.QANDY_CFG || 'qandyland.cfg',
+    mounts: []
+  };
+  for (var i = 0; i < argv.length; i++) {
+    var a = argv[i];
+    if ((a === '--port' || a === '-p') && argv[i + 1]) {
+      cfg.port = parseInt(argv[++i], 10) || cfg.port;
+    } else if ((a === '--id' || a === '--server-id') && argv[i + 1]) {
+      cfg.serverId = argv[++i];
+    } else if (a === '--cfg' && argv[i + 1]) {
+      cfg.cfgFile = argv[++i];
+    } else if ((a === '--mount' || a === '-m') && argv[i + 1]) {
+      cfg.mounts.push(argv[++i]);
+    }
+  }
+  if (!cfg.serverId) cfg.serverId = 'qandy-' + cfg.port;
+  return cfg;
+}
 
-var MANIFEST_KEY  = '_dir.sys!';
-var MAX_NAME_BYTES = 255;
-// Hard-coded limits: modify source to change (not configurable via API or scripts)
-var MAX_TOTAL_DRIVE_SIZE = 10 * 1024 * 1024; // 10 MB per drive
-var MAX_FILE_BYTES = 64 * 1024;             // 64 KB per file
-var MAX_DRIVE_FILES = 20000;
+var CLI_CONFIG     = parseCliArgs(process.argv.slice(2));
+var PORT           = CLI_CONFIG.port;
+var SERVER_ID      = CLI_CONFIG.serverId;
 var SESSION_COOKIE = 'q';
-var TYPE_MAX_BYTES = 65536; // 64 KB display limit
-var VALID_NAME_RE = /^(?!\.)(?!.*[\\/])[A-Za-z0-9 \-_.()+=!%,:;\[\]\^_{}@]+$/;
 
-// ── Z-Coordinate Engine Encoders ──────────────────────────────────────────────
-const QANDY_UPPER = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
-const QANDY_LOWER = "abcdefghijklmnopqrstuvwxyz";
-const QANDY_SYM   = "0123456789_()[]{}^,:;+-=%@";
+var encodeZ = UNIVAC.encodeZ;
+var decodeZ = UNIVAC.decodeZ;
 
-function encodeZ(z, base) {
-    if (base === 52) {
-        if (z < 0 || z >= 1352) return "Aa"; 
-        if (z < 676) {
-            return QANDY_UPPER[Math.floor(z / 26)] + QANDY_LOWER[z % 26];
-        } else {
-            let z2 = z - 676;
-            return QANDY_UPPER[Math.floor(z2 / 26)] + QANDY_SYM[z2 % 26];
-        }
-    }
-    return z.toString(base).toUpperCase().padStart(2, '0');
-}
-
-function decodeZ(zStr, base) {
-    if (base === 52) {
-        if (!zStr || zStr.length !== 2) return 0;
-        let first = QANDY_UPPER.indexOf(zStr.charAt(0));
-        if (first === -1) return 0;
-        
-        let secondLower = QANDY_LOWER.indexOf(zStr.charAt(1));
-        if (secondLower !== -1) return (first * 26) + secondLower;
-        
-        let secondSym = QANDY_SYM.indexOf(zStr.charAt(1));
-        if (secondSym !== -1) return 676 + (first * 26) + secondSym;
-        
-        return 0;
-    }
-    let val = parseInt(zStr, base);
-    return isNaN(val) ? 0 : val;
-}
+var playerIndex = new Map();
 
 // ── Request logging ───────────────────────────────────────────────────────────
 
@@ -95,168 +75,6 @@ function logRequest(req, method, drive, name, session, result) {
   var sess   = (session || '').slice(0, 8).padEnd(8);
   var status = (result && result.success) ? 'SUCCESS' : 'FAILED';
   console.log('[' + ts + '] ' + ip.padEnd(15) + ' ' + action + ' ' + drv + ' ' + file + ' ' + sess + ' ' + status);
-}
-
-// ── In-memory storage ─────────────────────────────────────────────────────────
-
-var drives = {};
-var playerIndex = new Map();
-
-// ── Storage helpers ───────────────────────────────────────────────────────────
-
-// Get a value from the storage Map by key. Returns null if not found.
-function _storageGet(storage, key) {
-  var val = storage.get(key);
-  return val !== undefined ? val : null;
-}
-
-// Set a value in the storage Map. Inserts or updates.
-function _storageSet(storage, key, value) {
-  storage.set(key, value);
-}
-
-// Delete an entry from the storage Map by key.
-function _storageDelete(storage, key) {
-  storage.delete(key);
-}
-
-// ── Manifest helpers ──────────────────────────────────────────────────────────
-
-var _manifestDebounceTimers = new Map();
-
-function _debounceSaveManifestToStorage(driveName) {
-  if (_manifestDebounceTimers.has(driveName)) {
-    clearTimeout(_manifestDebounceTimers.get(driveName));
-  }
-  _manifestDebounceTimers.set(driveName, setTimeout(function() {
-    // Perform the actual serialization to _dir.sys! in storage
-    _serializeManifestMapToStorage(driveName);
-    _manifestDebounceTimers.delete(driveName);
-  }, 50)); // Debounce for 50ms
-}
-
-// Internal helper to serialize the manifestMap to the _dir.sys! string in storage
-// NOTE: This function still uses _storageSet to put the serialized
-// manifest string back into the main drive.storage Map.
-function _serializeManifestMapToStorage(driveName) {
-  var drive = drives[driveName];
-  if (!drive || !drive.manifestMap) return;
-
-  var ts = timestamp();
-  var lines = [];
-  // Iterate the manifestMap, excluding the MANIFEST_KEY itself
-  drive.manifestMap.forEach(function(e) {
-    if (e.name === MANIFEST_KEY) return;
-    lines.push(
-      e.name + '|' + e.size + '|' + e.timestamp + '|' +
-      (e.owner || '') + '|' + (e.session || '')
-    );
-  });
-
-  var body     = lines.length ? lines.join('\n') + '\n' : '';
-  var selfLine = MANIFEST_KEY + '|0|' + ts;
-  var full     = body + selfLine;
-  var mSize    = utf8len(full);
-  selfLine     = MANIFEST_KEY + '|' + mSize + '|' + ts;
-  full         = body + selfLine;
-
-  var finalSize = utf8len(full);
-  if (finalSize !== mSize) {
-    selfLine = MANIFEST_KEY + '|' + finalSize + '|' + ts;
-    full     = body + selfLine;
-  }
-  _storageSet(drive.storage, MANIFEST_KEY, full);
-}
-
-// This function will now be called ONCE at drive initialization.
-function _parseManifestText(text) {
-  var entries = [];
-  if (!text) return entries;
-  var lines = text.split('\n');
-  for (var i = 0; i < lines.length; i++) {
-    var line = lines[i].trim();
-    if (!line) continue;
-    var parts = line.split('|');
-    if (parts.length < 3) continue;
-    var name = parts[0].trim();
-    // Exclude the manifest's own entry from the list of content entries
-    if (!name || name === MANIFEST_KEY) continue;
-    entries.push({
-      name:      name,
-      size:      parseInt(parts[1], 10) || 0,
-      timestamp: parts[2] || '',
-      owner:     parts[3] || '',
-      session:   parts[4] || ''
-    });
-  }
-  return entries;
-}
-
-// Read the current manifest entries from a drive's storage array.
-function _readManifest(driveName) {
-  var drive = drives[driveName];
-  if (!drive || !drive.manifestMap) {
-    // This should ideally not happen after proper initialization
-    console.error(`_readManifest called on uninitialized drive: ${driveName}`);
-    return [];
-  }
-  // Convert Map values to an array, as original functions expect an array
-  return Array.from(drive.manifestMap.values());
-}
-
-function _saveManifest(driveName, entries) {
-  var drive = drives[driveName];
-  if (!drive) return; // Drive must exist
-
-  // Clear and repopulate the manifestMap from the provided 'entries' array
-  drive.manifestMap.clear();
-  var currentTotalSize = 0;
-  var currentFileCount = 0;
-  
-  for (var i = 0; i < entries.length; i++) {
-    var e = entries[i];
-    if (e.name === MANIFEST_KEY) continue; // Ensure _dir.sys! is not added to manifestMap
-    drive.manifestMap.set(e.name, {
-      name: e.name,
-      size: e.size,
-      timestamp: e.timestamp,
-      owner: e.owner,
-      session: e.session
-    });
-    // Update cached stats based on what's going into the manifestMap
-    if (e.name.charAt(0) !== '<') { // Count only files (not directory tokens)
-      currentFileCount++;
-      currentTotalSize += e.size;
-    }
-  }
-  drive.fileCount = currentFileCount;
-  drive.totalSize = currentTotalSize;
-  _debounceSaveManifestToStorage(driveName);
-}
-
-// ── Drive stats ───────────────────────────────────────────────────────────────
-
-function calculateDriveStats(drive) {
-  if (typeof drive.fileCount === 'number' && typeof drive.totalSize === 'number') {
-    return { fileCount: drive.fileCount, totalSize: drive.totalSize };
-  }
-  let fileCount = 0, totalSize = 0;
-  (drive.storage || new Map()).forEach(function(val, key) {
-    if (key !== MANIFEST_KEY && key.charAt(0) !== '<') {
-      fileCount++;
-      totalSize += utf8len(val);
-    }
-  });
-  drive.fileCount = fileCount;
-  drive.totalSize = totalSize;
-  return { fileCount, totalSize };
-}
-
-function formatBytes(bytes) {
-  if (bytes === 0) return '0B';
-  if (bytes < 1024) return bytes + 'B';
-  if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + 'KB';
-  return Math.round(bytes / (1024 * 1024)) + 'MB';
 }
 
 // ── Console display ───────────────────────────────────────────────────────────
@@ -275,33 +93,26 @@ function displayStartupBanner(publicIP, registryStatus, serverId) {
   console.log(_boxLine('       QANDYLAND SERVER AND UNIVAC PUNCH CODE PROCESSOR '));
   console.log('╠' + line + '╣');
 
-    console.log(_boxLine(''));
+  console.log(_boxLine(''));
 
-  var portStr  = 'Port: ' + String(PORT).padEnd(25);
-  var ipStr    = 'Public IP: ' + (publicIP || '(unknown)').padEnd(15);
-  console.log(_boxLine(' ' + portStr + ' ' + ipStr));
+  var idStr   = 'Server ID: ' + (serverId || SERVER_ID).padEnd(20);
+  var portStr = 'Port: ' + String(PORT).padEnd(10);
+  var ipStr   = 'IP: ' + (publicIP || '(unknown)');
+  console.log(_boxLine(' ' + idStr + ' ' + portStr + ' ' + ipStr));
 
   console.log(_boxLine(''));
-  console.log(_boxLine(' Available Drives:'));
+  console.log(_boxLine(' Mounted Drives:'));
 
-  var driveNames = Object.keys(drives);
-  if (driveNames.length === 0) {
-    console.log(_boxLine('   (no drives created yet)'));
+  var mountedRows = DOS.mounts();
+  if (mountedRows.length === 0) {
+    console.log(_boxLine('   (no drives mounted)'));
   } else {
-    for (var i = 0; i < driveNames.length; i++) {
-      var n     = driveNames[i];
-      var stats = calculateDriveStats(drives[n]);
-      var created = '';
-      try {
-        var d = new Date(drives[n].created);
-        created = isNaN(d.getTime()) ? '(invalid date)' : d.toISOString().split('T')[0];
-      } catch (e) {
-        created = '(invalid date)';
-      }
-      var entry = '   \u2022 ' + n.padEnd(10) +
-        '(' + stats.fileCount + ' file' + (stats.fileCount !== 1 ? 's' : '') +
-        ', ' + formatBytes(stats.totalSize) + ')' +
-        (created ? ' - Created ' + created : '');
+    for (var i = 0; i < mountedRows.length; i++) {
+      var r = mountedRows[i];
+      var marker = r.current ? '*' : ' ';
+      var mode = r.readOnly ? 'ro' : 'rw';
+      var entry = ' ' + marker + ' ' + r.name.padEnd(15) + ' [' + r.type + '/' + mode + '] ' +
+        '(' + r.count + ' files, ' + DOS.formatSize(r.used) + ')';
       console.log(_boxLine(entry));
     }
   }
@@ -313,212 +124,24 @@ function displayStartupBanner(publicIP, registryStatus, serverId) {
   console.log('[TIME    ] CLIENT          ACTION    DRIVE    FILE         SESSION  RESULT');
 }
 
-// ── JSON Archive Export / Import ──────────────────────────────────────────────
+// ── HTTP Helpers & Static File Serving ────────────────────────────────────────
 
-function exportDrive(driveName, outputFile) {
-  var drive = drives[driveName];
-  if (!drive) return { success: false, error: 'drive not found' };
-
-  var entries = [];
-  drive.manifestMap.forEach(function(e, key) {
-    if (key === MANIFEST_KEY) return;
-    
-    var isDir = key.charAt(0) === '<';
-    var pathName = isDir ? key.substring(1, key.length - 1) : key;
-    var content = isDir ? '' : (_storageGet(drive.storage, key) || '');
-
-    entries.push({
-      name: pathName,
-      type: isDir ? 'directory' : 'file',
-      content: content,
-      size: e.size,
-      timestamp: e.timestamp,
-      owner: e.owner,
-      session: e.session,
-      readOnly: pathName.endsWith('!') // server tracks read-only via filename suffix
-    });
-  });
-
-  // Sort alphabetically so the JSON is deterministic and neat
-  entries.sort(function(a, b) { return a.name < b.name ? -1 : 1; });
-
-  var archive = {
-    format: 'qandy-ramdrive',
-    version: 2,
-    drive: driveName,
-    created: new Date().toISOString(),
-    entries: entries
-  };
-
-  // The 'null, 2' adds line feeds and 2-space indentation
-  var json = JSON.stringify(archive, null, 2);
-
-  if (outputFile) {
-    try {
-      fs.writeFileSync(path.join(process.cwd(), outputFile), json, 'utf8');
-      return { success: true, result: 'Exported drive to ' + outputFile };
-    } catch(err) {
-      return { success: false, error: err.message };
-    }
-  }
-  return { success: true, json: json };
-}
-
-function importDrive(driveName, inputFile, session) {
-  var raw;
-  try {
-    raw = fs.readFileSync(path.join(process.cwd(), inputFile), 'utf8');
-  } catch(err) {
-    return { success: false, error: 'Cannot read file: ' + err.message };
-  }
-
-  var archive;
-  try {
-    archive = JSON.parse(raw);
-  } catch(err) {
-    return { success: false, error: 'Invalid JSON format' };
-  }
-
-  if (archive.format !== 'qandy-ramdrive') {
-    return { success: false, error: 'Unsupported archive format: ' + archive.format };
-  }
-
-  // Ensure drive exists
-  if (!drives[driveName]) {
-    var cr = driveCreate(driveName, session || 'console');
-    if (!cr.success) return { success: false, error: 'Failed to create drive: ' + cr.error };
-  }
-
-  var entries = archive.entries || [];
-  
-  // Sort so parent directories are created before their children
-  entries.sort(function(a, b) {
-    var da = a.name.split('/').length, db = b.name.split('/').length;
-    return da !== db ? da - db : (a.name < b.name ? -1 : 1);
-  });
-
-  var importedCount = 0;
-  var errors = 0;
-
-  for (var i = 0; i < entries.length; i++) {
-    var e = entries[i];
-    if (e.type === 'directory') {
-      dirMake(driveName, '/', e.name, session || 'console');
-    } else {
-      var ts = e.timestamp || timestamp();
-      var owner = e.owner || session || 'console';
-      var res = fileSave(driveName, '/', e.name, e.content || '', e.session || session || 'console', owner, ts);
-      if (!res.success) {
-        console.warn('  Import warning for ' + e.name + ': ' + res.error);
-        errors++;
-      }
-    }
-    importedCount++;
-  }
-
-  return { 
-    success: true, 
-    result: 'Imported ' + importedCount + ' items into ' + driveName + (errors ? ' (' + errors + ' skipped)' : '') 
-  };
-}
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function timestamp() {
-  var d = new Date();
-  var pad = function (n, w) { return String(n).padStart(w || 2, '0'); };
-  return (
-    String(d.getFullYear()) +
-    pad(d.getMonth() + 1) +
-    pad(d.getDate()) +
-    pad(d.getHours()) +
-    pad(d.getMinutes()) +
-    pad(d.getSeconds())
-  );
-}
-
-// Generates a 14-character timestamp 'minutes' into the future
-function futureTimestamp(minutes) {
-  var d = new Date();
-  d.setMinutes(d.getMinutes() + minutes);
-  var pad = function (n, w) { return String(n).padStart(w || 2, '0'); };
-  return (
-    String(d.getFullYear()) +
-    pad(d.getMonth() + 1) +
-    pad(d.getDate()) +
-    pad(d.getHours()) +
-    pad(d.getMinutes()) +
-    pad(d.getSeconds())
-  );
-}
-
-function utf8len(s) {
-  return Buffer.byteLength(String(s == null ? '' : s), 'utf8');
-}
-
-function normName(n) {
-  return (typeof n === 'string') ? n.trim() : String(n == null ? '' : n).trim();
-}
-
-function baseName(name) {
-  var n = normName(name);
-  var slash = n.lastIndexOf('/');
-  if (slash >= 0) n = n.substring(slash + 1);
-  if (n.charAt(0) === '_') n = n.substring(1);
-  if (n.length > 0 && n.charAt(n.length - 1) === '!') n = n.substring(0, n.length - 1);
-  return n;
-}
-
-function validateName(name) {
-  var n = normName(name);
-  if (!n) return { ok: false, reason: 'empty filename' };
-  if (!VALID_NAME_RE.test(n)) return { ok: false, reason: 'invalid characters in filename' };
-  if (utf8len(n) > MAX_NAME_BYTES) return { ok: false, reason: 'filename exceeds 255 bytes' };
-  return { ok: true };
-}
-
-function isWriteProtected(name) {
-  var n = normName(name);
-  return n.charAt(n.length - 1) === '!';
-}
-
-function isHidden(name) {
-  var n = normName(name);
-  var b = n;
-  var slash = n.lastIndexOf('/');
-  if (slash >= 0) b = n.substring(slash + 1);
-  return b.charAt(0) === '_';
-}
-
-// Resolve a name against cwd, return canonical path (without leading /)
-function resolveName(cwd, name) {
-  var base = (cwd || '/').replace(/^\//, '').replace(/\/$/, '');
-  var n = normName(name);
-  if (n.indexOf('/') >= 0) {
-    return n.replace(/^\//, '');
-  }
-  return base ? (base + '/' + n) : n;
-}
-
-// --- Update getSession to look at the URL parameters ---
 function getSession(req) {
   try {
     const reqUrl = new URL(req.url, `http://${req.headers.host}`);
-    // Priority: 1. URL Parameter 's', 2. Legacy Header
     return reqUrl.searchParams.get('s') || req.headers['x-session-token'] || null;
   } catch (e) {
     return null;
   }
 }
 
-// ── Request parsing ───────────────────────────────────────────────────────────
 function readBody(req) {
   return new Promise(function (resolve, reject) {
     var chunks = [];
     var total  = 0;
     req.on('data', function (chunk) {
       total += chunk.length;
-      if (total > MAX_FILE_BYTES + 4096) {
+      if (total > DOS.MAX_FILE_BYTES + 4096) {
         req.destroy();
         return reject(new Error('Request too large'));
       }
@@ -529,7 +152,11 @@ function readBody(req) {
   });
 }
 
-// ── Static file serving ───────────────────────────────────────────────────────
+function getIP(req) {
+  var rawIp = req.headers['x-forwarded-for'] || (req.socket && req.socket.remoteAddress) || '127.0.0.1';
+  var ip = rawIp.replace('::ffff:', '').replace('::1', '127.0.0.1').slice(0, 15);
+  return ip;
+}
 
 var MIME = {
   '.html': 'text/html',
@@ -545,10 +172,9 @@ var MIME = {
   '.ico':  'image/x-icon'
 };
 
-// Custom 404 Handler that looks for 404.html
 function serve404(res) {
   var errorPage = path.join(__dirname, '404.html');
-  fs.stat(errorPage, function(err, stat) {
+  fs.stat(errorPage, function (err, stat) {
     if (!err && stat.isFile()) {
       res.writeHead(404, { 'Content-Type': 'text/html' });
       fs.createReadStream(errorPage).pipe(res);
@@ -559,542 +185,71 @@ function serve404(res) {
   });
 }
 
-// ── Drive operations ──────────────────────────────────────────────────────────
-
-function driveCreate(driveName, session) {
-  var name = normName(driveName);
-  var fv = validateName(name);
-  if (!fv.ok) return { success: false, error: 'invalid drive name: ' + fv.reason };
-  if (drives[name]) return { success: false, error: 'drive already exists' };
-
-  var ts = timestamp();
-  drives[name] = {
-    storage:     new Map(),   // Map<key, value> for O(1) access
-    manifestMap: new Map(),  // NEW: In-memory map for metadata
-    owner:       session,
-    created:     ts,
-    fileCount:   0,          // NEW: Cached stats
-    totalSize:   0           // NEW: Cached stats
-  };
-
-  // Initialize the manifest with an empty entry by calling _saveManifest.
-  // This will also trigger the debounced serialization to storage.
-  _saveManifest(name, []);
-
-  return { success: true, result: 'drive created' };
-}
-
-function driveMount(driveName, session) {
-  var name = normName(driveName);
-  if (!drives[name]) return { success: false, error: 'drive not found' };
-  return { success: true, result: 'server://' + name + '/', cwd: '/' };
-}
-
-// Find a manifest entry by basename (case-insensitive, ignores hidden/protected markers).
-function _findEntry(manifest, userInput) {
-  var base = baseName(normName(userInput)).toLowerCase();
-  for (var i = 0; i < manifest.length; i++) {
-    var entry = manifest[i];
-    if (baseName(normName(entry.name)).toLowerCase() === base) return entry;
-  }
-  return null;
-}
-
-function fileSave(driveName, cwd, name, content, session, owner, customTs) {
-  var drive = drives[driveName];
-  if (!drive) return { success: false, error: 'drive not mounted here' };
-
-  var fname = normName(name);
-  if (!fname) return { success: false, error: 'invalid filename' };
-  var fv = validateName(baseName(fname));
-  if (!fv.ok) return { success: false, error: fv.reason };
-
-  var canonical = resolveName(cwd, fname);
-  
-  // O(1) Manifest Lookup instead of Array reading
-  var existing = drive.manifestMap.get(canonical);
-
-  if (existing && isWriteProtected(existing.name)) {
-    return { success: false, error: 'file is write-protected' };
-  }
-
-  var str  = String(content == null ? '' : content);
-  var size = utf8len(str);
-
-  if (size > MAX_FILE_BYTES) return { success: false, error: 'file too large (max ' + formatBytes(MAX_FILE_BYTES) + ')' };
-
-  // Calculate stats directly without looping
-  if (!existing && drive.fileCount >= MAX_DRIVE_FILES) return { success: false, error: 'drive full' };
-  var oldSize = existing ? existing.size : 0;
-  if (drive.totalSize - oldSize + size > MAX_TOTAL_DRIVE_SIZE) return { success: false, error: 'drive storage limit exceeded' };
-
-  var ts = customTs || timestamp();
-  _storageSet(drive.storage, canonical, str);
-
-  // Instantly update the manifest Map
-  drive.manifestMap.set(canonical, {
-    name:      canonical,
-    size:      size,
-    timestamp: ts,
-    owner:     owner || session,
-    session:   session
-  });
-
-  // Keep cache updated incrementally
-  if (!existing && canonical.charAt(0) !== '<') drive.fileCount++;
-  if (canonical.charAt(0) !== '<') drive.totalSize += (size - oldSize);
-
-  _debounceSaveManifestToStorage(driveName);
-  return { success: true, result: true };
-}
-
-function fileLoad(driveName, cwd, name, session) {
-  var drive = drives[driveName];
-  if (!drive) return { success: false, error: 'drive not mounted' };
-
-  var fname    = normName(name);
-  if (!fname) return { success: false, error: 'invalid filename' };
-  var canonical = resolveName(cwd, fname);
-  var manifest  = _readManifest(driveName);
-
-  // Find entry by canonical path
-  var existing = null;
-  for (var fi = 0; fi < manifest.length; fi++) {
-    if (manifest[fi].name === canonical) { existing = manifest[fi]; break; }
-  }
-
-  if (!existing) return { success: false, error: 'file not found' };
-
-  var content = _storageGet(drive.storage, canonical);
-  if (content == null) return { success: false, error: 'file not found' };
-
-  return { success: true, content: content };
-}
-
-// Append an element to a JSON array stored in a file.
-// If the file does not exist it is created with a single-element array.
-// Returns { success, error } like other file operations.
-function fileAppendJSON(driveName, cwd, name, element, session, owner) {
-  var existing = fileLoad(driveName, cwd, name, session);
-  var arr = [];
-  if (existing.success) {
-    try { arr = JSON.parse(existing.content); } catch (e) { arr = []; }
-    if (!Array.isArray(arr)) arr = [];
-  }
-  arr.push(element);
-  return fileSave(driveName, cwd, name, JSON.stringify(arr), session, owner);
-}
-
-function fileDelete(driveName, cwd, name, session) {
-  var drive = drives[driveName];
-  if (!drive) return { success: false, error: 'drive not mounted' };
-
-  var fname = normName(name);
-  if (!fname) return { success: false, error: 'invalid filename' };
-  var canonical = resolveName(cwd, fname);
-  
-  var existing = drive.manifestMap.get(canonical);
-  if (!existing) return { success: false, error: 'file not found' };
-  if (isWriteProtected(existing.name)) return { success: false, error: 'file is write-protected' };
-
-  _storageDelete(drive.storage, canonical);
-  drive.manifestMap.delete(canonical);
-
-  if (canonical.charAt(0) !== '<') {
-    drive.fileCount--;
-    drive.totalSize -= existing.size;
-  }
-
-  _debounceSaveManifestToStorage(driveName);
-  return { success: true, result: 'deleted' };
-}
-
-function fileRename(driveName, cwd, name, dest, session) {
-  var drive = drives[driveName];
-  if (!drive) return { success: false, error: 'drive not mounted' };
-
-  var fname = normName(name);
-  var dname = normName(dest);
-  var fv = validateName(baseName(fname));
-  var dv = validateName(baseName(dname));
-  if (!fv.ok) return { success: false, error: fv.reason };
-  if (!dv.ok) return { success: false, error: 'invalid destination: ' + dv.reason };
-
-  var srcCanonical  = resolveName(cwd, fname);
-  var destCanonical = resolveName(cwd, dname);
-  
-  var existing = drive.manifestMap.get(srcCanonical);
-  var destExisting = drive.manifestMap.get(destCanonical);
-
-  if (!existing) return { success: false, error: 'file not found' };
-  if (isWriteProtected(existing.name)) return { success: false, error: 'file is write-protected' };
-  if (destExisting) return { success: false, error: 'destination already exists' };
-
-  var content = _storageGet(drive.storage, srcCanonical);
-  if (content == null) return { success: false, error: 'file not found' };
-
-  _storageSet(drive.storage, destCanonical, content);
-  _storageDelete(drive.storage, srcCanonical);
-
-  drive.manifestMap.delete(srcCanonical);
-  drive.manifestMap.set(destCanonical, {
-    name:      destCanonical,
-    size:      existing.size,
-    timestamp: timestamp(),
-    owner:     existing.owner || session,
-    session:   existing.session || session
-  });
-
-  _debounceSaveManifestToStorage(driveName);
-  return { success: true, result: 'renamed' };
-}
-
-function fileExists(driveName, cwd, name) {
-  var drive = drives[driveName];
-  if (!drive) return { success: true, exists: false };
-
-  var fname = normName(name);
-  if (!fname) return { success: true, exists: false };
-  
-  var canonical = resolveName(cwd, fname);
-  
-  // O(1) key check on the manifest map
-  var exists = drive.manifestMap.has(canonical);
-  return { success: true, exists: exists, path: canonical };
-}
-
-// Search manifest using wildcards
-function fileSearch(driveName, pattern) {
-  var drive = drives[driveName];
-  if (!drive) return { success: false, error: 'drive not found', results: [] };
-
-  var results = [];
-  var manifest = _readManifest(driveName);
-
-  for (var i = 0; i < manifest.length; i++) {
-    var e = manifest[i];
-    if (e.name === MANIFEST_KEY || e.name.charAt(0) === '<') continue;
-    
-    // Support matching either the full canonical path or just the base filename
-    var base = baseName(e.name);
-    if (matchPattern(base, pattern) || matchPattern(e.name, pattern)) {
-      results.push({
-        name: e.name,
-        size: e.size,
-        timestamp: e.timestamp
-      });
-    }
-  }
-  return { success: true, results: results };
-}
-
-function dirMake(driveName, cwd, name, session) {
-  var drive = drives[driveName];
-  if (!drive) return { success: false, error: 'drive not mounted' };
-
-  var dirName = normName(name);
-  if (!dirName) return { success: false, error: 'invalid directory name' };
-  var fv = validateName(baseName(dirName));
-  if (!fv.ok) return { success: false, error: fv.reason };
-
-  var canonical = resolveName(cwd, dirName);
-  canonical = String(canonical || '').replace(/\/+$/, '');
-  var dirToken = '<' + canonical + '>';
-
-  // Check if directory already exists in storage
-  if (drive.storage.has(dirToken)) {
-    return { success: false, error: 'directory already exists' };
-  }
-
-  // For nested directories, ensure parent exists
-  var slashIdx = canonical.lastIndexOf('/');
-  if (slashIdx > 0) {
-    var parent = canonical.substring(0, slashIdx);
-    var parentToken = '<' + parent + '>';
-    if (!drive.storage.has(parentToken)) {
-      return { success: false, error: 'parent directory not found' };
-    }
-  }
-
-  var ts = timestamp();
-  _storageSet(drive.storage, dirToken, '');
-
-  // Update manifest with new directory token
-  var manifest = _readManifest(driveName);
-  var newManifest = manifest.filter(function (e) { return e.name !== MANIFEST_KEY; });
-  newManifest.push({ name: dirToken, size: 0, timestamp: ts, owner: '', session: session || '' });
-  _saveManifest(driveName, newManifest);
-
-  return { success: true, result: 'done' };
-}
-
-function dirChange(driveName, cwd, name, session) {
-  var drive = drives[driveName];
-  if (!drive) return { success: false, error: 'drive not mounted' };
-
-  var dirName = normName(name);
-
-  // Navigate to root
-  if (!dirName || dirName === '/') {
-    return { success: true, cwd: '/', result: 'server://' + driveName + '/' };
-  }
-
-  // Up one level
-  if (dirName === '..') {
-    var parts = (cwd || '/').replace(/^\//, '').replace(/\/$/, '').split('/');
-    parts.pop();
-    var newCwd = '/' + parts.join('/');
-    if (newCwd !== '/') newCwd += '/';
-    return { success: true, cwd: newCwd, result: 'server://' + driveName + newCwd };
-  }
-
-  var canonical = resolveName(cwd, dirName);
-  canonical = String(canonical || '').replace(/^\/+|\/+$/g, '');
-
-  if (canonical === '') {
-    return { success: true, cwd: '/', result: 'server://' + driveName + '/' };
-  }
-
-  if (!drive.storage.has('<' + canonical + '>')) {
-    return { success: false, error: 'directory not found' };
-  }
-
-  var newCwdPath = '/' + canonical + '/';
-  return { success: true, cwd: newCwdPath, result: 'server://' + driveName + newCwdPath };
-}
-
-function dirRemove(driveName, cwd, name, session) {
-  var drive = drives[driveName];
-  if (!drive) return { success: false, error: 'drive not mounted' };
-
-  var dirName = normName(name);
-  if (!dirName) return { success: false, error: 'invalid directory name' };
-
-  var canonical = resolveName(cwd, dirName);
-  canonical = String(canonical || '').replace(/^\/+|\/+$/g, '');
-
-  if (canonical === '') {
-    return { success: false, error: 'cannot remove root directory' };
-  }
-
-  var dirToken = '<' + canonical + '>';
-  if (!drive.storage.has(dirToken)) {
-    return { success: false, error: 'directory not found' };
-  }
-
-  // Check if empty (no files or subdirs under this path)
-  var prefix = canonical + '/';
-  var notEmpty = false;
-  drive.storage.forEach(function(val, k) {
-    if (notEmpty) return;
-    if (k === dirToken || k === MANIFEST_KEY) return;
-    // Sub-directory tokens: <canonical/...>
-    if (k.charAt(0) === '<') {
-      var inner = k.substring(1, k.length - 1);
-      if (inner.indexOf(prefix) === 0) notEmpty = true;
-    } else {
-      if (k.indexOf(prefix) === 0) notEmpty = true;
-    }
-  });
-  if (notEmpty) return { success: false, error: 'directory not empty' };
-
-  _storageDelete(drive.storage, dirToken);
-
-  var manifest = _readManifest(driveName);
-  var newManifest = manifest.filter(function (e) {
-    return e.name !== MANIFEST_KEY && e.name !== dirToken;
-  });
-  _saveManifest(driveName, newManifest);
-
-  return { success: true, result: 'done' };
-}
-
-function dirList(driveName, cwd, pattern, switches, session) {
-  var drive = drives[driveName];
-  if (!drive) return { success: false, error: 'drive not mounted' };
-
-  var showHidden = (switches || '').indexOf('a') >= 0;
-  var dir   = (cwd || '/').replace(/^\//, '').replace(/\/$/, '');
-  var lines = [];
-
-  lines.push('Directory of server://' + driveName + (cwd || '/') + '\n');
-  lines.push('\n');
-
-  // Subdirectories – find storage entries of the form <dirPrefix + name>
-  var dirPrefix = dir ? (dir + '/') : '';
-  var storage = drive.storage;
-
-  storage.forEach(function(val, k) {
-    if (k.charAt(0) !== '<') return;
-    var inner = k.substring(1, k.length - 1);
-    if (inner.indexOf(dirPrefix) !== 0) return;
-    var rel = inner.substring(dirPrefix.length);
-    if (!rel || rel.indexOf('/') >= 0) return;
-    if (!showHidden && isHidden(rel)) return;
-    if (pattern && !matchPattern(rel, pattern)) return;
-    lines.push('  <DIR>  ' + rel + '\n');
-  });
-
-  // Files in current directory
-  var manifest = _readManifest(driveName);
-  var entries = manifest.filter(function (e) {
-    if (!e || !e.name) return false;
-    if (e.name === MANIFEST_KEY) return showHidden;
-    if (e.name.charAt(0) === '<') return false;
-    if (!showHidden && isHidden(e.name)) return false;
-    var slash = e.name.lastIndexOf('/');
-    var fileDir = slash >= 0 ? e.name.substring(0, slash) : '';
-    return fileDir === dir;
-  });
-
-  for (var j = 0; j < entries.length; j++) {
-    var e   = entries[j];
-    var nb  = baseName(e.name);
-    if (pattern && !matchPattern(nb, pattern)) continue;
-    var ts  = e.timestamp || '';
-    var sz  = String(e.size);
-    lines.push('  ' + ts + '  ' + sz.padStart(8) + '  ' + e.name + '\n');
-  }
-
-  lines.push('\n');
-  lines.push(entries.length + ' file(s)\n');
-
-  return { success: true, listing: lines.join('') };
-}
-
-function fileList(driveName, cwd, pattern, session) {
-  var drive = drives[driveName];
-  if (!drive) return { success: false, error: 'drive not mounted' };
-  
-  var dir   = (cwd || '/').replace(/^\//, '').replace(/\/$/, '');
-  var names = [];
-  var manifest = _readManifest(driveName);
-  
-  // Grab the current time for lazy expiration checks
-  var now = timestamp(); 
-
-  var entries = manifest.filter(function (e) {
-    if (!e || !e.name) return false;
-    if (e.name === MANIFEST_KEY) return false;
-    if (e.name.charAt(0) === '<') return false;
-    var slash = e.name.lastIndexOf('/');
-    var fileDir = slash >= 0 ? e.name.substring(0, slash) : '';
-    return fileDir === dir;
-  });
-
-  for (var i = 0; i < entries.length; i++) {
-    var e = entries[i];
-
-    // ── LAZY GARBAGE COLLECTION ──
-    if (e.timestamp && e.timestamp.charAt(0) === 'X') {
-      var expTime = e.timestamp.substring(1);
-      if (now >= expTime) {
-        // Delete it from the server immediately
-        fileDelete(driveName, '/', e.name, 'system');
-        //console.log('[GC-Lazy] Expired item removed on read: ' + e.name);
-        // Skip adding it to the return array
-        continue;
-      }
-    }
-
-    var nb = baseName(e.name);
-    if (pattern && !matchPattern(nb, pattern)) continue;
-    names.push(nb);
-  }
-  
-  return { success: true, listing: names.join(' ') };
-}
-
-// Simple glob-style pattern matching (* and ?)
-function matchPattern(name, pattern) {
-  if (!pattern) return true;
-  var escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&')
-    .replace(/\*/g, '.*')
-    .replace(/\?/g, '.');
-  try {
-    return new RegExp('^' + escaped + '$', 'i').test(name);
-  } catch (e) {
-    return false;
-  }
-}
-
-function getIP(req) {
-  var rawIp = req.headers['x-forwarded-for'] || (req.socket && req.socket.remoteAddress) || '127.0.0.1';
-  var ip = rawIp.replace('::ffff:', '').replace('::1', '127.0.0.1').slice(0, 15);
-  return ip;
+function respondRetro(res, text, session) {
+  if (session) res.setHeader('X-Session-Token', session);
+  res.writeHead(200, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' });
+  res.end(String(text));
 }
 
 // ── bigbang() – GFX World Generation ─────────────────────────────────────────
-//
-// Creates a multiplayer world on the server by reading capflag.gfx from the
-// server's working directory.  The client is never trusted for map data.
-//
-// bigbang(driveName, session)
-//   driveName – drive name to create world on (e.g. "gfx")
-//   session   – caller session token
-//
-// .gfx file format (one sector per line):
-//   [sector]=[96 tiles][valid exits].[item id][item z][item data]...
-//   sector  – upper-case letter + lower-case letter or numeral (e.g. A1, _L)
-//   tiles   – 2-char code each, 96 tiles = 192 chars
-//   exits   – 2-char sector codes for allowed movement (after tile chars)
-//   .       – separator before item list
-//   items   – 6-char entries: 2=id, 2=z-location, 2=data
-//
-// A system file will always be 1 character 
-// A static object filename will always be 6 characters (item z-location data)
-// A dynamic item filename will always be 4 characters (item z-location)
-// A player item will always be at least 8 characters (item a-location face body)
-//
 
-function bigbang(driveName, session) {
+function bigbang(driveName, sourceFile, session, rawOverride) {
+  // Support legacy 2-arg call: bigbang(driveName, session)
+  if (arguments.length <= 2 && typeof rawOverride === 'undefined') {
+    session = sourceFile;
+    sourceFile = driveName;
+  }
 
-  if (!drives[driveName]) return { success: false, error: 'drive not mounted: ' + driveName };
+  if (!DOS.getDrive(driveName)) return { success: false, error: 'drive not mounted: ' + driveName };
 
-  // Load .gfx map file from the server's working directory
-  var gfxPath = path.join(process.cwd(), driveName);
-  var raw;
-  try {
-    raw = fs.readFileSync(gfxPath, 'utf8');
-  } catch (e) {
-    return { success: false, error: 'cannot read ' + driveName + ': ' + (e.message || String(e)) };
+  var srcName = sourceFile || driveName;
+  var raw = rawOverride;
+  if (raw == null) {
+    var gfxPath = path.resolve(process.cwd(), srcName);
+    try {
+      raw = fs.readFileSync(gfxPath, 'utf8');
+    } catch (e) {
+      return { success: false, error: 'cannot read ' + srcName + ': ' + (e.message || String(e)) };
+    }
   }
 
   // --- Load matching legacy .qpc tapes file and queue valid entries for /q/ ---
   var VALID_QPC_TAG_RE = /^[a-z0-9]{3,}$/;
-  var qpcPath = path.join(process.cwd(), driveName.replace(/\.gfx$/i, '.qpc'));
   var qpcEntries = [];
-  try {
-    if (fs.existsSync(qpcPath)) {
-      var rawQpc = fs.readFileSync(qpcPath, 'utf8');
-      var qpcLines = rawQpc.split(/\r?\n/);
-      for (var qi = 0; qi < qpcLines.length; qi++) {
-        var qLine = qpcLines[qi].trim();
-        if (!qLine) continue;
-        var match = qLine.match(/^\[(.*?)\](.*)$/);
-        if (match) {
-          var tapeName = match[1];
-          if (!VALID_QPC_TAG_RE.test(tapeName)) {
-            console.warn('Skipping invalid QPC tag "' + tapeName + '" (must be >= 3 lowercase a-z / 0-9 chars)');
-            continue;
+  if (!/^https?:\/\//i.test(srcName) && srcName.charAt(0) !== '{') {
+    var qpcPath = path.resolve(process.cwd(), srcName.replace(/\.gfx$/i, '.qpc'));
+    try {
+      if (fs.existsSync(qpcPath)) {
+        var rawQpc = fs.readFileSync(qpcPath, 'utf8');
+        var qpcLines = rawQpc.split(/\r?\n/);
+        for (var qi = 0; qi < qpcLines.length; qi++) {
+          var qLine = qpcLines[qi].trim();
+          if (!qLine) continue;
+          var match = qLine.match(/^\[(.*?)\](.*)$/);
+          if (match) {
+            var tapeName = match[1];
+            if (!VALID_QPC_TAG_RE.test(tapeName)) {
+              console.warn('Skipping invalid QPC tag "' + tapeName + '" (must be >= 3 lowercase a-z / 0-9 chars)');
+              continue;
+            }
+            var tapeCode = match[2]
+              .replace(/_NL_/g, "\n")
+              .replace(/\\n/g, "\n")
+              .replace(/\\r/g, "")
+              .replace(/\\\\/g, "\\") //
+              .trim();
+            qpcEntries.push({ name: tapeName, code: tapeCode });
           }
-          var tapeCode = match[2]
-            .replace(/_NL_/g, "\n")
-            .replace(/\\n/g, "\n")
-            .replace(/\\r/g, "")
-            .replace(/\\\\/g, "\\")
-            .trim();
-          qpcEntries.push({ name: tapeName, code: tapeCode });
         }
       }
+    } catch (e) {
+      console.warn('Could not read QPC tapes file:', e.message);
     }
-  } catch (e) {
-    console.warn('Could not read QPC tapes file:', e.message);
   }
 
-  var lines = raw.split('\n');
-  var sectors = [];       // { id, tiles, exits, items[] }
-  var systemFiles = [];   // { id, data } for global UNIVAC scripts
+  var lines = String(raw).split('\n');
+  var sectors = [];
+  var systemFiles = [];
   var playerCodes = [];
 
   for (var li = 0; li < lines.length; li++) {
@@ -1104,23 +259,21 @@ function bigbang(driveName, session) {
     var eqIdx = line.indexOf('=');
     if (eqIdx < 0) continue;
 
-    var sectorId  = line.substring(0, eqIdx);
-    var rest      = line.substring(eqIdx + 1);
+    var sectorId = line.substring(0, eqIdx);
+    var rest     = line.substring(eqIdx + 1);
 
-    // Ignore metadata entirely (e.g. ##=Pa:White Flag)
     if (sectorId === '##') continue;
 
-    // Single-character keys are flat script files inside /w/, not map sectors
     if (sectorId.length === 1) {
       systemFiles.push({ id: sectorId, data: rest });
       continue;
     }
 
-    var dotIdx    = rest.indexOf('.');
-    var mapData   = dotIdx >= 0 ? rest.substring(0, dotIdx) : rest;
-    var itemData  = dotIdx >= 0 ? rest.substring(dotIdx + 1) : '';
+    var dotIdx   = rest.indexOf('.');
+    var mapData  = dotIdx >= 0 ? rest.substring(0, dotIdx) : rest;
+    var itemData = dotIdx >= 0 ? rest.substring(dotIdx + 1) : '';
 
-    var tiles = mapData.substring(0, 280);
+    var tiles   = mapData.substring(0, 280);
     var exitStr = mapData.substring(280);
 
     var items = [];
@@ -1135,67 +288,61 @@ function bigbang(driveName, session) {
   }
 
   if (sectors.length === 0) {
-    return { success: false, error: driveName + ' contains no valid world sectors' };
+    return { success: false, error: srcName + ' contains no valid world sectors' };
   }
 
   var created = [];
   var errors  = [];
 
-  // Create /w/ root directory
-  var wDir = dirMake(driveName, '/', 'w', session);
+  var wDir = DOS.dirMake(driveName, '/', 'w', session);
   if (!wDir.success && wDir.error !== 'directory already exists') {
     return { success: false, error: 'failed to create /w/ directory: ' + wDir.error };
   }
 
-  // Create empty /p/ root directory for connecting players
-  var pDir = dirMake(driveName, '/', 'p', session);
+  var pDir = DOS.dirMake(driveName, '/', 'p', session);
   if (!pDir.success && pDir.error !== 'directory already exists') {
     return { success: false, error: 'failed to create /p/ directory: ' + pDir.error };
   }
-  
-  // Create /q/ root directory for Qandy Punch Code tags and seed valid .qpc entries
-  var qDir = dirMake(driveName, '/', 'q', session);
+
+  var qDir = DOS.dirMake(driveName, '/', 'q', session);
   if (!qDir.success && qDir.error !== 'directory already exists') {
     return { success: false, error: 'failed to create /q/ directory: ' + qDir.error };
   }
 
   for (var qei = 0; qei < qpcEntries.length; qei++) {
-    var qRes = fileSave(driveName, '/', 'q/' + qpcEntries[qei].name, qpcEntries[qei].code, 'UNIVAC', 'UNIVAC');
+    var qRes = DOS.fileSave(driveName, '/', 'q/' + qpcEntries[qei].name, qpcEntries[qei].code, 'UNIVAC', 'UNIVAC');
     if (!qRes.success) errors.push('q/' + qpcEntries[qei].name + ': ' + qRes.error);
   }
 
-  // Save 1-character system files into /w/ (UNIVAC.loadPunchCode resolves [tags] & whitespace)
   for (var fi = 0; fi < systemFiles.length; fi++) {
     var sysFile = systemFiles[fi];
     var sysCode = String(sysFile.data || '')
       .replace(/_NL_/g, "\n")
       .replace(/\\n/g, "\n")
       .replace(/\\r/g, "")
-      .replace(/\\\\/g, "\\")
+      .replace(/\\\\/g, "\\") //
       .trim();
 
-    var sfResult = fileSave(driveName, '/', 'w/' + sysFile.id, sysCode, 'UNIVAC', 'UNIVAC'); //'
+    var sfResult = DOS.fileSave(driveName, '/', 'w/' + sysFile.id, sysCode, 'UNIVAC', 'UNIVAC');
     if (!sfResult.success) errors.push('w/' + sysFile.id + ': ' + sfResult.error);
   }
 
-  // Process Sector Items
   for (var si = 0; si < sectors.length; si++) {
     var sector  = sectors[si];
     var dirPath = 'w/' + sector.id;
 
-    var mkResult = dirMake(driveName, '/', dirPath, session);
+    var mkResult = DOS.dirMake(driveName, '/', dirPath, session);
     if (!mkResult.success && mkResult.error !== 'directory already exists') {
       errors.push('mkdir ' + dirPath + ': ' + mkResult.error);
       continue;
     }
 
-    var mResult = fileSave(driveName, '/', dirPath + '/m', sector.tiles, session, 'bigbang');
+    var mResult = DOS.fileSave(driveName, '/', dirPath + '/m', sector.tiles, session, 'bigbang');
     if (!mResult.success) errors.push(dirPath + '/m: ' + mResult.error);
 
-    var eResult = fileSave(driveName, '/', dirPath + '/e', sector.exits, session, 'bigbang');
+    var eResult = DOS.fileSave(driveName, '/', dirPath + '/e', sector.exits, session, 'bigbang');
     if (!eResult.success) errors.push(dirPath + '/e: ' + eResult.error);
 
-    // Save item files keeping [tags] intact for editing & runtime UNIVAC loading
     for (var ii = 0; ii < sector.items.length; ii++) {
       var parts = sector.items[ii].split('|');
       var itemMeta = parts[0];
@@ -1205,7 +352,7 @@ function bigbang(driveName, session) {
         .replace(/\\r/g, "")
         .trim();
 
-      var iResult = fileSave(driveName, '/', dirPath + '/' + itemMeta, itemCode, '', 'bigbang');
+      var iResult = DOS.fileSave(driveName, '/', dirPath + '/' + itemMeta, itemCode, '', 'bigbang');
       if (!iResult.success) errors.push(dirPath + '/' + itemMeta + ': ' + iResult.error);
     }
 
@@ -1224,73 +371,7 @@ function bigbang(driveName, session) {
   };
 }
 
-// ── Secure terminal output sanitization ───────────────────────────────────────
-
-// Sanitize arbitrary file content before writing it to the server terminal.
-// Strips control characters (except \n), ANSI/VT escape sequences, and other
-// sequences that could manipulate the terminal or cause unexpected behaviour.
-function sanitizeForTerminal(content) {
-  var s = (content == null) ? '' : String(content);
-
-  // Remove ANSI/VT escape sequences: ESC followed by [ or ( or ) or other
-  // introducers, plus the rest of the sequence.
-  // Covers: CSI sequences (ESC [ ... final), OSC sequences (ESC ] ... ST/BEL),
-  // and other two-char ESC sequences.
-  s = s.replace(/\x1b\[[\x20-\x3f]*[\x40-\x7e]/g, '');  // CSI sequences (full spec)
-  s = s.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, ''); // OSC sequences
-  s = s.replace(/\x1b[PX^_][^\x1b]*\x1b\\/g, '');     // DCS/SOS/PM/APC
-  s = s.replace(/\x1b[()][A-Za-z0-9]/g, '');           // character set designations
-  s = s.replace(/\x1b./g, '');                         // any remaining two-char ESC seq (aggressive)
-
-  // Remove all ASCII control characters except \n (0x0A).
-  // This covers NUL, BEL, BS, HT, VT, FF, CR, SO, SI, DEL, and others.
-  // eslint-disable-next-line no-control-regex
-  s = s.replace(/[\x00-\x09\x0b-\x1f\x7f]/g, '');
-
-  return s;
-}
-
-// ── Server console formatting helpers ─────────────────────────────────────────
-
-
-function _formatTimestampShort(ts) {
-  if (ts && ts.charAt(0) === 'X') ts = ts.substring(1); // <-- ADD THIS
-  if (!ts || ts.length < 14) return (ts || '(unknown)');
-  return ts.slice(0, 4) + '-' + ts.slice(4, 6) + '-' + ts.slice(6, 8) +
-         ' ' + ts.slice(8, 10) + ':' + ts.slice(10, 12) + ':' + ts.slice(12, 14);
-}
-
-function _formatTimestampHuman(ts) {
-  if (ts && ts.charAt(0) === 'X') ts = ts.substring(1); 
-  if (!ts || ts.length < 14) return (ts || '(unknown)');
-  var MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
-                'July', 'August', 'September', 'October', 'November', 'December'];
-  var mo = parseInt(ts.slice(4, 6), 10) - 1;
-  var dy = parseInt(ts.slice(6, 8), 10);
-  var yr = ts.slice(0, 4);
-  var hr = parseInt(ts.slice(8, 10), 10);
-  var mn = parseInt(ts.slice(10, 12), 10);
-  var sc = parseInt(ts.slice(12, 14), 10);
-  if (mo < 0 || mo > 11 || isNaN(dy) || isNaN(hr) || isNaN(mn) || isNaN(sc)) return ts;
-  var ampm = hr >= 12 ? 'PM' : 'AM';
-  var hr12 = hr % 12 || 12;
-  return (MONTHS[mo] || '?') + ' ' + dy + ', ' + yr + ' at ' +
-         hr12 + ':' + String(mn).padStart(2, '0') + ':' + String(sc).padStart(2, '0') + ' ' + ampm;
-}
-
-// ── Request dispatcher ────────────────────────────────────────────────────────
-
-// Send a plain-text retro-style response (used by 2-char commands like GS).
-function respondRetro(res, text, session) {
-  if (session) res.setHeader('X-Session-Token', session); // Return token to client
-  res.writeHead(200, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' });
-  res.end(String(text));
-}
-
-// Returns true if the drive name contains only safe filesystem characters.
-function isValidDriveName(drive) {
-  return !!(drive && /^[A-Za-z0-9_.-]+$/.test(drive) && drive.length <= 64);
-}
+DOS.injectBigBang(bigbang);
 
 // ── Line of Sight & Geometry Helpers ──────────────────────────────────────────
 
@@ -1301,8 +382,7 @@ function sectorToCoords(sector) {
   if (!sector || sector.length !== 2) return null;
   let y = Y_AXIS.indexOf(sector[0]);
   let x = X_AXIS.indexOf(sector[1]);
-  // If a sector isn't in standard coordinates (like "_L"), it has no LoS neighbors
-  if (y === -1 || x === -1) return null; 
+  if (y === -1 || x === -1) return null;
   return { x, y };
 }
 
@@ -1311,57 +391,44 @@ function coordsToSector(x, y) {
   return Y_AXIS[y] + X_AXIS[x];
 }
 
-// Fast check for the Vl95$$ file to determine terrain
 function getSectorTerrain(drive, sector) {
-  if (!drive || !drive.manifestMap) return 'A'; // Default flat
+  if (!drive || !drive.manifestMap) return 'A';
   let prefix = 'w/' + sector + '/Vl95';
-  
-  // Since we use a Map, iterating keys is extremely fast
+
   for (let key of drive.manifestMap.keys()) {
     if (key.startsWith(prefix) && key.length >= prefix.length + 1) {
-      return key.charAt(prefix.length); // Returns the first character of $$
+      return key.charAt(prefix.length);
     }
   }
-  return 'A'; // Default to flat
+  return 'A';
 }
 
-// Calculates all visible sectors based on player's current elevation and terrain
 function calculateLineOfSight(driveName, centerSector) {
-  let drive = drives[driveName];
+  let drive = DOS.getDrive(driveName);
   let centerPos = sectorToCoords(centerSector);
-  
-  // Return just the center for special rooms without coordinates (like _L)
-  if (!centerPos) return [centerSector]; 
+
+  if (!centerPos) return [centerSector];
 
   let terrainChar = getSectorTerrain(drive, centerSector);
-  
-  // Determine if player's vantage point is elevated
   let isElevated = (terrainChar === 'M' || terrainChar === 'S' || terrainChar === 'W');
 
   let visible = new Set();
-  visible.add(centerSector); // Player can always see their current sector
+  visible.add(centerSector);
 
-  // Define relative coordinate offsets (North, South, West, East)
-  let offsets = [ [0,-1], [0,1], [-1,0], [1,0] ];
+  let offsets = [ [0, -1], [0, 1], [-1, 0], [1, 0] ];
 
   for (let off of offsets) {
     let tx = centerPos.x + off[0];
     let ty = centerPos.y + off[1];
     let targetSector = coordsToSector(tx, ty);
-    
-    if (!targetSector) continue; // Off the edge of the map
 
-    // If the player is elevated, they can see adjacent sectors regardless of terrain.
+    if (!targetSector) continue;
+
     if (isElevated) {
       visible.add(targetSector);
     } else {
-      // If the player is NOT elevated, they can only see the target if it is flatlands.
       let targetTerrain = getSectorTerrain(drive, targetSector);
-      
-      // Based on previous logic: 'A' through 'K' are standard open flatlands
-      // ('R'/'T' are forest/swamp, 'M'/'S'/'W' are mountains, others are walls)
       let isFlatland = 'ABCDEFGHIJK'.includes(targetTerrain);
-      
       if (isFlatland) {
         visible.add(targetSector);
       }
@@ -1370,6 +437,8 @@ function calculateLineOfSight(driveName, centerSector) {
 
   return Array.from(visible);
 }
+
+// ── Player Auth, Snapshots & Idle Cleanup ─────────────────────────────────────
 
 var DEFAULT_PLAYER_ITEM = 'Sa';
 var DEFAULT_PLAYER_INV  = 'Za'.repeat(20);
@@ -1394,12 +463,12 @@ function verifyPassword(password, stored) {
 }
 
 function validateCredentials(username, password) {
-  if (!username || username.length < 3) return '04';   // At least 3 chars
-  if (username.length >= 16) return '05';              // Under 16 chars
-  if (!/^[A-Za-z0-9]+$/.test(username)) return '03';  // Alphanumeric only
-  if (!/^[A-Z]/.test(username)) return '16';           // Must start with upper-case letter
-  if (/^guest/i.test(username)) return '17';           // Cannot start with "guest"
-  if (!password || password.length < 4) return '08';   // Password at least 4 chars
+  if (!username || username.length < 3) return '04';
+  if (username.length >= 16) return '05';
+  if (!/^[A-Za-z0-9]+$/.test(username)) return '03';
+  if (!/^[A-Z]/.test(username)) return '16';
+  if (/^guest/i.test(username)) return '17';
+  if (!password || password.length < 4) return '08';
   if (/[\r\n]/.test(password) || password.indexOf('--') !== -1) return '07';
   return null;
 }
@@ -1407,11 +476,11 @@ function validateCredentials(username, password) {
 function getSpawnDefaults(drive, gfxZBase) {
   var sector = 'Bc';
   var zStr = encodeZ(0, gfxZBase);
-  var sLoad = fileLoad(drive, '/', 'a/gfxSpawn', 'system');
+  var sLoad = DOS.fileLoad(drive, '/', 'a/gfxSpawn', 'system');
   if (sLoad.success && sLoad.content && sLoad.content.trim().length === 2) {
     sector = sLoad.content.trim();
   }
-  var zLoad = fileLoad(drive, '/', 'a/gfxSpawnZ', 'system');
+  var zLoad = DOS.fileLoad(drive, '/', 'a/gfxSpawnZ', 'system');
   if (zLoad.success && zLoad.content) {
     zStr = encodeZ(decodeZ(zLoad.content.trim(), gfxZBase), gfxZBase);
   }
@@ -1424,13 +493,13 @@ function saveUserSnapshot(player, session, passwordHashOverride) {
   var uPath = 'u/' + player.userKey;
 
   var gfxZBase = 10;
-  var zBaseLoad = fileLoad(drive, '/', 'a/gfxZBase', 'system');
+  var zBaseLoad = DOS.fileLoad(drive, '/', 'a/gfxZBase', 'system');
   if (zBaseLoad.success && zBaseLoad.content) {
     var parsed = parseInt(zBaseLoad.content, 10);
     if (!isNaN(parsed) && ((parsed >= 2 && parsed <= 36) || parsed === 52)) gfxZBase = parsed;
   }
 
-  var existing = fileLoad(drive, '/', uPath, 'system');
+  var existing = DOS.fileLoad(drive, '/', uPath, 'system');
   var exactName = player.username || player.userKey;
   var passHash  = passwordHashOverride || '';
   if (existing.success && existing.content) {
@@ -1441,7 +510,7 @@ function saveUserSnapshot(player, session, passwordHashOverride) {
 
   var invContent = DEFAULT_PLAYER_INV;
   if (player.fullPath) {
-    var pFile = fileLoad(drive, '/', player.fullPath, session || 'system');
+    var pFile = DOS.fileLoad(drive, '/', player.fullPath, session || 'system');
     if (pFile.success && typeof pFile.content === 'string') {
       invContent = pFile.content;
     }
@@ -1451,7 +520,25 @@ function saveUserSnapshot(player, session, passwordHashOverride) {
   var zStr   = encodeZ(parseInt(player.z, 10) || 0, gfxZBase);
   var stateLine = [itemId, player.map || 'Bc', zStr, player.avatar || '', invContent].join('|');
 
-  fileSave(drive, '/', uPath, exactName + '\n' + passHash + '\n' + stateLine, 'system', 'system');
+  DOS.fileSave(drive, '/', uPath, exactName + '\n' + passHash + '\n' + stateLine, 'system', 'system');
+}
+
+function removePlayerFromWorld(player, session) {
+  if (!player || !player.drive) return;
+  if (player.userKey) {
+    saveUserSnapshot(player, session);
+  }
+  if (player.chatPath) {
+    DOS.fileDelete(player.drive, '/', player.chatPath, session || 'system');
+    player.chatPath = null;
+    player.chatLoc = null;
+  }
+  if (player.fullPath) {
+    DOS.fileDelete(player.drive, '/', player.fullPath, session || 'system');
+  }
+  if (player.pubId) {
+    DOS.fileDelete(player.drive, '/', 'p/' + player.pubId, session || 'system');
+  }
 }
 
 setInterval(function () {
@@ -1466,71 +553,40 @@ setInterval(function () {
   }
 }, 30000).unref();
 
-function removePlayerFromWorld(player, session) {
-  if (!player || !player.drive) return;
-  if (player.userKey) {
-    saveUserSnapshot(player, session);
-  }
-  if (player.chatPath) {
-    fileDelete(player.drive, '/', player.chatPath, session || 'system');
-    player.chatPath = null;
-    player.chatLoc = null;
-  }
-  if (player.fullPath) {
-    fileDelete(player.drive, '/', player.fullPath, session || 'system');
-  }
-  if (player.pubId) {
-    fileDelete(player.drive, '/', 'p/' + player.pubId, session || 'system');
-  }
-}
-
-// Periodically evict idle logged-in users from /w/ and save their snapshot to /u/
-setInterval(function () {
-  var now = Date.now();
-  for (var entry of playerIndex.entries()) {
-    var sess = entry[0];
-    var p = entry[1];
-    if (p && p.userKey && p.lastSeen && (now - p.lastSeen > IDLE_LOGOUT_MS)) {
-      removePlayerFromWorld(p, sess);
-      playerIndex.delete(sess);
-    }
-  }
-}, 30000).unref();
+// ── Plugboard Command Processor ───────────────────────────────────────────────
 
 function plugboard(req, stacker, plugs, drive, session) {
-  
+
+  drive = DOS.resolveDriveName(drive) || drive;
+
   var skipPostTick = false;
-  
+
   let gfxZBase = 10;
-  let zBaseLoad = fileLoad(drive, '/', 'a/gfxZBase', session);
+  let zBaseLoad = DOS.fileLoad(drive, '/', 'a/gfxZBase', session);
   if (zBaseLoad.success && zBaseLoad.content) {
     let parsedBase = parseInt(zBaseLoad.content, 10);
     if (!isNaN(parsedBase) && ((parsedBase >= 2 && parsedBase <= 36) || parsedBase === 52)) gfxZBase = parsedBase;
   }
-  
+
   let output = "";
-  if (plugs != "RF") { 
-    // console.log(plugs+" "+drive+" "+session);
-  }
+
   function runtape(code) {
     if (code) {
-      let uResult = UNIVAC(drive, player.fullPath, "RAM:"+code, session);
+      let uResult = UNIVAC(drive, player.fullPath, "RAM:" + code, session);
       if (uResult) {
         player.map      = uResult.sector;
         player.z        = uResult.z;
         player.avatar   = uResult.avatar;
         if (uResult.playerid) player.pubId = uResult.playerid;
-        if (uResult.item) player.item  = uResult.item + player.pubId; // e.g. "ZaAaAa"
+        if (uResult.item) player.item  = uResult.item + player.pubId;
         player.fullPath = uResult.fullPath;
         output += uResult.output;
-        // this get overwritten at line 1141
       }
     }
   }
-  
+
   function runfile(filepath) {
     if (typeof UNIVAC === 'function') {
-      //console.log("UNIVAC(" + drive + ", " + player.fullPath + ", " + filepath + ")");
       let uResult = UNIVAC(drive, player.fullPath, filepath, session);
       if (uResult) {
         player.map      = uResult.sector;
@@ -1542,10 +598,10 @@ function plugboard(req, stacker, plugs, drive, session) {
         output += uResult.output;
       }
     }
-  }  
+  }
 
   var player = playerIndex.get(session);
-  
+
   if (!player) {
     player = {
       drive: drive,
@@ -1566,17 +622,17 @@ function plugboard(req, stacker, plugs, drive, session) {
       runtape("Va" + cleanAvatar + "--");
     }
   }
-  
+
   let tape = "";
-  if (fileExists(drive, '/', 'w/b').exists) runfile('w/b');
-  
+  if (DOS.fileExists(drive, '/', 'w/b').exists) runfile('w/b');
+
   var refresh = true;
-  let column = 0; 
-  
+  let column = 0;
+
   while (column < plugs.length) {
 
     let code = plugs.slice(column, column + 2);
-    column += 2; 
+    column += 2;
 
     switch (code) {
       case 'Vb': {
@@ -1595,7 +651,7 @@ function plugboard(req, stacker, plugs, drive, session) {
           .slice(0, 80);
 
         if (player.chatPath) {
-          fileDelete(drive, '/', player.chatPath, session);
+          DOS.fileDelete(drive, '/', player.chatPath, session);
           player.chatPath = null;
           player.chatLoc = null;
         }
@@ -1604,15 +660,14 @@ function plugboard(req, stacker, plugs, drive, session) {
           let bZStr = encodeZ(parseInt(player.z, 10) || 0, gfxZBase);
           let bLoc  = player.map + bZStr;
           let bPath = 'b/' + bLoc + player.pubId;
-          let bExp  = 'X' + futureTimestamp(1);
-          fileSave(drive, '/', bPath, cleanText, session, session, bExp);
+          let bExp  = 'X' + DOS.futureTimestamp(1);
+          DOS.fileSave(drive, '/', bPath, cleanText, session, session, bExp);
           player.chatPath = bPath;
           player.chatLoc  = bLoc;
         }
         break;
       }
-    	
-    	
+
       case 'Vn':
       case 'Vs':
       case 'Ve':
@@ -1620,16 +675,16 @@ function plugboard(req, stacker, plugs, drive, session) {
         if (!player.item || player.item === "" || player.item.startsWith('Za')) { break; }
         tape += code;
         break;
-        
-      case 'Vd': 
+
+      case 'Vd':
         if (!player.item || player.item === "" || player.item.startsWith('Za')) { break; }
         let item = plugs.slice(column, column + 2); column += 2;
-        tape += code+item;
+        tape += code + item;
         break;
 
       case 'OD':
         if (tape) { runtape(tape); tape = ""; }
-        let objfile = null; 
+        let objfile = null;
         let objid = plugs.slice(column, column + 2);
         let objz  = plugs.slice(column + 2, column + 4);
         column += 4;
@@ -1642,7 +697,7 @@ function plugboard(req, stacker, plugs, drive, session) {
 
         let pZStr = encodeZ(player.z, gfxZBase);
         let odSearchPattern = 'w/' + player.map + '/' + objid + pZStr + '??';
-        let odFilesResponse = fileSearch(drive, odSearchPattern);
+        let odFilesResponse = DOS.fileSearch(drive, odSearchPattern);
 
         if (odFilesResponse.success && odFilesResponse.results.length > 0) {
           for (let i = 0; i < odFilesResponse.results.length; i++) {
@@ -1680,7 +735,7 @@ function plugboard(req, stacker, plugs, drive, session) {
         column += 4;
 
         let searchPrefix = 'w/' + player.map + '/' + itemId;
-        let filesResponse = fileSearch(drive, searchPrefix + '*');
+        let filesResponse = DOS.fileSearch(drive, searchPrefix + '*');
 
         if (filesResponse.success && filesResponse.results.length > 0) {
           let matchedPath = null;
@@ -1725,7 +780,7 @@ function plugboard(req, stacker, plugs, drive, session) {
             }
 
             if (matchedFullId === player.item) {
-              let invLoad = fileLoad(drive, '/', player.fullPath, session);
+              let invLoad = DOS.fileLoad(drive, '/', player.fullPath, session);
               let inventoryData = (invLoad.success && invLoad.content) ? invLoad.content : '';
               output += "S^Vi" + inventoryData + "--^S";
               break;
@@ -1735,64 +790,59 @@ function plugboard(req, stacker, plugs, drive, session) {
           }
         }
         break;
-        
+
       case 'Xt':
-        // tag another player
         if (tape) { runtape(tape); tape = ""; }
         let playerid = plugs.slice(column, column + 4);
         column = column + 4;
         if (!player.item || player.item.startsWith('Za')) { break; }
-        tape='Xt'+playerid;
+        tape = 'Xt' + playerid;
         runtape(tape);
         break;
 
       case 'Vl':
         if (tape) { runtape(tape); tape = ""; }
-        refresh = false; // Turn off the default 'RF' generation
+        refresh = false;
 
         let myTeam = player.item ? player.item.substring(0, 2) : 'Za';
         let tsStr = "";
-        
-        // 1. Load teamsectors (Removed the immediate fileSave that was only saving player.map)
+
         if (myTeam >= 'Sa' && myTeam <= 'Sd') {
-          let tsLoad = fileLoad(drive, '/', 'w/' + myTeam, session);
+          let tsLoad = DOS.fileLoad(drive, '/', 'w/' + myTeam, session);
           tsStr = (tsLoad.success && tsLoad.content) ? tsLoad.content : "";
         }
-        
-        let activeSectors = {}; 
-        
-        // 1. Scan the global player registry for all active sector locations
-        let pListRes = fileList(drive, 'p/', null, session);
+
+        let activeSectors = {};
+
+        let pListRes = DOS.fileList(drive, 'p/', null, session);
         if (pListRes && pListRes.success && pListRes.listing) {
           let pFiles = pListRes.listing.trim().split(/\s+/);
           for (let i = 0; i < pFiles.length; i++) {
             if (!pFiles[i]) continue;
-            let pLoad = fileLoad(drive, '/', 'p/' + pFiles[i], session);
+            let pLoad = DOS.fileLoad(drive, '/', 'p/' + pFiles[i], session);
             if (pLoad.success && pLoad.content && pLoad.content.length >= 2) {
               let sec = pLoad.content.substring(0, 2);
               activeSectors[sec] = true;
             }
           }
         }
-        
-        // 2. Calculate local Line of Sight and add them to activeSectors
+
         let myVisibleSectors = calculateLineOfSight(drive, player.map);
         for (let i = 0; i < myVisibleSectors.length; i++) {
           activeSectors[myVisibleSectors[i]] = true;
         }
-        
+
         let pCSVArr = [];
         let currentlyVisibleSectorsArr = [];
 
-        // 3. Evaluate all active sectors
         for (let sec in activeSectors) {
-          let secListRes = fileList(drive, 'w/' + sec, null, session);
+          let secListRes = DOS.fileList(drive, 'w/' + sec, null, session);
           if (secListRes && secListRes.success && secListRes.listing) {
             let wFiles = secListRes.listing.trim().split(/\s+/);
             let secPlayers = [];
             let teammateInSector = false;
             let isDirectLoS = myVisibleSectors.includes(sec);
-            
+
             for (let j = 0; j < wFiles.length; j++) {
               let fname = wFiles[j];
               if (fname && fname.length >= 8) {
@@ -1806,13 +856,11 @@ function plugboard(req, stacker, plugs, drive, session) {
                   }
                 }
               }
-            }            
+            }
 
-            // Player knows about the sector if they have Direct LoS OR a teammate is there broadcasting
             if (teammateInSector || isDirectLoS) {
               currentlyVisibleSectorsArr.push(sec);
               if (tsStr.indexOf(sec) < 0) { tsStr += sec; }
-              // Send player info if someone is there
               if (secPlayers.length > 0) {
                 pCSVArr = pCSVArr.concat(secPlayers);
               }
@@ -1821,13 +869,13 @@ function plugboard(req, stacker, plugs, drive, session) {
         }
 
         if (myTeam >= 'Sa' && myTeam <= 'Ua') {
-          fileSave(drive, '/', 'w/' + myTeam, tsStr, session, 'system');
+          DOS.fileSave(drive, '/', 'w/' + myTeam, tsStr, session, 'system');
         }
 
         let pCSV = pCSVArr.join('~');
         let visibleSectorsStr = currentlyVisibleSectorsArr.join('');
         let zStr = encodeZ(player.z, gfxZBase);
-        
+
         output += "Vl" + player.map + zStr + pCSV + "|" + visibleSectorsStr + "|" + tsStr;
         break;
 
@@ -1857,11 +905,9 @@ function plugboard(req, stacker, plugs, drive, session) {
           };
           playerIndex.set(session, player);
 
-          // Create the ghost player file with Za (empty slot) using /a/gfxSpawn & /a/gfxSpawnZ
           runtape("XaZa");
           if (!player.item) player.item = 'Za' + (player.pubId || '');
 
-          // Overwrite UNIVAC output as client has no session token to process it yet
           output = "ST" + session;
           refresh = false;
         }
@@ -1880,18 +926,17 @@ function plugboard(req, stacker, plugs, drive, session) {
           column = plugs.length;
         }
 
-        if (!player.item || player.item === "") break; 
+        if (!player.item || player.item === "") break;
         if (vaAvatar !== player.avatar) {
           runtape("Va" + vaAvatar + "--");
           if (player.userKey) saveUserSnapshot(player, session);
         }
-
-        break;                
+        break;
 
       case 'LG': {
         if (tape) { runtape(tape); tape = ""; }
         if (player.userKey) {
-          output += "S^LE21^S"; // Already logged in
+          output += "S^LE21^S";
           refresh = false; skipPostTick = true;
           column = plugs.length;
           break;
@@ -1925,9 +970,9 @@ function plugboard(req, stacker, plugs, drive, session) {
         }
 
         let userKey = uName.toLowerCase();
-        let uLoad = fileLoad(drive, '/', 'u/' + userKey, 'system');
+        let uLoad = DOS.fileLoad(drive, '/', 'u/' + userKey, 'system');
         if (!uLoad.success || !uLoad.content) {
-          output += "S^LE13^S"; // Player Name Does Not Exist
+          output += "S^LE13^S";
           refresh = false; skipPostTick = true;
           column = plugs.length;
           break;
@@ -1938,13 +983,12 @@ function plugboard(req, stacker, plugs, drive, session) {
         let storedHash = (lines[1] || '').trim();
 
         if (!verifyPassword(uPass, storedHash)) {
-          output += "S^LE09^S"; // Invalid Password
+          output += "S^LE09^S";
           refresh = false; skipPostTick = true;
           column = plugs.length;
           break;
         }
 
-        // Check if this account is already logged in on another session
         let alreadyActive = false;
         for (let [otherSess, otherP] of playerIndex.entries()) {
           if (otherSess !== session && otherP.drive === drive && otherP.userKey === userKey) {
@@ -1958,18 +1002,16 @@ function plugboard(req, stacker, plugs, drive, session) {
           }
         }
         if (alreadyActive) {
-          output += "S^LE20^S"; // Player Already Logged In - Wait 10 seconds
+          output += "S^LE20^S";
           refresh = false; skipPostTick = true;
           column = plugs.length;
           break;
         }
 
-        // Reload /u/ in case stale-session cleanup just updated Line 3
-        uLoad = fileLoad(drive, '/', 'u/' + userKey, 'system');
+        uLoad = DOS.fileLoad(drive, '/', 'u/' + userKey, 'system');
         lines = (uLoad.content || '').split('\n');
         let savedParts = (lines[2] || '').split('|');
 
-        // Clean up current Za ghost, active guest, or previous account from /w/ and /p/
         if (player.fullPath || player.pubId) {
           removePlayerFromWorld(player, session);
           player.fullPath = null;
@@ -1986,8 +1028,8 @@ function plugboard(req, stacker, plugs, drive, session) {
         let newPubId = UNIVAC.tickOdometer(drive);
 
         let restoredPath = 'w/' + pSector + '/' + pId + pZStr + newPubId + pAvatar;
-        fileSave(drive, '/', restoredPath, pContent, session, session);
-        fileSave(drive, '/', 'p/' + newPubId, pSector + pZStr + pAvatar, session, session);
+        DOS.fileSave(drive, '/', restoredPath, pContent, session, session);
+        DOS.fileSave(drive, '/', 'p/' + newPubId, pSector + pZStr + pAvatar, session, session);
 
         player.fullPath = restoredPath;
         player.map      = pSector;
@@ -2013,7 +1055,7 @@ function plugboard(req, stacker, plugs, drive, session) {
         column = endPass !== -1 ? endPass + 2 : plugs.length;
 
         if (player.userKey) {
-          output += "S^LE21^S"; // Already logged in
+          output += "S^LE21^S";
           refresh = false; skipPostTick = true;
           column = plugs.length;
           break;
@@ -2028,14 +1070,13 @@ function plugboard(req, stacker, plugs, drive, session) {
         }
 
         let userKey = uName.toLowerCase();
-        if (fileExists(drive, '/', 'u/' + userKey).exists) {
-          output += "S^LE10^S"; // Player Name Already Taken
+        if (DOS.fileExists(drive, '/', 'u/' + userKey).exists) {
+          output += "S^LE10^S";
           refresh = false; skipPostTick = true;
           column = plugs.length;
           break;
         }
 
-        // If still a Za ghost, spawn as Sa; if already an active guest, keep their live /w/ file
         if (!player.item || player.item.startsWith('Za')) {
           runtape("Xa" + DEFAULT_PLAYER_ITEM + DEFAULT_PLAYER_INV + "--");
         }
@@ -2061,70 +1102,66 @@ function plugboard(req, stacker, plugs, drive, session) {
       }
 
       case 'OO':
-        var refresh=false;
-        column = plugs.length; 
-        break;        
+        refresh = false;
+        column = plugs.length;
+        break;
     }
   }
 
-  if (tape) { runtape(tape); tape=""; }
+  if (tape) { runtape(tape); tape = ""; }
 
   if (!skipPostTick && session) {
-    // --- track sectors team has explored ---
     if (player.item && player.item.length >= 2) {
       var team = player.item.substring(0, 2);
       if (team >= 'Sa' && team <= 'Sd') {
-        let tsLoad = fileLoad(drive, '/', 'w/' + team, session);
+        let tsLoad = DOS.fileLoad(drive, '/', 'w/' + team, session);
         let tsStr = (tsLoad.success && tsLoad.content) ? tsLoad.content : "";
         if (tsStr.indexOf(player.map) < 0) {
           tsStr = tsStr + player.map;
-          fileSave(drive, '/', 'w/' + team, tsStr, session, 'system');
+          DOS.fileSave(drive, '/', 'w/' + team, tsStr, session, 'system');
         }
       }
     }
 
-    // --- PvP Tag Intercept ---
     if (player.pubId && player.map) {
       let tagPath = 'w/' + player.map + '/Xt' + player.pubId;
-      let tagRes = fileLoad(drive, '/', tagPath, session);
+      let tagRes = DOS.fileLoad(drive, '/', tagPath, session);
       if (tagRes.success && tagRes.content) {
-        let attackerId = tagRes.content.substring(0, 4);
-        let attackVal  = tagRes.content.substring(4, 6);
-        fileDelete(drive, '/', tagPath, session);
-        if (fileExists(drive, '/', 'w/t').exists) {
+        let attackVal = tagRes.content.substring(4, 6);
+        DOS.fileDelete(drive, '/', tagPath, session);
+        if (DOS.fileExists(drive, '/', 'w/t').exists) {
           runtape('XsW@' + attackVal);
           runfile('w/t');
         }
       }
     }
 
-    if (fileExists(drive, '/', 'w/c').exists) runfile('w/c');
-    
+    if (DOS.fileExists(drive, '/', 'w/c').exists) runfile('w/c');
+
     let curZStr = encodeZ(parseInt(player.z, 10) || 0, gfxZBase);
     if (player.chatPath && player.chatLoc !== (player.map + curZStr)) {
-      fileDelete(drive, '/', player.chatPath, session);
+      DOS.fileDelete(drive, '/', player.chatPath, session);
       player.chatPath = null;
       player.chatLoc  = null;
     }
-
 
     player.lastSeen = Date.now();
     playerIndex.set(session, player);
   }
 
   if (refresh) {
-    let list = fileList(drive, 'w/' + player.map, null, session);
+    let list = DOS.fileList(drive, 'w/' + player.map, null, session);
     let items = [];
     if (list.success && list.listing) {
       let files = list.listing.split(' ');
       files.forEach(f => {
-        if (f.length > 1) { 
-          items.push(f); 
+        if (f.length > 1) {
+          items.push(f);
         }
       });
     }
-    
-    let bList = fileList(drive, 'b/', player.map + '*', session);
+
+    let bList = DOS.fileList(drive, 'b/', player.map + '*', session);
     if (bList.success && bList.listing) {
       let bFiles = bList.listing.trim().split(/\s+/);
       for (let bi = 0; bi < bFiles.length; bi++) {
@@ -2135,13 +1172,13 @@ function plugboard(req, stacker, plugs, drive, session) {
         let bPub  = bf.substring(4, 8);
         if (bSec !== player.map) continue;
 
-        let pCheck = fileLoad(drive, '/', 'p/' + bPub, 'system');
+        let pCheck = DOS.fileLoad(drive, '/', 'p/' + bPub, 'system');
         if (!pCheck.success || !pCheck.content || pCheck.content.substring(0, 4) !== (bSec + bZStr)) {
-          fileDelete(drive, '/', 'b/' + bf, 'system');
+          DOS.fileDelete(drive, '/', 'b/' + bf, 'system');
           continue;
         }
 
-        let bLoad = fileLoad(drive, '/', 'b/' + bf, session);
+        let bLoad = DOS.fileLoad(drive, '/', 'b/' + bf, session);
         if (bLoad.success && bLoad.content) {
           let safeMsg = String(bLoad.content).replace(/[\r\n~]/g, ' ').trim();
           if (safeMsg) {
@@ -2151,14 +1188,13 @@ function plugboard(req, stacker, plugs, drive, session) {
       }
     }
 
-    
     let numericZ = parseInt(player.z, 10) || 0;
     let z = numericZ < 0 ? encodeZ(0, gfxZBase) : encodeZ(numericZ, gfxZBase);
 
     let pItemId = player.item ? player.item.substring(0, 2) : "Za";
     let pPubId = player.pubId ? player.pubId : "0000";
     if (pPubId.length < 4) pPubId = pPubId.padEnd(4, '0');
-    
+
     output = "PI" + pItemId + z + pPubId + output;
     output += "RF" + player.map + z + items.join('~');
   }
@@ -2181,49 +1217,76 @@ var server = http.createServer(function (req, res) {
   var reqPathname = reqUrl.pathname;
 
   if ((reqPathname === '/qandyland.js') && req.method === 'POST') {
-  readBody(req).then(function (bodyText) {
-    var command, drive, session;
+    readBody(req).then(function (bodyText) {
+      var command, drive, session;
 
-    if (req.headers['content-type'] === 'application/x-www-form-urlencoded') {
-      var params = new URLSearchParams(bodyText);
-      command = params.get('c');
-      drive   = params.get('d');
-      session = params.get('s');
-    } else {
-      // Fallback for your original text/plain logic
-      command = bodyText;
-      drive   = reqUrl.searchParams.get('d');
-      session = getSession(req);
-    }
+      if (req.headers['content-type'] === 'application/x-www-form-urlencoded') {
+        var params = new URLSearchParams(bodyText);
+        command = params.get('c');
+        drive   = params.get('d');
+        session = params.get('s');
+      } else {
+        command = bodyText;
+        drive   = reqUrl.searchParams.get('d');
+        session = getSession(req);
+      }
 
-    if (command === 'SYS:DRIVES') {
-        var driveNames = Object.keys(drives).filter(n => n.endsWith('.gfx'));
+      if (command === 'SYS:DRIVES') {
+        var driveNames = DOS.mounts()
+          .filter(function (m) {
+            return (m.source && /\.gfx$/i.test(m.source)) || DOS.dirExists(m.name, 'w');
+          })
+          .map(function (m) { return m.name; });
         res.writeHead(200, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' });
         return res.end(driveNames.join(','));
-    }
-    
-    if (command === 'SYS:KRYSTALS_LIST') {
+      }
+
+      if (command === 'SYS:INFO') {
+        var info = {
+          serverId: SERVER_ID,
+          port: PORT,
+          players: playerIndex.size,
+          drives: DOS.mounts().map(function (m) {
+            return {
+              name: m.name,
+              type: m.type,
+              source: m.source,
+              readOnly: m.readOnly,
+              used: m.used,
+              quota: m.quota
+            };
+          })
+        };
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        return res.end(JSON.stringify(info));
+      }
+
+      if (command === 'SYS:KRYSTALS_LIST') {
         var list = Krystals.getList();
         res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
         return res.end(JSON.stringify(list));
-    }
-
-    if (session && playerIndex.has(session)) {
-      var cachedProfile = playerIndex.get(session);
-      if (cachedProfile && cachedProfile.drive) {
-        drive = cachedProfile.drive;
       }
-    }
 
-    plugboard(req, res, command, drive, session);
-    
-  }).catch(err => {
-    console.error("HTTP 500 ERROR:", err.stack || err); 
-    res.writeHead(500);
-    res.end("Server Error");
-  });
-  return;
-}
+      if (session && playerIndex.has(session)) {
+        var cachedProfile = playerIndex.get(session);
+        if (cachedProfile && cachedProfile.drive) {
+          drive = cachedProfile.drive;
+        }
+      }
+
+      if (drive) {
+        drive = DOS.resolveDriveName(drive) || drive;
+      }
+
+      plugboard(req, res, command, drive, session);
+
+    }).catch(err => {
+      console.error("HTTP 500 ERROR:", err.stack || err);
+      res.writeHead(500);
+      res.end("Server Error");
+    });
+    return;
+  }
 
   var pathname = path.normalize(decodeURIComponent(reqUrl.pathname).replace(/\0/g, ''));
   if (pathname === '/') pathname = '/index.htm';
@@ -2232,602 +1295,107 @@ var server = http.createServer(function (req, res) {
   try {
     var resolvedPath = fs.realpathSync(filePath);
     if (!resolvedPath.startsWith(realBase) || pathname.includes('.sys!')) return serve404(res);
-    fs.stat(resolvedPath, function(err, stat) {
+    fs.stat(resolvedPath, function (err, stat) {
       if (err || !stat.isFile()) return serve404(res);
-      var MIME = { '.html': 'text/html', '.htm': 'text/html', '.js': 'application/javascript', '.css': 'text/css', '.txt': 'text/plain', '.png': 'image/png' };
       res.writeHead(200, { 'Content-Type': MIME[path.extname(resolvedPath).toLowerCase()] || 'application/octet-stream' });
       fs.createReadStream(resolvedPath).pipe(res);
     });
   } catch (e) { serve404(res); }
 });
 
-// ── Server console (stdin) command processing ─────────────────────────────────
-
-if (process.stdin.isTTY) {
-  var readline = require('readline');
-
-  var _serverMountedDrive = null;
-  var _serverCwd = '/';
-
-  // Initialize the readline interface
-  var rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout,
-    prompt: 'qandyland.js '
-  });
-
-  // Display the initial prompt
-  rl.prompt();
-
-  // Parse a command line into tokens, respecting double-quoted strings.
-  function parseQuotedArgs(str) {
-    var tokens = [];
-    var i = 0;
-    var start;
-    while (i < str.length) {
-      while (i < str.length && str[i] === ' ') i++;
-      if (i >= str.length) break;
-      if (str[i] === '"') {
-        i++;
-        start = i;
-        while (i < str.length && str[i] !== '"') i++;
-        tokens.push(str.slice(start, i));
-        if (i < str.length) i++;
-      } else {
-        start = i;
-        while (i < str.length && str[i] !== ' ') i++;
-        tokens.push(str.slice(start, i));
-      }
-    }
-    return tokens;
-  }
-
-  rl.on('line', function (line) {
-    var trimmed = line.trim();
-    if (!trimmed) {
-      rl.prompt();
-      return;
-    }
-
-    var allTokens = parseQuotedArgs(trimmed);
-    var cmd = (allTokens[0] || '').toLowerCase();
-    var arg = allTokens.slice(1).join(' ');
-    var name = arg;
-
-
-      switch (cmd) {
-        case 'serverstorage': {
-          var driveName = arg || _serverMountedDrive;
-          if (!driveName) {
-            process.stdout.write('Usage: serverstorage [drive-name]\n');
-            process.stdout.write('       serverstorage          (shows current mounted drive)\n');
-            break;
-          }
-
-          var drive = drives[driveName];
-          if (!drive) {
-            process.stdout.write('Error: drive "' + driveName + '" not found.\n');
-            var availableDrives = Object.keys(drives);
-            if (availableDrives.length > 0) {
-              process.stdout.write('Available drives: ' + availableDrives.join(', ') + '\n');
-            }
-            break;
-          }
-
-          var stats = calculateDriveStats(drive);
-          var storage = drive.storage;
-          var dirTokens = [];
-          var fileEntries = [];
-          storage.forEach(function(val, key) {
-            if (!key) return;
-            if (key.charAt(0) === '<') {
-              dirTokens.push({ key: key, val: val });
-            } else if (key !== MANIFEST_KEY) {
-              fileEntries.push({ key: key, val: val });
-            }
-          });
-
-          process.stdout.write('\n' + '='.repeat(60) + '\n');
-          process.stdout.write('DRIVE STORAGE DEBUG: ' + driveName + '\n');
-          process.stdout.write('='.repeat(60) + '\n');
-          process.stdout.write('Type: memory-only\n');
-          process.stdout.write('Owner: ' + (drive.owner || 'none') + '\n');
-          process.stdout.write('Created: ' + (drive.created || 'unknown') + '\n');
-          process.stdout.write('Files: ' + stats.fileCount + ' (' + formatBytes(stats.totalSize) + ')\n');
-          process.stdout.write('Directories: ' + dirTokens.length + '\n');
-          process.stdout.write('Storage entries: ' + storage.size + '\n');
-          process.stdout.write('\n');
-
-          if (dirTokens.length > 0) {
-            process.stdout.write('DIRECTORIES (' + dirTokens.length + '):\n');
-            for (var i = 0; i < dirTokens.length; i++) {
-              var dtName = dirTokens[i].key || '';
-              var dtTrunc = dtName.length > 50 ? dtName.substring(0, 47) + '...' : dtName;
-              process.stdout.write('  ' + dtTrunc + '\n');
-            }
-            process.stdout.write('\n');
-          }
-
-          if (fileEntries.length > 0) {
-            process.stdout.write('FILES (' + fileEntries.length + '):\n');
-            for (var j = 0; j < fileEntries.length; j++) {
-              var fkey = fileEntries[j].key;
-              var fval = fileEntries[j].val || '';
-              var keyTrunc = fkey.length > 35 ? fkey.substring(0, 32) + '...' : fkey;
-              var fsize = utf8len(fval);
-              var contentTrunc = fval.length > 40 ? fval.substring(0, 37) + '...' : fval;
-              contentTrunc = contentTrunc.replace(/[\r\n\t]/g, function (c) {
-                return c === '\r' ? '\\r' : c === '\n' ? '\\n' : '\\t';
-              });
-              process.stdout.write('  ' + keyTrunc.padEnd(35) + ' | ' +
-                String(fsize).padStart(6) + 'b | ' + contentTrunc + '\n');
-            }
-            process.stdout.write('\n');
-          }
-
-          // Manifest entries from parsed text
-          var manifestEntries = _readManifest(driveName);
-          if (manifestEntries.length > 0) {
-            process.stdout.write('MANIFEST ENTRIES (' + manifestEntries.length + '):\n');
-            for (var k = 0; k < manifestEntries.length; k++) {
-              var entry = manifestEntries[k];
-              var eName = (entry.name || '').padEnd(30);
-              var eSize = String(entry.size || 0).padStart(8);
-              var eTs   = (entry.timestamp || '').substring(0, 14);
-              var eOwn  = (entry.owner || 'none').substring(0, 12);
-              var eSess = (entry.session || 'none').substring(0, 8);
-              process.stdout.write('  ' + eName + ' | ' + eSize + 'b | ' +
-                eTs + ' | ' + eOwn.padEnd(12) + ' | ' + eSess + '\n');
-            }
-            process.stdout.write('\n');
-          }
-
-          process.stdout.write('='.repeat(60) + '\n');
-          break;
-        }
-
-        case 'drives': {
-          var names = Object.keys(drives);
-          if (names.length === 0) {
-            process.stdout.write('No drives.\n');
-          } else {
-            process.stdout.write('Drives:\n');
-            names.forEach(function (n) {
-              var d = drives[n];
-              var dStats = calculateDriveStats(d);
-              process.stdout.write('  ' + n + '  [memory]' +
-                '  ' + dStats.fileCount + ' file(s), ' + formatBytes(dStats.totalSize) + '\n');
-            });
-          }
-          break;
-        }
-
-        case 'export':
-          if (!_serverMountedDrive) { process.stdout.write('No drive mounted. Use: mount <drive>\n'); return; }
-          if (!arg) { process.stdout.write('Usage: export <filename.json>\n'); return; }
-          var expRes = exportDrive(_serverMountedDrive, arg);
-          if (expRes.success) {
-            process.stdout.write(expRes.result + '\n');
-          } else {
-            process.stdout.write('Error: ' + expRes.error + '\n');
-          }
-          break;
-
-        case 'import':
-          if (!_serverMountedDrive) { process.stdout.write('No drive mounted. Use: mount <drive>\n'); return; }
-          if (!arg) { process.stdout.write('Usage: import <filename.json>\n'); return; }
-          process.stdout.write('Importing ' + arg + ' into server://' + _serverMountedDrive + '/...\n');
-          var impRes = importDrive(_serverMountedDrive, arg, 'console');
-          if (impRes.success) {
-            process.stdout.write(impRes.result + '\n');
-          } else {
-            process.stdout.write('Error: ' + impRes.error + '\n');
-          }
-          break;
-        
-        case 'mount':
-          if (!name) { process.stdout.write('Usage: mount <drive>\n'); return; }
-          var n = normName(name);
-          if (!drives[n]) { process.stdout.write('Error: drive "' + n + '" not found.\n'); return; }
-          _serverMountedDrive = n;
-          _serverCwd = '/';
-          process.stdout.write('Mounted: server://' + n + '/\n');
-          break;
-
-        case 'unmount':
-          if (_serverMountedDrive) {
-            process.stdout.write('Unmounted: server://' + _serverMountedDrive + '/\n');
-            _serverMountedDrive = null;
-            _serverCwd = '/';
-          } else {
-            process.stdout.write('No drive is currently mounted.\n');
-          }
-          break;
-
-        case 'dir':
-          if (!_serverMountedDrive) { process.stdout.write('No drive mounted\n'); return; }
-          var drive = drives[_serverMountedDrive];
-          var dir   = (_serverCwd || '/').replace(/^\//, '').replace(/\/$/, '');
-          process.stdout.write('Directory of server://' + _serverMountedDrive + (_serverCwd || '/') + '\n\n');
-          // Subdirectories from storage tokens
-          var dirPrefix = dir ? (dir + '/') : '';
-          var storage = drive.storage;
-          storage.forEach(function(val, dk) {
-            if (dk.charAt(0) !== '<') return;
-            var inner = dk.substring(1, dk.length - 1);
-            if (inner.indexOf(dirPrefix) !== 0) return;
-            var rel = inner.substring(dirPrefix.length);
-            if (!rel || rel.indexOf('/') >= 0) return;
-            process.stdout.write('  <DIR>  ' + rel + '\n');
-          });
-          // Files in current directory
-          var manifest = _readManifest(_serverMountedDrive);
-          var dirEntries = manifest.filter(function (e) {
-            if (!e || !e.name) return false;
-            if (e.name === MANIFEST_KEY) return false;
-            if (e.name.charAt(0) === '<') return false;
-            var slash = e.name.lastIndexOf('/');
-            var fileDir = slash >= 0 ? e.name.substring(0, slash) : '';
-            return fileDir === dir;
-          });
-          var fileCount = 0;
-          for (var fi = 0; fi < dirEntries.length; fi++) {
-            var fe   = dirEntries[fi];
-            var fnb  = baseName(fe.name);
-            var fsz  = formatBytes(fe.size || 0);
-            var fts  = _formatTimestampShort(fe.timestamp);
-            var sess = (fe.session || 'PUBLIC').slice(0, 8);
-            var fown = fe.owner || '';
-            process.stdout.write(
-              '  ' + fnb.padEnd(14) + ' ' + fsz.padStart(6) + '  ' + fts + '  ' +
-              sess.padEnd(10) + '  ' + fown + '\n'
-            );
-            fileCount++;
-          }
-          process.stdout.write('\n' + fileCount + ' file(s)\n');
-          break;
-
-        case 'ls':
-          if (!_serverMountedDrive) { process.stdout.write('No drive mounted\n'); return; }
-          var drive   = drives[_serverMountedDrive];
-          var dir     = (_serverCwd || '/').replace(/^\//, '').replace(/\/$/, '');
-          var lsPrefix = dir ? (dir + '/') : '';
-          // Subdirectories from storage tokens
-          var storage = drive.storage;
-          storage.forEach(function(val, lk) {
-            if (lk.charAt(0) !== '<') return;
-            var inner = lk.substring(1, lk.length - 1);
-            if (inner.indexOf(lsPrefix) !== 0) return;
-            var rel = inner.substring(lsPrefix.length);
-            if (!rel || rel.indexOf('/') >= 0) return;
-            process.stdout.write(rel + '/\n');
-          });
-          // Files
-          var manifest = _readManifest(_serverMountedDrive);
-          var lsEntries = manifest.filter(function (e) {
-            if (!e || !e.name) return false;
-            if (e.name === MANIFEST_KEY) return false;
-            if (e.name.charAt(0) === '<') return false;
-            var slash = e.name.lastIndexOf('/');
-            var fileDir = slash >= 0 ? e.name.substring(0, slash) : '';
-            return fileDir === dir;
-          });
-          for (var lj = 0; lj < lsEntries.length; lj++) {
-            process.stdout.write(baseName(lsEntries[lj].name) + '\n');
-          }
-          break;
-
-        case 'exists': {
-          if (!arg) { 
-            process.stdout.write('Usage: exists <filename>\n'); 
-            break; 
-          }
-          if (!_serverMountedDrive) { 
-            process.stdout.write('No drive mounted\n'); 
-            break; 
-          }
-          
-          // Call helper
-          var res = fileExists(_serverMountedDrive, _serverCwd, arg);
-          
-          // Format output for terminal operator
-          if (res.exists) {
-            process.stdout.write('TRUE (File "' + res.path + '" exists)\n');
-          } else {
-            process.stdout.write('FALSE (File not found)\n');
-          }
-          break;
-        }
-
-        case 'search': {
-          if (!arg) { 
-            process.stdout.write('Usage: search <pattern>\n'); 
-            break; 
-          }
-          if (!_serverMountedDrive) { 
-            process.stdout.write('No drive mounted\n'); 
-            break; 
-          }
-
-          // Call helper
-          var res = fileSearch(_serverMountedDrive, arg);
-          
-          if (!res.success) {
-            process.stdout.write('Error: ' + res.error + '\n');
-            break;
-          }
-
-          // Format output for terminal operator
-          if (res.results.length === 0) {
-            process.stdout.write('No matching files found.\n');
-          } else {
-            process.stdout.write('Search results for "' + arg + '":\n');
-            for (var i = 0; i < res.results.length; i++) {
-              var r = res.results[i];
-              process.stdout.write('  ' + r.name.padEnd(30) + ' | ' + String(r.size).padStart(6) + ' bytes | ' + r.timestamp + '\n');
-            }
-            process.stdout.write('\nTotal: ' + res.results.length + ' match(es) found.\n');
-          }
-          break;
-        }
-
-
-        case 'mkdir':
-           if (!name) { process.stdout.write('Usage: mkdir <name>\n'); return; }
-           if (!_serverMountedDrive) { process.stdout.write('No drive mounted. Use: mount <drive>\n'); return; }
-           var mkr = dirMake(_serverMountedDrive, _serverCwd, name, 'console');
-           if (mkr.success) {
-             process.stdout.write('Created directory: ' + name + '/\n');
-           } else {
-             process.stdout.write('Error: ' + mkr.error + '\n');
-           }
-          break;
-
-        case 'cd':
-        case 'chdir':
-          if (!_serverMountedDrive) { process.stdout.write('No drive mounted. Use: mount <drive>\n'); return; }
-          var cdr = dirChange(_serverMountedDrive, _serverCwd, name || '/', 'console');
-          if (cdr.success) {
-            _serverCwd = cdr.cwd;
-            process.stdout.write(cdr.result + '\n');
-          } else {
-            process.stdout.write('Error: ' + cdr.error + '\n');
-          }
-          break;
-
-        case 'rmdir':
-          if (!name) { process.stdout.write('Usage: rmdir <name>\n'); return; }
-          if (!_serverMountedDrive) { process.stdout.write('No drive mounted. Use: mount <drive>\n'); return; }
-          var rmr = dirRemove(_serverMountedDrive, _serverCwd, name, 'console');
-          if (rmr.success) {
-            process.stdout.write('Removed directory: ' + name + '/\n');
-          } else {
-            process.stdout.write('Error: ' + rmr.error + '\n');
-          }
-          break;
-
-        case 'rename':
-          if (!arg) { process.stdout.write('Usage: rename <name>=<newname>\n'); return; }
-          if (!_serverMountedDrive) { process.stdout.write('No drive mounted. Use: mount <drive>\n'); return; }
-          var eqIdx = arg.indexOf('=');
-          if (eqIdx < 0) { process.stdout.write('Usage: rename <name>=<newname>\n'); return; }
-          var rnSrc = arg.slice(0, eqIdx).trim();
-          var rnDst = arg.slice(eqIdx + 1).trim();
-          if (!rnSrc || !rnDst) { process.stdout.write('Usage: rename <name>=<newname>\n'); return; }
-          var rnr = fileRename(_serverMountedDrive, _serverCwd, rnSrc, rnDst, 'console');
-          if (rnr.success) {
-            process.stdout.write('Renamed: ' + rnSrc + ' \u2192 ' + rnDst + '\n');
-          } else {
-            process.stdout.write('Error: ' + rnr.error + '\n');
-          }
-          break;
-
-        case 'exam':
-        case 'examine':
-          if (!name) { process.stdout.write('Usage: exam <filename>\n'); return; }
-          if (!_serverMountedDrive) { process.stdout.write('No drive mounted. Use: mount <drive>\n'); return; }
-          var canonical = resolveName(_serverCwd, normName(name));
-          var manifest = _readManifest(_serverMountedDrive);
-          var exEntry = null;
-          for (var fi = 0; fi < manifest.length; fi++) {
-            if (manifest[fi].name === canonical) { exEntry = manifest[fi]; break; }
-          }
-          // Fall back to basename match for convenience (e.g. user types just "a.txt")
-          if (!exEntry) exEntry = _findEntry(manifest, name);
-          if (!exEntry) { process.stdout.write('Error: file "' + name + '" not found.\n'); return; }
-          var exNb = baseName(exEntry.name);
-          process.stdout.write('File: '        + exNb + '\n');
-          process.stdout.write('Path: '        + exEntry.name + '\n');
-          process.stdout.write('Size: '        + (exEntry.size || 0) + ' bytes\n');
-          process.stdout.write('Created: '     + _formatTimestampHuman(exEntry.timestamp) + '\n');
-          process.stdout.write('Owner Token: ' + (exEntry.session || '(none)') + ' (' + (exEntry.owner || '(none)') + ')\n');
-          break;
-
-        case 'type':
-          if (!name) { process.stdout.write('Usage: type <filename>\n'); return; }
-          if (!_serverMountedDrive) { process.stdout.write('No drive mounted. Use: mount <drive>\n'); return; }
-          var canonical = resolveName(_serverCwd, normName(name));
-          var manifest = _readManifest(_serverMountedDrive);
-          var tyEntry = null;
-          for (var fi = 0; fi < manifest.length; fi++) {
-            if (manifest[fi].name === canonical) { tyEntry = manifest[fi]; break; }
-          }
-          // Fall back to basename match for convenience (e.g. user types just "p.txt")
-          if (!tyEntry) tyEntry = _findEntry(manifest, name);
-          if (!tyEntry) { process.stdout.write('Error: file "' + name + '" not found.\n'); return; }
-          var result = fileLoad(_serverMountedDrive, _serverCwd, tyEntry.name, 'console');
-          if (!result.success) { process.stdout.write('Error: ' + result.error + '\n'); return; }
-          var raw = result.content;
-          var size = (raw == null) ? 0 : String(raw).length;
-          var truncated = false;
-          var display = (raw == null) ? '' : String(raw);
-          if (display.length > TYPE_MAX_BYTES) {
-            display = display.slice(0, TYPE_MAX_BYTES);
-            truncated = true;
-          }
-          var safe = sanitizeForTerminal(display);
-          process.stdout.write(safe);
-          if (safe.length > 0 && safe[safe.length - 1] !== '\n') process.stdout.write('\n');
-          if (truncated) {
-            process.stdout.write('(Output truncated at ' + TYPE_MAX_BYTES + ' bytes. Full size: ' + size + ' bytes)\n');
-          }
-          break;
-
-        case 'delete':
-          if (_serverMountedDrive) {
-            if (!arg) { process.stdout.write('Usage: delete <filename>\n'); break; }
-              if (!name) { process.stdout.write('Usage: delete <filename>\n'); return; }
-              var fdr = fileDelete(_serverMountedDrive, _serverCwd, name, 'console');
-              if (fdr.success) {
-                process.stdout.write('Deleted: ' + name + '\n');
-              } else {
-                process.stdout.write('Error: ' + fdr.error + '\n');
-              }
-          } else {
-            if (!arg) { process.stdout.write('Usage: delete <name>\n'); break; }
-            var dn = normName(arg);
-            if (!drives[dn]) {
-              process.stdout.write('Error: drive "' + dn + '" not found.\n');
-            } else {
-              process.stdout.write('Warning: All data on drive "' + dn + '" will be permanently lost.\n');
-              delete drives[dn];
-              process.stdout.write('Drive "' + dn + '" deleted.\n');
-            }
-          }
-          break;
-
-        case 'help':
-          process.stdout.write(
-            'Server console commands:\n' +
-            '  drives               - List all drives\n' +
-            '  delete <name>        - Delete a drive (no drive mounted) or a file (drive mounted)\n' +
-            '\nNavigation commands (mount a drive first):\n' +
-            '  import <file.json>   - Import a Qandy JSON archive into current drive\n' + 
-            '  export <file.json>   - Export current drive to a JSON archive\n' +
-            '  mount <drive>        - Mount a drive for navigation\n' +
-            '  unmount <drive>      - Unmount current drive\n' +
-            '  dir                  - Directory listing with full metadata\n' +
-            '  ls                   - Simple file/directory listing\n' +
-            '  cd <name>            - Change directory (.. = parent, / = root)\n' +
-            '  mkdir <name>         - Create a directory\n' +
-            '  rmdir <name>         - Remove an empty directory\n' +
-            '  rename <old>=<new>   - Rename a file\n' +
-            '  exam <name>          - Examine file metadata in detail\n' +
-            '  type <name>          - Display file contents safely (strips control chars)\n' +
-            '  exit                 - shutdown the server (can also use shutdown or quit)\n' +
-            '  help                 - Show this help\n\n'
-            
-          );
-          break;
-
-        case 'exit':
-        case 'shutdown':
-        case 'quit':
-          process.stdout.write('\nGracefully shutting down Qandyland Server...\n');
-          server.close(function() {
-            process.stdout.write('All connections closed. HTTP server stopped.\n\n');
-            process.exit(0);
-          });
-          setTimeout(function() {
-            process.stdout.write('Forcing shutdown...\n');
-            process.exit(0);
-          }, 3000);
-          break;
-
-        default:
-          process.stdout.write('Unknown command "' + cmd + '". Type "help" for commands.\n');
-    }
-    rl.prompt();
-  }).on('close', function () {
-    process.exit(0);
-  });
-}
-
 // ── Server initialization ─────────────────────────────────────────────────────
 
-function _proceedWithStartup() {
+var commandExecutor = Command.createExecutor({
+  dos: DOS,
+  krystals: Krystals,
+  getPlayers: function () { return playerIndex; },
+  shutdown: function () {
+    server.close(function () {
+      process.stdout.write('All connections closed. HTTP server stopped.\n\n');
+      process.exit(0);
+    });
+    setTimeout(function () {
+      process.stdout.write('Forcing shutdown...\n');
+      process.exit(0);
+    }, 3000);
+  }
+});
 
-  var driveList = ['cylon-capflag.gfx', 'cylon-desktop.gfx', 'cylon-queville.gfx' ]; 
-  
-  for (var i = 0; i < driveList.length; i++) {
-    var dn = normName(driveList[i]);
-    console.log(`Processing drive: ${dn}`);
-    if (dn && validateName(dn).ok) {
-      if (drives[dn]) { 
-        console.warn(`Warning: Drive "${dn}" already exists during startup.`);
-        continue;
+async function _proceedWithStartup() {
+  var cfgPath = path.resolve(process.cwd(), CLI_CONFIG.cfgFile);
+  var usedConfig = false;
+
+  // 1. Run qandyland.cfg (mirrors cylon.cfg autoexec) if present
+  if (fs.existsSync(cfgPath)) {
+    usedConfig = true;
+    console.log('Executing boot config: ' + CLI_CONFIG.cfgFile);
+    var cfgLines = fs.readFileSync(cfgPath, 'utf8').split(/\r?\n/);
+    for (var ci = 0; ci < cfgLines.length; ci++) {
+      var line = cfgLines[ci].trim();
+      if (!line || line.startsWith('//') || line.startsWith(';') || line.startsWith('#')) continue;
+      var res = await commandExecutor(line);
+      if (res && res.output) console.log('  ' + res.output);
+    }
+  }
+
+  // 2. Apply any CLI --mount <source>[:name][:type] flags
+  if (CLI_CONFIG.mounts.length > 0) {
+    usedConfig = true;
+    for (var mi = 0; mi < CLI_CONFIG.mounts.length; mi++) {
+      var parts = CLI_CONFIG.mounts[mi].split(':');
+      // Handle URLs like https://host/world.json:world:rom
+      var src = parts[0];
+      var restParts = parts.slice(1);
+      if (/^https?$/i.test(src) && restParts.length > 0) {
+        src = src + ':' + restParts.shift();
       }
-      
-      var filepath = path.join(process.cwd(), dn);
-      if (!fs.existsSync(filepath)) {
-          console.warn(`  Warning: File ${dn} not found on disk.`);
-          continue;
-      }
-
-      var raw = fs.readFileSync(filepath, 'utf8');
-
-      if (raw.trim().startsWith('{')) {
-        try {
-          var parsed = JSON.parse(raw);
-          // If the JSON contains a specific drive name, use it (e.g. desktop -> desktop.gfx)
-          var targetDn = parsed.drive ? (parsed.drive.endsWith('.gfx') ? parsed.drive : parsed.drive + '.gfx') : dn;
-          
-          if (drives[targetDn]) { 
-            console.warn(`Warning: Drive "${targetDn}" already exists during startup.`);
-            continue;
-          }
-          
-          console.log(`\n  Importing JSON drive '${dn}' into '${targetDn}'...`);
-          var impRes = importDrive(targetDn, dn, 'system');
-          if (impRes.success) console.log(`  ✓ JSON World '${targetDn}' imported.\n`);
-          else console.error(`  ✗ Failed to import '${dn}': ${impRes.error}`);
-        } catch(e) {
-          console.error(`  ✗ Failed to parse JSON in '${dn}': ${e.message}`);
-        }
-      } else {
-        console.log(`\n  Initiating Big Bang for legacy world drive '${dn}'...`);
-        drives[dn] = {
-          storage:     new Map(),
-          manifestMap: new Map(), 
-          owner:       'console', 
-          created:     timestamp(),
-          fileCount:   0,
-          totalSize:   0
-        };
-        var initialManifestText = _storageGet(drives[dn].storage, MANIFEST_KEY);
-        var initialEntries = _parseManifestText(initialManifestText);
-        _saveManifest(dn, initialEntries); 
-        
-        var initResult = bigbang(dn, 'system'); 
-        if (initResult.success) {
-          console.log(`  ✓ World '${dn}' initialized.\n`);
-        } else {
-          console.error(`  ✗ Failed to initialize world '${dn}': ${initResult.error}`);
-        }
+      var mName = restParts[0] || null;
+      var mType = restParts[1] || 'ram';
+      try {
+        var mounted = await DOS.mount(src, mName, { type: mType });
+        console.log('  Mounted ' + mounted + ':/ (' + mType + ') from ' + src);
+      } catch (e) {
+        console.error('  Failed to mount ' + src + ': ' + e.message);
       }
     }
   }
+
+  // 3. Default startup drives if no config/CLI mounts were provided
+  // if (!usedConfig) {
+  //   var driveList = ['cylon-capflag.gfx', 'cylon-desktop.gfx', 'cylon-queville.gfx'];
+  //   for (var i = 0; i < driveList.length; i++) {
+  //     var file = driveList[i];
+  //     var filepath = path.resolve(process.cwd(), file);
+  //     if (!fs.existsSync(filepath)) {
+  //       console.warn('  Warning: File ' + file + ' not found on disk.');
+  //       continue;
+  //     }
+  //     try {
+  //       var mountedName = await DOS.mount(file, null, { type: 'ram' });
+  //       console.log('  ✓ Mounted ' + mountedName + ':/ from ' + file);
+  //     } catch (e) {
+  //       console.error('  ✗ Failed to mount ' + file + ': ' + e.message);
+  //     }
+  //   }
+  // }
 }
 
-(function _initializeServer() {
-  _proceedWithStartup();
+(async function _initializeServer() {
+  await _proceedWithStartup();
 
-  // Start the HTTP server
   server.listen(PORT, '0.0.0.0', function () {
-    Krystals.init(server); // <-- NEW: Start the WebSocket server
-      
-    var publicIP = '127.0.0.1'; 
-    displayStartupBanner(publicIP, null, null);
-    
-    // If running in terminal, display the prompt
-    if (process.stdin.isTTY) {
-      process.stdout.write('qandyland.js ');
-    }
+    Krystals.init(server);
 
+    var publicIP = '127.0.0.1';
+    displayStartupBanner(publicIP, null, SERVER_ID);
+
+    Command.init({
+      dos: DOS,
+      execute: commandExecutor
+    });
   });
 })();
 
-// Graceful shutdown: remove this server from registry
 process.on('SIGINT', function () {
   process.exit(0);
 });
@@ -2836,10 +1404,10 @@ process.on('SIGTERM', function () {
   process.exit(0);
 });
 
-process.on('uncaughtException', function(err) {
+process.on('uncaughtException', function (err) {
   console.error("UNCAUGHT EXCEPTION:", err.stack || err);
 });
 
-process.on('unhandledRejection', function(reason, p) {
+process.on('unhandledRejection', function (reason, p) {
   console.error("UNHANDLED PROMISE REJECTION:", reason.stack || reason);
 });

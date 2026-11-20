@@ -12,9 +12,26 @@
             margin: 0; padding: 0; width: 100%; height: 100%;
             background: var(--bg-color, #000);
             color: var(--fg-color, #0f0);
-            overflow: hidden; user-select: none;
+            font-family: var(--font-face, monospace);
+            overflow: hidden; user-select: none; -webkit-user-select: none;
         }
-        #desktop-wrapper { position: relative; background-color: #000; overflow: hidden; margin: 0 auto; }
+        #queville-stage {
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            width: 100%;
+            height: 100%;
+            box-sizing: border-box;
+        }
+        #queville-stage.thumb-left {
+            flex-direction: row-reverse;
+        }
+        #desktop-wrapper {
+            position: relative;
+            flex: 0 0 auto;
+            background-color: #000;
+            overflow: hidden;
+        }
         #tiles-layer, #icons-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
         #tiles-layer { z-index: 1; }
         #icons-layer { z-index: 10; }
@@ -31,13 +48,110 @@
         .icon-label {
             display: none;
         }
+
+        /* --- Side Control Panel (~30% width) --- */
+        #queville-controls {
+            flex: 1 1 0;
+            min-width: 0;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: clamp(6px, 3vh, 16px);
+            padding: 6px;
+            box-sizing: border-box;
+            touch-action: none;
+        }
+        #qpad-toolbar {
+            width: min(84%, 52vh, 210px);
+            display: flex;
+            justify-content: flex-end;
+            gap: 6px;
+        }
+        #queville-stage.thumb-left #qpad-toolbar {
+            justify-content: flex-start;
+        }
+        .qpad-util-btn {
+            background: var(--menu-bg, #181818);
+            color: var(--menu-fg, #aaa);
+            border: 1px solid var(--sel-bg, #444);
+            border-radius: 4px;
+            padding: 3px 8px;
+            font-family: inherit;
+            font-size: clamp(10px, 3.2vh, 13px);
+            cursor: pointer;
+            touch-action: none;
+        }
+        .qpad-util-btn:active {
+            background: var(--sel-bg, #444);
+            color: var(--sel-fg, #0f0);
+        }
+
+        .qpad-cross {
+            width: min(84%, 52vh, 210px);
+            aspect-ratio: 1 / 1;
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            grid-template-rows: repeat(3, 1fr);
+            gap: clamp(3px, 1.2vh, 6px);
+        }
+        .qpad-btn {
+            background: var(--key-bg, #222);
+            color: var(--key-fg, #fff);
+            border: 1px solid var(--case-fg, #444);
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: inherit;
+            font-size: clamp(14px, 5vh, 26px);
+            font-weight: bold;
+            cursor: pointer;
+            touch-action: none;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            box-sizing: border-box;
+        }
+        .qpad-btn.active {
+            background: var(--key-hl-bg, #666);
+            color: var(--key-hl-fg, #fff);
+            border-color: var(--key-fg, #888);
+        }
+        .qpad-up    { grid-column: 2; grid-row: 1; }
+        .qpad-left  { grid-column: 1; grid-row: 2; }
+        .qpad-right { grid-column: 3; grid-row: 2; }
+        .qpad-down  { grid-column: 2; grid-row: 3; }
+
+        .qpad-enter {
+            width: min(84%, 52vh, 210px);
+            height: clamp(34px, 14vh, 60px);
+            font-size: clamp(12px, 3.8vh, 20px);
+            letter-spacing: 2px;
+        }
     </style>
 </head>
 <body>
 
-<div id="desktop-wrapper">
-    <div id="tiles-layer"></div>
-    <div id="icons-layer"></div>
+<div id="queville-stage">
+    <div id="desktop-wrapper">
+        <div id="tiles-layer"></div>
+        <div id="icons-layer"></div>
+    </div>
+
+    <div id="queville-controls">
+        <div id="qpad-toolbar">
+            <button type="button" id="qpad-thumb-toggle" class="qpad-util-btn" title="Switch left/right thumb side">⇄ L/R</button>
+        </div>
+        <div class="qpad-cross">
+            <div class="qpad-btn qpad-up" data-key="up">▲</div>
+            <div class="qpad-btn qpad-left" data-key="left">◀</div>
+            <div class="qpad-btn qpad-right" data-key="right">▶</div>
+            <div class="qpad-btn qpad-down" data-key="down">▼</div>
+        </div>
+        <div class="qpad-btn qpad-enter" data-key="enter">ENTER</div>
+    </div>
 </div>
 
 <script>
@@ -205,6 +319,8 @@ window.onload = async function() {
 
     const dos = window.parent && window.parent.CylonDOS ? window.parent.CylonDOS : window.CylonDOS;
     let localDrive = 'queville';
+
+    initQuevilleControls();
 
     // 1. Ensure the local .gfx assets drive is mounted in RAM or LS (not IDB)
     if (dos) {
@@ -778,6 +894,87 @@ function showAvatarHeadPopup(sex) {
     if (typeof pop === 'function') pop(html, 'center');
 }
 
+function triggerCylonPress(keyId) {
+    if (window.parent && window.parent !== window && typeof window.parent.press === 'function') {
+        window.parent.press({ id: keyId, toApp: true });
+        return;
+    }
+    const fallbackMap = {
+        up: 'ArrowUp',
+        down: 'ArrowDown',
+        left: 'ArrowLeft',
+        right: 'ArrowRight',
+        enter: 'Enter'
+    };
+    if (typeof window.keydown === 'function' && fallbackMap[keyId]) {
+        window.keydown(fallbackMap[keyId], null);
+    }
+}
+
+function initQuevilleControls() {
+    const stage = document.getElementById('queville-stage');
+    const toggleBtn = document.getElementById('qpad-thumb-toggle');
+
+    if (stage && localStorage.getItem('queville_thumb_side') === 'left') {
+        stage.classList.add('thumb-left');
+    }
+
+    if (toggleBtn && stage) {
+        toggleBtn.addEventListener('pointerdown', (e) => e.preventDefault());
+        toggleBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const isLeft = stage.classList.toggle('thumb-left');
+            localStorage.setItem('queville_thumb_side', isLeft ? 'left' : 'right');
+        });
+    }
+
+    document.querySelectorAll('#queville-controls .qpad-btn[data-key]').forEach((btn) => {
+        const keyId = btn.getAttribute('data-key');
+        const repeatable = (keyId !== 'enter');
+        let delayTimer = null;
+        let repeatTimer = null;
+        let activePointerId = null;
+
+        const stopPress = (e) => {
+            if (activePointerId !== null && e && e.pointerId !== undefined && e.pointerId !== activePointerId) {
+                return;
+            }
+            activePointerId = null;
+            clearTimeout(delayTimer);
+            clearInterval(repeatTimer);
+            delayTimer = null;
+            repeatTimer = null;
+            btn.classList.remove('active');
+        };
+
+        btn.addEventListener('pointerdown', (e) => {
+            if (e.button !== 0 && e.pointerType === 'mouse') return;
+            e.preventDefault();
+            e.stopPropagation();
+
+            stopPress();
+            activePointerId = e.pointerId;
+            try { btn.setPointerCapture(e.pointerId); } catch (err) {}
+            btn.classList.add('active');
+
+            triggerCylonPress(keyId);
+
+            if (repeatable) {
+                const cycleMs = Math.max(80, (window.CylonGFX && window.CylonGFX.gfxCycle) || 200);
+                delayTimer = setTimeout(() => {
+                    repeatTimer = setInterval(() => triggerCylonPress(keyId), cycleMs);
+                }, 260);
+            }
+        });
+
+        btn.addEventListener('pointerup', stopPress);
+        btn.addEventListener('pointercancel', stopPress);
+        btn.addEventListener('lostpointercapture', stopPress);
+        window.addEventListener('blur', () => stopPress());
+    });
+}
+
 function fitDesktopToScreen() {
     if (!window.CylonGFX) return;
     const wrapper = document.getElementById('desktop-wrapper');
@@ -786,15 +983,19 @@ function fitDesktopToScreen() {
     const rows = window.CylonGFX.gridTall || 10;
     const aspect = cols / rows;
 
-    let w = window.innerWidth;
-    let h = w / aspect;
-    if (h > window.innerHeight) {
-        h = window.innerHeight;
-        w = h * aspect;
+    // Reserve ~28-30% for #queville-controls; in a 2:1 #screen-wrapper,
+    // 1.4/2.0 is already 70%, so the map stays at full 98% height.
+    const maxMapW = window.innerWidth * 0.72;
+    let h = window.innerHeight * 0.98;
+    let w = h * aspect;
+    if (w > maxMapW) {
+        w = maxMapW;
+        h = w / aspect;
     }
-    wrapper.style.width = Math.floor(w * 0.98) + 'px';
-    wrapper.style.height = Math.floor(h * 0.98) + 'px';
+    wrapper.style.width = Math.floor(w) + 'px';
+    wrapper.style.height = Math.floor(h) + 'px';
 }
+
 </script>
 </body>
 </html>

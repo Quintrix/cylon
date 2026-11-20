@@ -628,6 +628,7 @@ async function bootMount() {
     }
 
     // 2. Not installed: attempt to boot from the cylon.json image into RAM
+    printDOS("[.2]It can take up to 1 minute to mount the cylon.json drive...[.]\n");
     if (await run('mount cylon.json ram cylon')) {
         await run('cylon:');
         printDOS("[.2]System booted to RAM drive, run 'install' to setup indexDB[.]\n");
@@ -707,6 +708,9 @@ window.applyThemeFromAlpha = async function() {
         BackgroundColor: vars.themeBackground, ForegroundColor: vars.themeForeground,
         Font: vars.themeFont, MenuBgColor: vars.themeMenuBG, MenuFgColor: vars.themeMenuFG,
         SelectBgColor: vars.themeSelectBG, SelectFgColor: vars.themeSelectFG,
+        KeyBgColor: vars.themeKeyUpBG, KeyFgColor: vars.themeKeyUpFG,
+        KeyHlBgColor: vars.themeKeyDownBG, KeyHlFgColor: vars.themeKeyDownFG,
+        CaseBgColor: vars.themeCaseBG, CaseFgColor: vars.themeCaseFG,
         // Expose to apps
         TextFg0: vars.themeTextFg0, TextFg1: vars.themeTextFg1, TextFg2: vars.themeTextFg2, TextFg3: vars.themeTextFg3, TextFg4: vars.themeTextFg4,
         TextBg5: vars.themeTextBg5, TextBg6: vars.themeTextBg6, TextBg7: vars.themeTextBg7, TextBg8: vars.themeTextBg8, TextBg9: vars.themeTextBg9

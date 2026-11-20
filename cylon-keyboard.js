@@ -495,6 +495,12 @@ function keyboard() {
     };
 
     window.press = function(e) {
+        if (e && e.toApp && osMode !== 'app' && osMode !== 'app-edit' && osMode !== 'app-textarea') {
+            if (document.body.classList.contains('app-mode') && typeof window.setOSMode === 'function') {
+                window.setOSMode('app');
+            }
+        }
+
         var shiftHeld = (typeof e.shift !== 'undefined') ? e.shift : !!window.shift;
 
         if (e.id === 'back') {

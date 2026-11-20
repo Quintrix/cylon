@@ -236,12 +236,17 @@ window.addEventListener('message', (e) => {
     if (e.source !== window && e.source !== window.parent) return;
     // ------------------------------------------------------
 
+    if (e.data.type === 'QANDY_UPDATE_COLORS' && e.data.colors) {
+        window.CylonSDK.applyColors(e.data.colors);
+    }
+
     // Catch virtual keystrokes forwarded from the parent OS
     if (e.data.type === 'QANDY_VKEY') {
         if (typeof window.keydown === 'function') {
             window.keydown(e.data.key, null); 
         }
-    } 
+    }
+     
     if (e.data.type === 'QANDY_UPDATE_INPUT' || e.data.type === 'QANDY_COMMIT_INPUT') {
         const el = document.getElementById(e.data.id);
         if (el) {
@@ -279,6 +284,12 @@ window.CylonSDK.applyColors = function(vars) {
     root.style.setProperty('--menu-fg', vars.MenuFgColor || '#aaa');
     root.style.setProperty('--sel-bg', vars.SelectBgColor || '#333');
     root.style.setProperty('--sel-fg', vars.SelectFgColor || '#0f0');
+    root.style.setProperty('--case-bg', vars.CaseBgColor || '#080808');
+    root.style.setProperty('--case-fg', vars.CaseFgColor || '#0a0');
+    root.style.setProperty('--key-bg', vars.KeyBgColor || '#222');
+    root.style.setProperty('--key-fg', vars.KeyFgColor || '#fff');
+    root.style.setProperty('--key-hl-bg', vars.KeyHlBgColor || '#666');
+    root.style.setProperty('--key-hl-fg', vars.KeyHlFgColor || '#fff');
 };
 
 /**
