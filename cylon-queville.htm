@@ -56,45 +56,258 @@
             height: 100%;
             display: flex;
             flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            gap: clamp(6px, 3vh, 16px);
             padding: 6px;
             box-sizing: border-box;
-            touch-action: none;
         }
-        #qpad-toolbar {
-            width: min(84%, 52vh, 210px);
-            display: flex;
-            justify-content: flex-end;
-            gap: 6px;
-        }
-        #queville-stage.thumb-left #qpad-toolbar {
-            justify-content: flex-start;
-        }
+
         .qpad-util-btn {
             background: var(--menu-bg, #181818);
             color: var(--menu-fg, #aaa);
             border: 1px solid var(--sel-bg, #444);
             border-radius: 4px;
-            padding: 3px 8px;
+            padding: 2px 7px;
             font-family: inherit;
-            font-size: clamp(10px, 3.2vh, 13px);
+            font-size: clamp(10px, 3vh, 12px);
             cursor: pointer;
             touch-action: none;
+            flex: 0 0 auto;
         }
         .qpad-util-btn:active {
             background: var(--sel-bg, #444);
             color: var(--sel-fg, #0f0);
         }
 
+        /* --- Logged-out Login Sidebar (inputs anchored at top) --- */
+        #qhud-login {
+            display: flex;
+            flex-direction: column;
+            align-items: stretch;
+            justify-content: flex-start;
+            gap: clamp(4px, 1.5vh, 8px);
+            width: 100%;
+            height: 100%;
+            box-sizing: border-box;
+        }
+        #qhud-login.flash {
+            outline: 1px solid var(--fg-color, #0f0);
+            border-radius: 4px;
+        }
+
+        /* --- Logged-out Login Sidebar --- */
+        .qlogin-input {
+            width: 100%;
+            box-sizing: border-box;
+            padding: clamp(3px, 1.2vh, 6px) 6px;
+            font-family: inherit;
+            font-size: clamp(11px, 3.5vh, 14px);
+            background: var(--input-bg, #000);
+            color: var(--input-fg, #0f0);
+            border: 1px solid var(--fg-color, #0f0);
+            border-radius: 4px;
+        }
+        .qlogin-btn-row {
+            display: flex;
+            gap: 5px;
+        }
+
+        .qlogin-btn:focus,
+        #qBtnGuest:focus {
+            outline: 2px solid #ffeb3b;
+            outline-offset: 1px;
+        }
+
+        .qlogin-btn {
+            flex: 1 1 0;
+            min-width: 0;
+            padding: clamp(4px, 1.2vh, 6px) 4px;
+            font-family: inherit;
+            font-size: clamp(10px, 3.2vh, 13px);
+            font-weight: bold;
+            cursor: pointer;
+            border-radius: 4px;
+            border: 1px solid var(--fg-color, #0f0);
+            background: var(--menu-bg, #111);
+            color: var(--fg-color, #0f0);
+        }
+        .qlogin-btn.primary {
+            background: var(--sel-bg, #333);
+            color: var(--sel-fg, #0f0);
+        }
+        .qlogin-btn:active {
+            opacity: 0.8;
+        }
+        #qLoginErr {
+            color: #ff5555;
+            font-size: clamp(10px, 2.8vh, 12px);
+            line-height: 1.2;
+            text-align: center;
+            min-height: 1.1em;
+            word-wrap: break-word;
+        }
+        #qBtnGuest {
+            display: block;
+            width: 100%;
+            padding: clamp(5px, 1.6vh, 8px) 6px;
+            font-family: inherit;
+            font-size: clamp(12px, 4vh, 16px);
+            font-weight: bold;
+            color: #ffeb3b;
+            background: #0b3d0b;
+            border: 2px solid #00e676;
+            border-radius: 4px;
+            cursor: pointer;
+            text-shadow: 1px 1px 0 #000;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
+            box-sizing: border-box;
+        }
+        #qBtnGuest:active {
+            transform: scale(0.98);
+        }
+        .qlogin-title {
+            font-size: clamp(14px, 5vh, 22px);
+            font-weight: 900;
+            letter-spacing: 1px;
+            background: linear-gradient(180deg, #ffeb3b 0%, #00e676 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            filter: drop-shadow(1px 1px 0 #003300);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* --- Logged-in HUD (Inventory + Keypad + Username) --- */
+        #qhud-game {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: space-between;
+            width: 100%;
+            height: 100%;
+            gap: clamp(4px, 1.6vh, 10px);
+            box-sizing: border-box;
+            touch-action: none;
+        }
+        #qhud-header {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            flex: 0 0 auto;
+        }
+        #qhud-username {
+            font-weight: bold;
+            font-size: clamp(11px, 3.6vh, 15px);
+            color: var(--fg-color, #0f0);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            min-width: 0;
+            text-align: center;
+        }
+
+        #qhud-inven {
+            width: 100%;
+            flex: 1 1 0;
+            min-height: 0;
+            border: 1px solid var(--sel-bg, #333);
+            border-radius: 4px;
+            background: var(--bg-color, rgba(16, 16, 16, 0.6));
+            padding: 5px;
+            box-sizing: border-box;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            --inven-cols: 4; /* Tinker between 4 and 5 */
+        }
+        
+        #qhud-inven-grid {
+            display: grid;
+            grid-template-columns: repeat(var(--inven-cols), minmax(0, clamp(42px, 11vh, 64px)));
+            justify-content: center;
+            gap: 5px;
+            width: 100%;
+            flex: 0 0 auto;
+        }
+
+        .qhud-inven-slot {
+            width: 100%;
+            aspect-ratio: 1 / 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: var(--menu-bg, #222);
+            color: var(--menu-fg, #aaa);
+            border: 1px solid var(--sel-bg, #333);
+            border-bottom: 2px solid var(--sel-bg, #333);
+            border-radius: 6px;
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 2px 3px rgba(0, 0, 0, 0.5);
+            padding: 4px;
+            margin: 0;
+            box-sizing: border-box;
+            cursor: pointer;
+            touch-action: manipulation;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .qhud-inven-slot:hover:not(.empty),
+        .qhud-inven-slot:focus-visible:not(.empty) {
+            background: var(--sel-bg, #333);
+            color: var(--sel-fg, #0f0);
+            border-color: var(--fg-color, #0f0);
+            outline: none;
+        }
+
+        .qhud-inven-slot:active:not(.empty) {
+            background: var(--sel-bg, #111);
+            color: var(--sel-fg, #0f0);
+            border-color: var(--sel-fg, #0f0);
+            transform: translateY(1px);
+            box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.7);
+        }
+
+        .qhud-inven-slot.empty {
+            cursor: default;
+            opacity: 0.35;
+            box-shadow: none;
+        }
+
+        .qhud-inven-slot img {
+            width: 80%;
+            height: 80%;
+            object-fit: contain;
+            image-rendering: pixelated;
+            pointer-events: none;
+        }
+
+        #qhud-tooltip {
+            position: fixed;
+            z-index: 2000;
+            pointer-events: none;
+            display: none;
+            padding: 3px 7px;
+            border-radius: 4px;
+            background: var(--menu-bg, #111);
+            color: var(--sel-fg, #0f0);
+            border: 1px solid var(--fg-color, #0f0);
+            font-family: var(--font-face, monospace);
+            font-size: 12px;
+            white-space: nowrap;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.8);
+        }
+
         .qpad-cross {
-            width: min(84%, 52vh, 210px);
+            width: min(84%, 40vh, 180px);
             aspect-ratio: 1 / 1;
             display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            grid-template-rows: repeat(3, 1fr);
-            gap: clamp(3px, 1.2vh, 6px);
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            grid-template-rows: repeat(3, minmax(0, 1fr));
+            gap: clamp(2px, 1vh, 5px);
+            flex: 0 0 auto;
         }
         .qpad-btn {
             background: var(--key-bg, #222);
@@ -105,7 +318,7 @@
             align-items: center;
             justify-content: center;
             font-family: inherit;
-            font-size: clamp(14px, 5vh, 26px);
+            font-size: clamp(13px, 4.4vh, 22px);
             font-weight: bold;
             cursor: pointer;
             touch-action: none;
@@ -114,6 +327,7 @@
             -webkit-tap-highlight-color: transparent;
             box-sizing: border-box;
         }
+        .qpad-btn:active,
         .qpad-btn.active {
             background: var(--key-hl-bg, #666);
             color: var(--key-hl-fg, #fff);
@@ -121,14 +335,38 @@
         }
         .qpad-up    { grid-column: 2; grid-row: 1; }
         .qpad-left  { grid-column: 1; grid-row: 2; }
+        .qpad-enter {
+            grid-column: 2;
+            grid-row: 2;
+            font-size: clamp(8px, 2.3vh, 12px);
+            letter-spacing: 0;
+        }
         .qpad-right { grid-column: 3; grid-row: 2; }
         .qpad-down  { grid-column: 2; grid-row: 3; }
 
-        .qpad-enter {
-            width: min(84%, 52vh, 210px);
-            height: clamp(34px, 14vh, 60px);
-            font-size: clamp(12px, 3.8vh, 20px);
-            letter-spacing: 2px;
+        .qpad-side-btn {
+            width: 68%;
+            height: 68%;
+            justify-self: center;
+            align-self: center;
+            font-size: clamp(10px, 3vh, 16px);
+            padding: 0;
+            margin: 0;
+        }
+        .qpad-side-left {
+            grid-column: 1;
+            grid-row: 3;
+        }
+        .qpad-side-right {
+            grid-column: 3;
+            grid-row: 3;
+            display: none;
+        }
+        #queville-stage.thumb-left .qpad-side-left {
+            display: none;
+        }
+        #queville-stage.thumb-left .qpad-side-right {
+            display: flex;
         }
     </style>
 </head>
@@ -141,26 +379,121 @@
     </div>
 
     <div id="queville-controls">
-        <div id="qpad-toolbar">
-            <button type="button" id="qpad-thumb-toggle" class="qpad-util-btn" title="Switch left/right thumb side">⇄ L/R</button>
+        <!-- Logged-out View -->
+        <div id="qhud-login">
+            <input id="qLoginUser" class="qlogin-input" type="text" maxlength="15" placeholder="Username" autocomplete="off">
+            <input id="qLoginPass" class="qlogin-input" type="password" maxlength="32" placeholder="Password" autocomplete="off">
+            <div class="qlogin-btn-row">
+                <button type="button" id="qBtnLogin" class="qlogin-btn primary">Login</button>
+            </div>
+            <div id="qLoginErr"></div>
+            <button type="button" id="qBtnGuest">Play Now!</button>
         </div>
-        <div class="qpad-cross">
-            <div class="qpad-btn qpad-up" data-key="up">▲</div>
-            <div class="qpad-btn qpad-left" data-key="left">◀</div>
-            <div class="qpad-btn qpad-right" data-key="right">▶</div>
-            <div class="qpad-btn qpad-down" data-key="down">▼</div>
+
+        <!-- Logged-in HUD View -->
+        <div id="qhud-game">
+            <div id="qhud-inven">
+                <div id="qhud-inven-grid"></div>
+            </div>
+            <div class="qpad-cross">
+                <div class="qpad-btn qpad-up" data-key="up" data-pop-passthrough="true">▲</div>
+                <div class="qpad-btn qpad-left" data-key="left" data-pop-passthrough="true">◀</div>
+                <div class="qpad-btn qpad-enter" data-key="enter" data-pop-passthrough="true">ENTER</div>
+                <div class="qpad-btn qpad-right" data-key="right" data-pop-passthrough="true">▶</div>
+                <button type="button" tabindex="-1" class="qpad-btn qpad-side-btn qpad-side-left qpad-thumb-toggle" title="Move controls to left side">&lt;</button>
+                <div class="qpad-btn qpad-down" data-key="down" data-pop-passthrough="true">▼</div>
+                <button type="button" tabindex="-1" class="qpad-btn qpad-side-btn qpad-side-right qpad-thumb-toggle" title="Move controls to right side">&gt;</button>
+            </div>
+            <div id="qhud-header">
+                <span id="qhud-username"></span>
+            </div>
         </div>
-        <div class="qpad-btn qpad-enter" data-key="enter">ENTER</div>
     </div>
 </div>
 
 <script>
 const SERVER_DRIVE = 'queville.gfx';
+const QUEVILLE_SERVERS = [
+    'http://localhost:8080/qandyland.js',
+    'http://cylon.onrender.com/qandyland.js'
+];
+
+let selectedServerUrl = null;
+let selectingServer = false;
 
 function getItemLabel(id) {
+    if (window.CylonGFX && typeof window.CylonGFX.getItemName === 'function') {
+        return window.CylonGFX.getItemName(id);
+    }
     if (typeof window.gfxItemID === 'function') return window.gfxItemID(id);
     if (window.parent && typeof window.parent.gfxItemID === 'function') return window.parent.gfxItemID(id);
     return id;
+}
+
+// Room to plug in item-specific actions (Eat, Wear, Use, etc.)
+function getInventoryActions(itemId) {
+    const label = getItemLabel(itemId);
+    const actions = [];
+
+    // Example hooks for future item categories:
+    // if (isFoodItem(itemId)) {
+    //     actions.push({ label: `Eat ${label}`, action: () => gfxClick(`SDVe${itemId}`) });
+    // }
+    // if (isArmorItem(itemId)) {
+    //     actions.push({ label: `Wear ${label}`, action: () => gfxClick(`SDVw${itemId}`) });
+    // }
+
+    actions.push({
+        label: `Drop ${label}`,
+        action: () => gfxClick(`SDVd${itemId}`)
+    });
+
+    return actions;
+}
+
+function showInvenItemMenu(itemId, e, slotEl) {
+    const actions = getInventoryActions(itemId);
+
+    // Determine click coords, falling back to button center for keyboard activation
+    let clientX = e && e.clientX;
+    let clientY = e && e.clientY;
+    if (!clientX && !clientY && slotEl) {
+        const r = slotEl.getBoundingClientRect();
+        clientX = r.left + r.width / 2;
+        clientY = r.top + r.height / 2;
+    }
+
+    const popMgr = window.parent && window.parent.CylonPopManager;
+    if (popMgr && typeof popMgr.showContextMenu === 'function') {
+        popMgr.showContextMenu({ clientX, clientY, view: window }, actions);
+    } else {
+        // Fallback if run standalone without parent CylonPopManager
+        const links = actions.map(a => `<a href="#" data-act="${escapeAttr(a.label)}">${escapeAttr(a.label)}</a>`).join('<br>');
+        pop(`<div style="padding:6px;">${links}</div>`, 'center');
+    }
+}
+
+function showHoverTooltip(text, anchorEl) {
+    let tip = document.getElementById('qhud-tooltip');
+    if (!tip) {
+        tip = document.createElement('div');
+        tip.id = 'qhud-tooltip';
+        document.body.appendChild(tip);
+    }
+    tip.textContent = text;
+    tip.style.display = 'block';
+
+    const r = anchorEl.getBoundingClientRect();
+    const tr = tip.getBoundingClientRect();
+    const left = Math.max(4, Math.min(window.innerWidth - tr.width - 4, r.left + (r.width - tr.width) / 2));
+    const top = (r.top - tr.height - 6 >= 4) ? (r.top - tr.height - 6) : (r.bottom + 6);
+    tip.style.left = left + 'px';
+    tip.style.top = top + 'px';
+}
+
+function hideHoverTooltip() {
+    const tip = document.getElementById('qhud-tooltip');
+    if (tip) tip.style.display = 'none';
 }
 
 function encodeTileZ(z) {
@@ -177,31 +510,6 @@ function flushNetworkNow() {
     }
 }
 
-async function resolveServerUrl() {
-    if (window.location.origin && window.location.origin !== 'null' && !window.location.protocol.startsWith('file')) {
-        const dir = window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/'));
-        return window.location.origin + dir + '/qandyland.js';
-    }
-    try {
-        if (window.parent && window.parent !== window &&
-            window.parent.location.origin && window.parent.location.origin !== 'null' &&
-            !window.parent.location.protocol.startsWith('file')) {
-            const pDir = window.parent.location.pathname.substring(0, window.parent.location.pathname.lastIndexOf('/'));
-            return window.parent.location.origin + pDir + '/qandyland.js';
-        }
-    } catch (e) {}
-    const dos = window.parent && window.parent.CylonDOS ? window.parent.CylonDOS : window.CylonDOS;
-    if (dos) {
-        try {
-            const saved = await dos.load('cylon:/a/cylonHostOrigin');
-            if (saved && saved.trim()) {
-                return saved.trim().replace(/\/$/, '') + '/qandyland.js';
-            }
-        } catch (e) {}
-    }
-    return 'https://qandy.onrender.com/qandyland.js';
-}
-
 let loggedInUser = null;
 
 const LOGIN_ERRORS = {
@@ -213,62 +521,267 @@ const LOGIN_ERRORS = {
     '09': 'Invalid password.',
     '10': 'That username is already taken.',
     '13': 'Username does not exist.',
+    '14': 'Player Server Error',
     '16': 'Username must start with an uppercase letter.',
     '17': 'Usernames cannot start with "guest".',
     '20': 'Player is already logged in (wait 10 seconds).',
-    '21': 'Already logged in. Logout first.'
+    '21': 'Already logged in. Logout first.',
+    '22': 'Account is banned.',
+    '23': 'Already logged in on another server.'
 };
 
 function escapeAttr(s) {
     return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-async function showLoginPopup(errorMsg) {
+function setLoginError(msg) {
+    const errEl = document.getElementById('qLoginErr');
+    if (errEl) errEl.textContent = msg || '';
+}
+
+function setSidebarLoggedIn(isLoggedIn) {
+    const loginPane = document.getElementById('qhud-login');
+    const gamePane = document.getElementById('qhud-game');
+    const userLabel = document.getElementById('qhud-username');
+
+    if (loginPane) loginPane.style.display = isLoggedIn ? 'none' : 'flex';
+    if (gamePane) gamePane.style.display = isLoggedIn ? 'flex' : 'none';
+    if (userLabel) userLabel.textContent = isLoggedIn ? (loggedInUser || '') : '';
+}
+
+function focusSidebarLogin(msg) {
+    if (msg) setLoginError(msg);
+    const loginPane = document.getElementById('qhud-login');
+    if (loginPane) {
+        loginPane.classList.add('flash');
+        setTimeout(() => loginPane.classList.remove('flash'), 350);
+    }
+}
+
+function showServerMenuPopup(errorMsg) {
     if (typeof setPopForce === 'function') setPopForce('visible');
 
-    // Re-handshake ST when opening the login popup after a logout
-    if (window.CylonGFX && !window.cylonGfxSession) {
-        try {
-            await window.CylonGFX.ensureSession();
-        } catch (err) {
-            errorMsg = errorMsg || ('Connection error: ' + (err.message || err));
-        }
-    }
-
-    const submitScript = (action) =>
-        `(function(){` +
-        `if(window.proxyInputInPopup&&window.proxyInputId&&window.applyProxyInputToTarget){` +
-        `window.applyProxyInputToTarget('QANDY_COMMIT_INPUT',window.proxyInputId,typeof inputBuffer==='string'?inputBuffer:'');` +
-        `}` +
-        `if(window.setOSMode)window.setOSMode('app');` +
-        `if(window.hideFullKeyboard)window.hideFullKeyboard();` +
-        `var u=(document.getElementById('qLoginUser')||{}).value||'';` +
-        `var p=(document.getElementById('qLoginPass')||{}).value||'';` +
-        `var f=document.querySelector('.page-frame.active');` +
-        `if(f&&f.contentWindow){f.contentWindow.postMessage({type:'QANDY_GFX_CMD',cmd:'${action}',data:{user:u,pass:p}},(window.location.origin&&window.location.origin!=='null'?window.location.origin:'*'));}` +
-        `})()`;
+    let linksHtml = '';
+    QUEVILLE_SERVERS.forEach((url, idx) => {
+        linksHtml +=
+            `<a href="gfx:SRV${idx}" ` +
+            `style="display:block; padding:8px 12px; color:var(--menu-fg,#aaa); text-decoration:none; border-radius:2px; cursor:pointer;" ` +
+            `onmouseover="this.style.background='var(--sel-bg,#333)';this.style.color='var(--sel-fg,#0f0)';" ` +
+            `onmouseout="this.style.background='transparent';this.style.color='var(--menu-fg,#aaa)';">` +
+            `${escapeAttr(url)}` +
+            `</a>`;
+    });
 
     const errHtml = errorMsg
-        ? `<div style="color:#ff5555; margin-bottom:8px; font-size:12px;">${escapeAttr(errorMsg)}</div>`
+        ? `<div style="margin-top:6px; padding:6px 10px; color:#ff5555; border-top:1px solid var(--sel-bg,#333); font-size:12px; max-width:300px; word-wrap:break-word;">${escapeAttr(errorMsg)}</div>`
         : '';
 
     const html =
-        `<div style="padding:12px 16px; min-width:220px; text-align:center; font-family:var(--font-face,monospace);">` +
-        `<div style="font-size:28px; font-weight:900; letter-spacing:2px; margin-bottom:10px; ` +
-            `background:linear-gradient(180deg, #ffeb3b 0%, #00e676 100%); ` +
-            `-webkit-background-clip:text; -webkit-text-fill-color:transparent; ` +
-            `filter:drop-shadow(1px 1px 0 #003300) drop-shadow(-1px -1px 0 #003300) drop-shadow(0 0 6px rgba(0,255,0,0.4));">Queville</div>` +
+        `<div style="font-family:var(--font-face,monospace); font-size:14px; min-width:240px; display:flex; flex-direction:column;">` +
+        `<div style="padding:6px 12px; font-weight:bold; color:var(--fg-color,#0f0); border-bottom:1px solid var(--sel-bg,#333); margin-bottom:2px;">Select Server</div>` +
+        linksHtml +
         errHtml +
-        `<div style="margin-bottom:12px;"><a href="gfx:GUEST" style="display:inline-block; padding:6px 16px; font-size:18px; font-weight:bold; color:#ffeb3b; background:#0b3d0b; border:2px solid #00e676; border-radius:4px; text-decoration:none; text-shadow:1px 1px 0 #000; box-shadow:0 2px 6px rgba(0,0,0,0.6);">Play Now!</a></div>` +
-        `<div style="margin-bottom:6px;"><input id="qLoginUser" type="text" maxlength="15" placeholder="Username" style="width:180px; padding:4px; font-family:inherit; background:var(--input-bg,#000); color:var(--input-fg,#0f0); border:1px solid var(--fg-color,#0f0);"></div>` +
-        `<div style="margin-bottom:10px;"><input id="qLoginPass" type="password" maxlength="32" placeholder="Password" style="width:180px; padding:4px; font-family:inherit; background:var(--input-bg,#000); color:var(--input-fg,#0f0); border:1px solid var(--fg-color,#0f0);"></div>` +
-        `<div style="display:flex; gap:6px; justify-content:center; margin-bottom:10px;">` +
-        `<button type="button" onclick="${submitScript('login')}" style="padding:4px 10px; cursor:pointer; background:var(--sel-bg,#333); color:var(--sel-fg,#0f0); border:1px solid var(--fg-color,#0f0); font-family:inherit;">Login</button>` +
-        `<button type="button" onclick="${submitScript('new')}" style="padding:4px 10px; cursor:pointer; background:var(--menu-bg,#111); color:var(--fg-color,#0f0); border:1px solid var(--fg-color,#0f0); font-family:inherit;">New Account</button>` +
-        `</div>` +
         `</div>`;
 
-    if (typeof pop === 'function') pop(html, 'center');
+    if (typeof pop === 'function') pop(html, 'topleft');
+}
+
+function getDriveSourceUrl(mountInfo) {
+    if (!mountInfo || mountInfo.type === 'idb') return null;
+    if (mountInfo.sourceUrl) return mountInfo.sourceUrl;
+
+    let src = String(mountInfo.source || '').trim();
+    if (!src || src === '(inline)' || /^(ram|rom|ls|idb):$/i.test(src)) {
+        return null;
+    }
+
+    const prefixMatch = /^(ram|rom|ls):([\s\S]*)$/i.exec(src);
+    if (prefixMatch) src = prefixMatch[2].trim();
+    if (!src) return null;
+
+    if (/^https?:\/\//i.test(src)) return src;
+
+    if (src.toLowerCase().endsWith('.gfx')) {
+        try {
+            const baseHref = (window.parent && window.parent !== window)
+                ? window.parent.location.href
+                : window.location.href;
+            if (/^https?:\/\//i.test(baseHref)) {
+                return new URL(src, baseHref).href;
+            }
+        } catch (e) {}
+    }
+    return null;
+}
+
+function isDriveFromServer(mountInfo, serverUrl) {
+    if (!mountInfo || mountInfo.type === 'idb') return false;
+    const driveUrlStr = getDriveSourceUrl(mountInfo);
+    if (!driveUrlStr) return false;
+
+    try {
+        const drvUrl = new URL(driveUrlStr);
+        const srvUrl = new URL(serverUrl);
+        if (drvUrl.host.toLowerCase() !== srvUrl.host.toLowerCase()) return false;
+
+        const drvDir = drvUrl.pathname.substring(0, drvUrl.pathname.lastIndexOf('/') + 1);
+        const srvDir = srvUrl.pathname.substring(0, srvUrl.pathname.lastIndexOf('/') + 1);
+        const drvFile = drvUrl.pathname.substring(drvUrl.pathname.lastIndexOf('/') + 1).toLowerCase();
+
+        return drvDir === srvDir && (drvFile === 'cylon-queville.gfx' || drvFile === 'queville.gfx');
+    } catch (e) {
+        return false;
+    }
+}
+
+async function selectServer(serverUrl) {
+    if (selectingServer) return;
+    selectingServer = true;
+
+    try {
+        const dos = window.parent && window.parent.CylonDOS ? window.parent.CylonDOS : window.CylonDOS;
+        if (!dos) {
+            const errMsg = 'Error: CylonDOS is not available.';
+            if (typeof print === 'function') print(errMsg + '\n');
+            showServerMenuPopup(errMsg);
+            return;
+        }
+
+        let localDrive = 'queville';
+        const mnts = await dos.mounts();
+        const existing = mnts.find(m => m.name === 'queville' || m.name === 'queville.gfx')
+                      || mnts.find(m => m.name === 'cylon-queville' || m.name === 'cylon-queville.gfx');
+
+        if (existing) {
+            if (!isDriveFromServer(existing, serverUrl)) {
+                const actualSrc = existing.sourceUrl || existing.source || 'unknown';
+                const errMsg = `Error: Mounted drive "${existing.name}:" has source "${actualSrc}", which does not match "${serverUrl}". Existing drive was not unmounted.`;
+                if (typeof print === 'function') print(errMsg + '\n');
+                showServerMenuPopup(errMsg);
+                return;
+            }
+            localDrive = existing.name;
+        } else {
+            const gfxUrl = new URL('cylon-queville.gfx', serverUrl).href;
+            const mounted = await window.CylonCommand(`mount "${gfxUrl}" ram queville`);
+            if (!mounted) {
+                const errMsg = `Error: Failed to mount ${gfxUrl}`;
+                if (typeof print === 'function') print(errMsg + '\n');
+                showServerMenuPopup(errMsg);
+                return;
+            }
+            localDrive = 'queville';
+        }
+
+        selectedServerUrl = serverUrl;
+        if (typeof setPopForce === 'function') setPopForce('hidden');
+        if (typeof hpop === 'function') hpop();
+
+        // Determine spawn sector from /a/gfxSpawn (defaults to Bc)
+        let startSector = 'Bc';
+        try {
+            const sp = await dos.load(`${localDrive}:/a/gfxSpawn`);
+            if (sp && sp.trim().length === 2) startSector = sp.trim();
+        } catch (e) {}
+
+        // Initialize local map preview without opening a session or polling RF until login
+        window.remoteQandylandUrl = serverUrl;
+        window.desktopDrive = localDrive;
+        window.cylonGfxSession = null;
+        window.playerItem = 'Za';
+        window.playerZ = 0;
+        window.playerAvatar = '';
+        window.playerInven = '';
+        window.playerId = '';
+        window.playerWalk = -1;
+        window.playerDo = '';
+        window.gfxDo = 'RF';
+        window.movingItems = {};
+        window.CylonGFX.mapTiles = {};
+        window.CylonGFX.mapObjs = {};
+        window.CylonGFX._loadedSector = null;
+        window.CylonGFX.lastRenderedItems = null;
+        window.CylonGFX.isLooking = false;
+
+        window.gfxDrive = await window.CylonGFX.resolveServerDrive(serverUrl, SERVER_DRIVE);
+        await window.CylonGFX.init(`${localDrive}:/w/${startSector}`);
+        window.CylonGFX._loadedSector = startSector;
+        await window.CylonGFX.ensureSectorCached(startSector);
+        window.CylonGFX.renderSectorTiles(startSector);
+        window.CylonGFX.renderSectorStaticObjects(startSector);
+        fitDesktopToScreen();
+        
+        window.CylonGFX.renderSectorStaticObjects(startSector);
+        fitDesktopToScreen();
+
+        const userInput = document.getElementById('qLoginUser');
+        if (userInput && window.CylonSDK && typeof window.CylonSDK.focusInput === 'function') {
+            window.CylonSDK.focusInput(userInput);
+        }
+        showSplashPopup();
+        
+    } catch (err) {
+        const errMsg = `Error: ${err && err.message ? err.message : String(err)}`;
+        if (typeof print === 'function') print(errMsg + '\n');
+        showServerMenuPopup(errMsg);
+    } finally {
+        selectingServer = false;
+    }
+}
+
+function submitAuth(action) {
+    if (!selectedServerUrl) {
+        showServerMenuPopup('Please select a server first.');
+        return;
+    }
+    const user = (document.getElementById('qLoginUser')?.value || '').trim();
+    const pass = document.getElementById('qLoginPass')?.value || '';
+    if (!user || !pass) {
+        setLoginError('Enter username and password.');
+        return;
+    }
+    setLoginError('');
+    window.CylonGFX.handleGfxCommand(action, { user, pass });
+}
+
+function initLoginControls() {
+    const btnLogin = document.getElementById('qBtnLogin');
+    const btnNew = document.getElementById('qBtnNew');
+    const btnGuest = document.getElementById('qBtnGuest');
+    const passInput = document.getElementById('qLoginPass');
+
+    if (passInput) {
+        passInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !loggedInUser) {
+                e.preventDefault();
+                submitAuth('login');
+            }
+        });
+    }
+
+    if (btnLogin) {
+        btnLogin.addEventListener('click', (e) => {
+            e.stopPropagation();
+            submitAuth('login');
+        });
+    }
+    if (btnNew) {
+        btnNew.addEventListener('click', (e) => {
+            e.stopPropagation();
+            submitAuth('new');
+        });
+    }
+    if (btnGuest) {
+        btnGuest.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (!selectedServerUrl) {
+                showServerMenuPopup('Please select a server first.');
+                return;
+            }
+            setLoginError('');
+            window.CylonGFX.handleGfxCommand('guest', '');
+        });
+    }
 }
 
 function showSayPopup() {
@@ -317,37 +830,11 @@ window.onload = async function() {
         return;
     }
 
-    const dos = window.parent && window.parent.CylonDOS ? window.parent.CylonDOS : window.CylonDOS;
-    let localDrive = 'queville';
-
+    initLoginControls();
     initQuevilleControls();
+    setSidebarLoggedIn(false);
 
-    // 1. Ensure the local .gfx assets drive is mounted in RAM or LS (not IDB)
-    if (dos) {
-        const mnts = await dos.mounts();
-        const existing = mnts.find(m => (m.name === 'queville' || m.name === 'queville.gfx') && m.type !== 'idb');
-        if (existing) {
-            localDrive = existing.name;
-        } else {
-            let mounted = await window.CylonCommand('mount cylon-queville.gfx ram queville');
-            if (!mounted) mounted = await window.CylonCommand('mount queville.gfx ram queville');
-            if (!mounted) {
-                document.body.innerHTML = "<h3 style='color:red;'>Failed to mount Queville world drive</h3>";
-                return;
-            }
-        }
-    }
-
-    // 2. Determine spawn sector from /a/gfxSpawn (defaults to Bc)
-    let startSector = 'Bc';
-    if (dos) {
-        try {
-            const sp = await dos.load(`${localDrive}:/a/gfxSpawn`);
-            if (sp && sp.trim().length === 2) startSector = sp.trim();
-        } catch (e) {}
-    }
-
-    // 3. Hook tile clicks & sizing before connecting
+    // Hook tile clicks & sizing
     window.CylonGFX.showTargetMenu = handleTileClick;
     const origGfxRefresh = window.CylonGFX.gfxRefresh.bind(window.CylonGFX);
     window.CylonGFX.gfxRefresh = async function(sector, zStr, itemsStr) {
@@ -356,23 +843,8 @@ window.onload = async function() {
     };
     window.addEventListener('resize', fitDesktopToScreen);
 
-    // 4. Connect using the CylonGFX ping/pong multiplayer engine
-    const serverUrl = await resolveServerUrl();
-    try {
-        await window.CylonGFX.gfxConnect(serverUrl, localDrive, SERVER_DRIVE, startSector);
-        fitDesktopToScreen();
-        if (typeof pop === 'function') {
-            pop(
-                '<div style="text-align:center; padding:14px 22px; font-family:var(--font-face,monospace); cursor:pointer;" onclick="hpop()">' +
-                '<strong>Welcome to Queville</strong>' +
-                '</div>',
-                'center'
-            );
-        }
-    } catch (err) {
-        console.error('Queville connection error:', err);
-        if (typeof print === 'function') print(`Queville Error: ${err.message || err}\n`);
-    }
+    // First action: open the topleft server selection popup with PopForce = visible
+    showServerMenuPopup();
 };
 
 // Handle popup <a href="gfx:..."> clicks forwarded from Cylon OS
@@ -386,8 +858,12 @@ window.addEventListener('message', function(e) {
 
 // --- Tile & Entity Click Handling ---
 function handleTileClick(z, clientX, clientY) {
+    if (!selectedServerUrl) {
+        showServerMenuPopup('Please select a server first.');
+        return;
+    }
     if (!loggedInUser || (window.playerItem && window.playerItem.startsWith('Za'))) {
-        showLoginPopup();
+        focusSidebarLogin('Please login or click Play Now!');
         return;
     }
     if (!window.playerAvatar) {
@@ -398,7 +874,6 @@ function handleTileClick(z, clientX, clientY) {
     const zStr = encodeTileZ(z);
     const menuItems = [];
 
-    // 1. Static 6-char objects (supports Vx/Vy live attributes)
     document.querySelectorAll(`.icon-wrap.static-obj[data-z="${z}"]`).forEach(el => {
         const objId = el.getAttribute('data-id');
         const objZStr = el.getAttribute('data-zstr') || zStr;
@@ -409,7 +884,6 @@ function handleTileClick(z, clientX, clientY) {
         });
     });
 
-    // 2. Dynamic items and other players
     document.querySelectorAll(`.icon-wrap.dyn-sprite[data-z="${z}"]`).forEach(el => {
         const code = el.getAttribute('data-code') || '';
         if (code.length < 4) return;
@@ -423,7 +897,6 @@ function handleTileClick(z, clientX, clientY) {
         });
     });
 
-    // 3. Local player (rendered on #gfx-sys-cursor)
     if (z === window.playerZ && window.playerItem) {
         const pId = window.playerItem.substring(0, 2);
         menuItems.push({
@@ -435,14 +908,12 @@ function handleTileClick(z, clientX, clientY) {
             action: () => showSayPopup()
         });
     }
-    
-    // Empty tile -> walk directly
+
     if (menuItems.length === 0) {
         window.zdown(z);
         return;
     }
 
-    // Add Walk Here when clicking another tile that also has entities
     if (z !== window.playerZ) {
         menuItems.push({
             label: 'Walk Here',
@@ -450,7 +921,6 @@ function handleTileClick(z, clientX, clientY) {
         });
     }
 
-    // Use CylonPopManager context menu with pixel coordinates so 14x10 aligns cleanly
     const popMgr = window.parent && window.parent.CylonPopManager;
     if (popMgr && typeof popMgr.showContextMenu === 'function') {
         if (clientX === undefined || clientY === undefined) {
@@ -472,7 +942,18 @@ function handleTileClick(z, clientX, clientY) {
 }
 
 function gfxClick(bytecode) {
+    if (bytecode.startsWith('SRV')) {
+        const idx = parseInt(bytecode.substring(3), 10);
+        const url = QUEVILLE_SERVERS[idx];
+        if (url) selectServer(url);
+        return;
+    }
+
     if (bytecode === 'GUEST') {
+        if (!selectedServerUrl) {
+            showServerMenuPopup('Please select a server first.');
+            return;
+        }
         if (window.parent && window.parent !== window) {
             window.parent.postMessage(
                 { type: 'QANDY_APP_CLICKED' },
@@ -572,13 +1053,11 @@ window.itemdown = function(code) {
     const itemZ = decodeTileZ(itemZStr);
     const uniqueId = code.length >= 8 ? code.substring(4, 8) : '';
 
-    // Clicked local player -> request inventory from server
     if (itemId === window.playerItem && (!uniqueId || uniqueId === window.playerId)) {
         window.invdown('');
         return;
     }
 
-    // Clicked another player -> tag or interact
     if (itemId >= 'Sa' && itemId <= 'Sd') {
         if (window.gfxDo === 'RF') window.gfxDo = '';
         window.gfxDo += (window.playerItem === 'Za' || !uniqueId)
@@ -614,7 +1093,6 @@ window.invdown = function(code) {
         return;
     }
 
-    // Single item sub-menu
     if (code.charAt(0) === '-') {
         const item = code.substring(1, 3);
         const desc = getItemLabel(item);
@@ -629,6 +1107,8 @@ window.invdown = function(code) {
         pop(html, 'center');
         return;
     }
+
+    window.renderInventory(code);
 
     let col = 0;
     let outputItems = '';
@@ -668,11 +1148,11 @@ window.invdown = function(code) {
         }
         output += '</div>';
     }
-    
+
     if (loggedInUser && loggedInUser.startsWith('guest')) {
         output += `<div style="margin-top:8px; font-size:11px; opacity:0.8;">Playing as ${escapeAttr(loggedInUser)}.<br>Run <code>gfx new &lt;user&gt; &lt;pass&gt;</code> to save.</div>`;
     }
- 
+
     if (!outputItems && !wKeys.length && wzValue === null) {
         output += '(Inventory empty)';
     }
@@ -690,35 +1170,90 @@ window.serverdown = function(code) {
     while (col < code.length) {
         const verb = code.substring(col, col + 2);
         col += 2;
-
         if (verb === 'LI' || verb === 'LG' || verb === 'LC') {
             const endIdx = code.indexOf('--', col);
             const name = endIdx < 0 ? code.substring(col) : code.substring(col, endIdx);
             col = endIdx < 0 ? code.length : endIdx + 2;
 
+            if (verb === 'LC') {
+                pendingNewUser = name;
+                if (typeof print === 'function') print(`Account saved as ${name}. Please log in.\n`);
+                continue;
+            }
+
             loggedInUser = name || (verb === 'LG' ? ('guest' + (window.playerId || '')) : 'Player');
+            const passEl = document.getElementById('qLoginPass');
+            if (passEl) passEl.value = '';
+            setLoginError('');
+            setSidebarLoggedIn(true);
+
+            if (!window.playerInven) {
+                window.renderInventory();
+            }
+
             if (typeof setPopForce === 'function') setPopForce('hidden');
             if (typeof hpop === 'function') hpop();
 
             if (typeof print === 'function') {
-                if (verb === 'LC') print(`Account saved as ${loggedInUser}.\n`);
-                else print(`Logged in as ${loggedInUser}.\n`);
+                print(`Logged in as ${loggedInUser}.\n`);
             }
         } else if (verb === 'LO') {
             const endIdx = code.indexOf('--', col);
             col = endIdx < 0 ? code.length : endIdx + 2;
 
             loggedInUser = null;
-            if (typeof print === 'function') print('Logged out.\n');
-            showLoginPopup('Logged out.');
+            if (window.CylonGFX) {
+                window.CylonGFX.resetSession();
+            }
+            const iconsLayer = document.getElementById('icons-layer');
+            if (iconsLayer) {
+                iconsLayer.querySelectorAll('.dyn-sprite, .chat-bubble, #gfx-sys-cursor').forEach(el => el.remove());
+            }
+            if (window.parent && window.parent !== window) {
+                window.parent.postMessage(
+                    { type: 'QANDY_SET_MODE', mode: 'app' },
+                    (window.location.origin && window.location.origin !== 'null' ? window.location.origin : '*')
+                );
+            }
+            if (typeof setPopForce === 'function') setPopForce('hidden');
+            if (typeof hpop === 'function') hpop();
+
+            setSidebarLoggedIn(false);
+
+            if (pendingNewUser) {
+                const userEl = document.getElementById('qLoginUser');
+                if (userEl) userEl.value = pendingNewUser;
+                setLoginError('Account saved! Log in to continue.');
+                pendingNewUser = null;
+                if (typeof print === 'function') print('Logged out. Log in with your new account.\n');
+            } else {
+                setLoginError('Logged out.');
+                if (typeof print === 'function') print('Logged out.\n');
+            }
         } else if (verb === 'LE') {
             const errCode = code.substring(col, col + 2);
             col += 2;
             const msg = LOGIN_ERRORS[errCode] || ('Login error (' + errCode + ').');
             if (typeof print === 'function') print(`Error: ${msg}\n`);
-            if (!loggedInUser) {
-                showLoginPopup(msg);
+
+            let joinErrEl = null;
+            try {
+                if (window.parent && window.parent.document) {
+                    joinErrEl = window.parent.document.getElementById('qJoinErr');
+                }
+            } catch (e) {}
+
+            if (joinErrEl) {
+                joinErrEl.textContent = msg;
+            } else if (!loggedInUser) {
+                if (window.CylonGFX) {
+                    window.CylonGFX.resetSession();
+                }
+                setSidebarLoggedIn(false);
+                setLoginError(msg);
             }
+        } else if (verb === 'Vg') {
+            showJoinModalPopup();
         } else if (verb === 'Vi') {
             if (typeof setPopForce === 'function') setPopForce('hidden');
             let endIdx = code.indexOf('--', col);
@@ -755,6 +1290,10 @@ window.serverdown = function(code) {
 
 // --- Keyboard Input (supports physical keys + Cylon virtual keyboard) ---
 window.keydown = function(key, e) {
+    if (!loggedInUser || (window.playerItem && window.playerItem.startsWith('Za'))) {
+        return;
+    }
+
     if (!window.playerAvatar) {
         if (e) e.preventDefault();
         checkAvatarRequired();
@@ -764,10 +1303,20 @@ window.keydown = function(key, e) {
     const keyStr = (typeof e === 'object' && e && e.key) ? e.key : String(key || '');
     const lower = keyStr.toLowerCase();
 
-    if (!loggedInUser || (window.playerItem && window.playerItem.startsWith('Za'))) {
-        if (lower === 'enter') {
+    const popMgr = window.parent && window.parent.CylonPopManager;
+    const menuOpen = popMgr && (
+        typeof popMgr.isMenuOpenForWindow === 'function'
+            ? popMgr.isMenuOpenForWindow(window)
+            : popMgr.isMenuOpen
+    );
+    if (menuOpen) {
+        if (popMgr.handleMenuKey(keyStr)) {
             if (e) e.preventDefault();
-            showLoginPopup();
+            return;
+        }
+        if (lower === 'arrowleft' || lower === 'left' ||
+            lower === 'arrowright' || lower === 'right') {
+            if (e) e.preventDefault();
         }
         return;
     }
@@ -781,15 +1330,6 @@ window.keydown = function(key, e) {
             window.gfxDo = 'RF';
             flushNetworkNow();
         }
-        return;
-    }
-
-    if (lower === 'l') {
-        if (e) e.preventDefault();
-        if (typeof hpop === 'function') hpop();
-        if (window.gfxDo === 'RF') window.gfxDo = '';
-        window.gfxDo += 'Vl';
-        flushNetworkNow();
         return;
     }
 
@@ -811,6 +1351,31 @@ window.keydown = function(key, e) {
         window.playerWalk = -1;
         window.playerDo = '';
         window.CylonGFX.moveCursor(dx, dy);
+    }
+    if (
+        window.CylonGFX &&
+        window.CylonGFX.fillTileCode &&
+        !window.CylonGFX.isLooking &&
+        !(e && (e.ctrlKey || e.metaKey || e.altKey)) &&
+        keyStr.length === 1
+    ) {
+        const cur = window.CylonGFX.fillTileCode.padEnd(2, 'a').slice(0, 2);
+        let c1 = cur[0];
+        let c2 = cur[1];
+    
+        if (/^[A-Z]$/.test(keyStr)) {
+            c1 = keyStr;
+        } else if (/^[a-z0-9_()[\]{}^,:;+\-=@]$/.test(keyStr)) { // adjust allowed symbols as needed
+            c2 = keyStr;
+        } else {
+            return;
+        }
+        if (e) e.preventDefault();
+        window.CylonGFX.handleGfxCommand('tile', c1 + c2);
+        window.CylonGFX.fillTileCode = c1 + c2;
+        if (typeof print === 'function') {
+            print(`Brush: ${window.CylonGFX.fillTileCode}\n`);
+        }
     }
 };
 
@@ -894,6 +1459,55 @@ function showAvatarHeadPopup(sex) {
     if (typeof pop === 'function') pop(html, 'center');
 }
 
+let pendingNewUser = null;
+
+function showJoinModalPopup() {
+    if (typeof setPopForce === 'function') setPopForce('visible');
+
+    const submitScript =
+        `(function(){` +
+        `var u=(document.getElementById('qJoinUser').value||'').trim();` +
+        `var p=document.getElementById('qJoinPass').value||'';` +
+        `var c=document.getElementById('qJoinConfirm').value||'';` +
+        `var err=document.getElementById('qJoinErr');` +
+        `if(!u||!p||!c){if(err)err.textContent='All fields are required.';return;}` +
+        `if(p!==c){if(err)err.textContent='Passwords do not match.';return;}` +
+        `if(err)err.textContent='Saving...';` +
+        `if(window.setOSMode)window.setOSMode('app');` +
+        `if(window.hideFullKeyboard)window.hideFullKeyboard();` +
+        `var f=document.querySelector('.page-frame.active');` +
+        `var target=(f&&f.contentWindow)?f.contentWindow:window;` +
+        `target.postMessage({type:'QANDY_GFX_CMD',cmd:'new',data:{user:u,pass:p}},` +
+        `(window.location.origin&&window.location.origin!=='null'?window.location.origin:'*'));` +
+        `})()`;
+
+    const cancelScript =
+        `window.proxyInputInPopup=false;` +
+        `if(window.setOSMode)window.setOSMode('app');` +
+        `if(window.hideFullKeyboard)window.hideFullKeyboard();` +
+        `if(window.setPopForce)window.setPopForce('hidden');` +
+        `if(window.hpop)window.hpop();return false;`;
+
+    const html =
+        `<div style="padding:10px 14px; font-family:var(--font-face,monospace); width:230px; display:flex; flex-direction:column; gap:6px;">` +
+        `<div style="font-weight:bold; color:var(--fg-color,#0f0);">Save Player Account</div>` +
+        `<input id="qJoinUser" type="text" maxlength="15" placeholder="Player Name" ` +
+            `style="width:100%; box-sizing:border-box; padding:4px; font-family:inherit; background:var(--input-bg,#000); color:var(--input-fg,#0f0); border:1px solid var(--fg-color,#0f0);">` +
+        `<input id="qJoinPass" type="password" maxlength="32" placeholder="Password" ` +
+            `style="width:100%; box-sizing:border-box; padding:4px; font-family:inherit; background:var(--input-bg,#000); color:var(--input-fg,#0f0); border:1px solid var(--fg-color,#0f0);">` +
+        `<input id="qJoinConfirm" type="password" maxlength="32" placeholder="Confirm Password" ` +
+            `onkeydown="if(event.key==='Enter'){event.preventDefault();${submitScript}}" ` +
+            `style="width:100%; box-sizing:border-box; padding:4px; font-family:inherit; background:var(--input-bg,#000); color:var(--input-fg,#0f0); border:1px solid var(--fg-color,#0f0);">` +
+        `<div id="qJoinErr" style="color:#ff5555; font-size:12px; min-height:1em;"></div>` +
+        `<div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">` +
+            `<button type="button" onclick="${submitScript}" style="flex:1; padding:5px; font-family:inherit; font-weight:bold; cursor:pointer; background:var(--sel-bg,#333); color:var(--sel-fg,#0f0); border:1px solid var(--fg-color,#0f0); border-radius:4px;">Save</button>` +
+            `<a href="#" onclick="${cancelScript}" style="font-size:12px;">Cancel</a>` +
+        `</div>` +
+        `</div>`;
+
+    if (typeof pop === 'function') pop(html, 'center');
+}
+
 function triggerCylonPress(keyId) {
     if (window.parent && window.parent !== window && typeof window.parent.press === 'function') {
         window.parent.press({ id: keyId, toApp: true });
@@ -913,13 +1527,13 @@ function triggerCylonPress(keyId) {
 
 function initQuevilleControls() {
     const stage = document.getElementById('queville-stage');
-    const toggleBtn = document.getElementById('qpad-thumb-toggle');
 
     if (stage && localStorage.getItem('queville_thumb_side') === 'left') {
         stage.classList.add('thumb-left');
     }
 
-    if (toggleBtn && stage) {
+    document.querySelectorAll('.qpad-thumb-toggle').forEach((toggleBtn) => {
+        if (!stage) return;
         toggleBtn.addEventListener('pointerdown', (e) => e.preventDefault());
         toggleBtn.addEventListener('click', (e) => {
             e.preventDefault();
@@ -927,9 +1541,9 @@ function initQuevilleControls() {
             const isLeft = stage.classList.toggle('thumb-left');
             localStorage.setItem('queville_thumb_side', isLeft ? 'left' : 'right');
         });
-    }
+    });
 
-    document.querySelectorAll('#queville-controls .qpad-btn[data-key]').forEach((btn) => {
+    document.querySelectorAll('#qhud-game .qpad-btn[data-key]').forEach((btn) => {
         const keyId = btn.getAttribute('data-key');
         const repeatable = (keyId !== 'enter');
         let delayTimer = null;
@@ -975,27 +1589,116 @@ function initQuevilleControls() {
     });
 }
 
+window.renderInventory = function(invenStr) {
+    const grid = document.getElementById('qhud-inven-grid');
+    if (!grid) return;
+
+    const code = (typeof invenStr === 'string') ? invenStr : (window.playerInven || '');
+    const iconDir = (window.CylonGFX && window.CylonGFX.gfxIconDir) ? window.CylonGFX.gfxIconDir : 'i/';
+
+    hideHoverTooltip();
+    grid.innerHTML = '';
+
+    let col = 0;
+    while (col < code.length) {
+        const verb = code.substring(col, col + 2);
+        col += 2;
+        if (verb.length < 2) break;
+
+        if (verb === 'Za') {
+            const emptySlot = document.createElement('div');
+            emptySlot.className = 'qhud-inven-slot empty';
+            grid.appendChild(emptySlot);
+            continue;
+        }
+
+        if (verb >= 'Pa') {
+            col += 2;
+            continue;
+        }
+
+        const label = getItemLabel(verb);
+        const slot = document.createElement('button');
+        slot.type = 'button';
+        slot.className = 'qhud-inven-slot';
+        slot.setAttribute('aria-label', label);
+
+        const img = document.createElement('img');
+        img.src = `${iconDir}${verb}.png`;
+        img.alt = label;
+        img.onerror = function() { this.style.visibility = 'hidden'; };
+
+        slot.appendChild(img);
+        slot.addEventListener('pointerenter', (e) => {
+            if (e.pointerType === 'mouse') showHoverTooltip(label, slot);
+        });
+        slot.addEventListener('pointerleave', hideHoverTooltip);
+        slot.addEventListener('click', (e) => {
+            e.stopPropagation();
+            hideHoverTooltip();
+            showInvenItemMenu(verb, e, slot);
+        });
+
+        grid.appendChild(slot);
+    }
+};
+
+function showSplashPopup() {
+    if (typeof setPopForce === 'function') setPopForce('hidden');
+
+    const html =
+        `<div style="padding:10px 16px; text-align:center; font-family:var(--font-face,monospace); line-height:1.5;">` +
+        `<div>An epic tale of Romance and Adventure...</div>` +
+        `<div style="margin-top:6px;">` +
+        `<a href="gfx:GUEST">Play Queville Now!</a>` +
+        `</div>` +
+        `</div>`;
+
+    const wrapper = document.getElementById('desktop-wrapper');
+    let pos = 'topcenter';
+    if (wrapper) {
+        const rect = wrapper.getBoundingClientRect();
+        if (rect.width > 0) {
+            pos = {
+                x: Math.round(rect.left + rect.width / 2),
+                y: 'topcenter',
+                center: true
+            };
+        }
+    }
+
+    if (typeof pop === 'function') pop(html, pos);
+}
+
 function fitDesktopToScreen() {
     if (!window.CylonGFX) return;
     const wrapper = document.getElementById('desktop-wrapper');
     if (!wrapper) return;
     const cols = window.CylonGFX.gridWide || 14;
     const rows = window.CylonGFX.gridTall || 10;
-    const aspect = cols / rows;
 
-    // Reserve ~28-30% for #queville-controls; in a 2:1 #screen-wrapper,
-    // 1.4/2.0 is already 70%, so the map stays at full 98% height.
-    const maxMapW = window.innerWidth * 0.72;
-    let h = window.innerHeight * 0.98;
-    let w = h * aspect;
-    if (w > maxMapW) {
-        w = maxMapW;
-        h = w / aspect;
+    let w, h;
+    if (window.CylonGFX.gfxGridStretch) {
+        const aspect = cols / rows;
+
+        const maxMapW = window.innerWidth * 0.72;
+        h = window.innerHeight * 0.98;
+        w = h * aspect;
+        if (w > maxMapW) {
+            w = maxMapW;
+            h = w / aspect;
+        }
+        w = Math.floor(w);
+        h = Math.floor(h);
+    } else {
+        const tileSize = window.CylonGFX.gfxTileSize || 32;
+        w = cols * tileSize;
+        h = rows * tileSize;
     }
-    wrapper.style.width = Math.floor(w) + 'px';
-    wrapper.style.height = Math.floor(h) + 'px';
-}
 
+    wrapper.style.width = w + 'px';
+    wrapper.style.height = h + 'px';
+}
 </script>
 </body>
 </html>

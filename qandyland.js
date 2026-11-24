@@ -24,9 +24,22 @@ UNIVAC.inject({
 });
 
 var http   = require('http');
+var https  = require('https');
 var path   = require('path');
 var fs     = require('fs');
 var crypto = require('crypto');
+
+// .env loader (no npm package required)
+(function loadDotEnv() {
+  var envPath = path.join(__dirname, '.env');
+  if (!fs.existsSync(envPath)) return;
+  fs.readFileSync(envPath, 'utf8').split(/\r?\n/).forEach(function (line) {
+    var m = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)\s*$/.exec(line);
+    if (!m || process.env[m[1]] !== undefined) return;
+    process.env[m[1]] = m[2].replace(/^['"]|['"]$/g, '');
+  });
+
+})();
 
 // ── CLI Arguments & Configuration ─────────────────────────────────────────────
 
@@ -438,11 +451,40 @@ function calculateLineOfSight(driveName, centerSector) {
   return Array.from(visible);
 }
 
-// ── Player Auth, Snapshots & Idle Cleanup ─────────────────────────────────────
+// ── Player Auth, JSON Snapshots & Idle Cleanup ────────────────────────────────
 
 var DEFAULT_PLAYER_ITEM = 'Sa';
 var DEFAULT_PLAYER_INV  = 'Za'.repeat(20);
 var IDLE_LOGOUT_MS      = 120000; // 2 minutes without a ping removes idle player from /w/
+
+var kickedSessions = new Map(); // session -> { msg, at }
+
+setInterval(function () {
+  var cutoff = Date.now() - 300000;
+  for (var entry of kickedSessions.entries()) {
+    if (entry[1].at < cutoff) kickedSessions.delete(entry[0]);
+  }
+}, 60000).unref();
+
+function getRequestServerUrl(req) {
+  if (process.env.SERVER_URL) return process.env.SERVER_URL.trim();
+  if (!req || !req.headers) return 'http://localhost:' + PORT + '/qandyland.js';
+  var protoHeader = req.headers['x-forwarded-proto'];
+  var proto = protoHeader ? String(protoHeader).split(',')[0].trim() : 'http';
+  var hostHeader = req.headers['x-forwarded-host'] || req.headers.host || ('localhost:' + PORT);
+  var host = String(hostHeader).split(',')[0].trim();
+  return proto + '://' + host + '/qandyland.js';
+}
+
+function getDriveZBase(drive) {
+  var gfxZBase = 10;
+  var zBaseLoad = DOS.fileLoad(drive, '/', 'a/gfxZBase', 'system');
+  if (zBaseLoad.success && zBaseLoad.content) {
+    var parsed = parseInt(zBaseLoad.content, 10);
+    if (!isNaN(parsed) && ((parsed >= 2 && parsed <= 36) || parsed === 52)) gfxZBase = parsed;
+  }
+  return gfxZBase;
+}
 
 function hashPassword(password) {
   var salt = crypto.randomBytes(16).toString('hex');
@@ -473,6 +515,83 @@ function validateCredentials(username, password) {
   return null;
 }
 
+function formatTimestampFromMs(ms) {
+  var d = new Date(ms);
+  var pad = function (n) { return String(n).padStart(2, '0'); };
+  return (
+    String(d.getFullYear()) +
+    pad(d.getMonth() + 1) +
+    pad(d.getDate()) +
+    pad(d.getHours()) +
+    pad(d.getMinutes()) +
+    pad(d.getSeconds())
+  );
+}
+
+function formatTsReadable(ts) {
+  if (!ts || ts.length < 14) return ts || '';
+  return ts.slice(0, 4) + '-' + ts.slice(4, 6) + '-' + ts.slice(6, 8) + ' ' +
+         ts.slice(8, 10) + ':' + ts.slice(10, 12) + ':' + ts.slice(12, 14);
+}
+
+function parsePlayerStatus(statusStr) {
+  var s = String(statusStr || 'player').trim();
+  if (!s || s === 'player') {
+    return { type: 'player', until: null, expired: false };
+  }
+  var parts = s.split(/\s+/);
+  var kind = parts[0].toLowerCase();
+  if (kind !== 'ban' && kind !== 'mute') {
+    return { type: 'player', until: null, expired: false };
+  }
+  var until = parts[1] || null;
+  if (until && /^\d{14}$/.test(until)) {
+    if (DOS.timestamp() >= until) {
+      return { type: 'player', until: null, expired: true };
+    }
+    return { type: kind, until: until, expired: false };
+  }
+  return { type: kind, until: null, expired: false };
+}
+
+function parseDurationToStatus(kind, rawDuration) {
+  if (rawDuration === undefined || rawDuration === null || String(rawDuration).trim() === '') {
+    return { ok: true, status: kind }; // permanent
+  }
+  var d = String(rawDuration).trim().toLowerCase();
+  if (d === '0' || d === 'off' || d === 'none' || d === 'clear' || d === 'unban' || d === 'unmute') {
+    return { ok: true, status: 'player' };
+  }
+  if (d === 'perm' || d === 'permanent' || d === 'forever') {
+    return { ok: true, status: kind };
+  }
+  if (/^\d{14}$/.test(d)) {
+    return { ok: true, status: kind + ' ' + d };
+  }
+  var m = /^(\d+)\s*(s|m|h|d|w)$/i.exec(d);
+  if (!m) {
+    return { ok: false, error: 'Invalid duration "' + rawDuration + '". Use e.g. 30m, 12h, 7d, 0/off, or omit for permanent.' };
+  }
+  var n = parseInt(m[1], 10);
+  if (n <= 0) return { ok: true, status: 'player' };
+  var mult = { s: 1000, m: 60000, h: 3600000, d: 86400000, w: 604800000 }[m[2].toLowerCase()];
+  return { ok: true, status: kind + ' ' + formatTimestampFromMs(Date.now() + n * mult) };
+}
+
+function parsePlayerRecord(raw) {
+  if (!raw || typeof raw !== 'string') return null;
+  try {
+    var obj = JSON.parse(raw);
+    return (obj && typeof obj === 'object' && !Array.isArray(obj)) ? obj : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+function serializePlayerRecord(rec) {
+  return JSON.stringify(rec, null, 2);
+}
+
 function getSpawnDefaults(drive, gfxZBase) {
   var sector = 'Bc';
   var zStr = encodeZ(0, gfxZBase);
@@ -487,28 +606,20 @@ function getSpawnDefaults(drive, gfxZBase) {
   return { sector: sector, zStr: zStr };
 }
 
-function saveUserSnapshot(player, session, passwordHashOverride) {
+function saveUserSnapshot(player, session, overrides) {
   if (!player || !player.drive || !player.userKey) return;
   var drive = player.drive;
   var uPath = 'u/' + player.userKey;
+  var gfxZBase = getDriveZBase(drive);
+  var sp = getSpawnDefaults(drive, gfxZBase);
 
-  var gfxZBase = 10;
-  var zBaseLoad = DOS.fileLoad(drive, '/', 'a/gfxZBase', 'system');
-  if (zBaseLoad.success && zBaseLoad.content) {
-    var parsed = parseInt(zBaseLoad.content, 10);
-    if (!isNaN(parsed) && ((parsed >= 2 && parsed <= 36) || parsed === 52)) gfxZBase = parsed;
+  var existing = {};
+  var exLoad = DOS.fileLoad(drive, '/', uPath, 'system');
+  if (exLoad.success && exLoad.content) {
+    existing = parsePlayerRecord(exLoad.content) || {};
   }
 
-  var existing = DOS.fileLoad(drive, '/', uPath, 'system');
-  var exactName = player.username || player.userKey;
-  var passHash  = passwordHashOverride || '';
-  if (existing.success && existing.content) {
-    var lines = existing.content.split('\n');
-    if (lines[0]) exactName = lines[0].trim();
-    if (!passHash && lines[1]) passHash = lines[1].trim();
-  }
-
-  var invContent = DEFAULT_PLAYER_INV;
+  var invContent = existing.inventory !== undefined ? existing.inventory : DEFAULT_PLAYER_INV;
   if (player.fullPath) {
     var pFile = DOS.fileLoad(drive, '/', player.fullPath, session || 'system');
     if (pFile.success && typeof pFile.content === 'string') {
@@ -516,18 +627,59 @@ function saveUserSnapshot(player, session, passwordHashOverride) {
     }
   }
 
-  var itemId = (player.item && player.item.length >= 2) ? player.item.substring(0, 2) : DEFAULT_PLAYER_ITEM;
-  var zStr   = encodeZ(parseInt(player.z, 10) || 0, gfxZBase);
-  var stateLine = [itemId, player.map || 'Bc', zStr, player.avatar || '', invContent].join('|');
+  var itemId = (player.item && player.item.length >= 2)
+    ? player.item.substring(0, 2)
+    : (existing.item || DEFAULT_PLAYER_ITEM);
+  var zStr = encodeZ(parseInt(player.z, 10) || 0, gfxZBase);
+  var nowTs = DOS.timestamp();
 
-  DOS.fileSave(drive, '/', uPath, exactName + '\n' + passHash + '\n' + stateLine, 'system', 'system');
+  var record = {
+    username:  player.username || existing.username || player.userKey,
+    password:  (overrides && overrides.password !== undefined) ? overrides.password : (existing.password || ''),
+    item:      itemId,
+    avatar:    player.avatar != null ? player.avatar : (existing.avatar || ''),
+    sector:    player.map || existing.sector || sp.sector,
+    z:         zStr,
+    status:    (overrides && overrides.status !== undefined) ? overrides.status : (player.status || existing.status || 'player'),
+    created:   (overrides && overrides.created !== undefined) ? overrides.created : (player.created || existing.created || nowTs),
+    lastLogin: (overrides && overrides.lastLogin !== undefined) ? overrides.lastLogin : (player.lastLogin || existing.lastLogin || nowTs),
+    server:    (overrides && overrides.server !== undefined) ? overrides.server : (player.server !== undefined ? player.server : (existing.server || '')),
+    inventory: invContent
+  };
+
+  DOS.fileSave(drive, '/', uPath, serializePlayerRecord(record), 'system', 'system');
+}
+
+var inFlightUsers = new Set();
+
+function isUserActiveOnDrive(drive, userKey) {
+  for (var entry of playerIndex.entries()) {
+    var p = entry[1];
+    if (p && p.drive === drive && p.userKey === userKey) return true;
+  }
+  return false;
 }
 
 function removePlayerFromWorld(player, session) {
-  if (!player || !player.drive) return;
+  if (!player || !player.drive) return Promise.resolve();
+  var syncPromise = Promise.resolve();
   if (player.userKey) {
-    saveUserSnapshot(player, session);
+    player.server = '';
+    saveUserSnapshot(player, session, { server: '' });
+    var drive = player.drive;
+    var userKey = player.userKey;
+    syncPromise = upstashSaveUser(drive, userKey).then(function (res) {
+      if (
+        res && res.ok && res.status === 'saved' &&
+        !isUserActiveOnDrive(drive, userKey) &&
+        !inFlightUsers.has(drive + ':' + userKey)
+      ) {
+        DOS.fileDelete(drive, '/', 'u/' + userKey, 'system');
+      }
+      return res;
+    });
   }
+
   if (player.chatPath) {
     DOS.fileDelete(player.drive, '/', player.chatPath, session || 'system');
     player.chatPath = null;
@@ -539,6 +691,7 @@ function removePlayerFromWorld(player, session) {
   if (player.pubId) {
     DOS.fileDelete(player.drive, '/', 'p/' + player.pubId, session || 'system');
   }
+  return syncPromise;
 }
 
 setInterval(function () {
@@ -547,17 +700,23 @@ setInterval(function () {
     var sess = entry[0];
     var p = entry[1];
     if (p && p.lastSeen && (now - p.lastSeen > IDLE_LOGOUT_MS)) {
-      removePlayerFromWorld(p, sess);
       playerIndex.delete(sess);
+      removePlayerFromWorld(p, sess);
     }
   }
 }, 30000).unref();
 
 // ── Plugboard Command Processor ───────────────────────────────────────────────
 
-function plugboard(req, stacker, plugs, drive, session) {
+async function plugboard(req, stacker, plugs, drive, session) {
 
   drive = DOS.resolveDriveName(drive) || drive;
+
+  if (session && kickedSessions.has(session)) {
+    var kickedMsg = kickedSessions.get(session).msg;
+    kickedSessions.delete(session);
+    return respondRetro(stacker, kickedMsg, null);
+  }
 
   var skipPostTick = false;
 
@@ -570,9 +729,17 @@ function plugboard(req, stacker, plugs, drive, session) {
 
   let output = "";
 
+  function getPlayerStatus(p) {
+    if (!p || !p.userKey) return 'guest';
+    return p.status || 'player';
+  }
+
   function runtape(code) {
     if (code) {
-      let uResult = UNIVAC(drive, player.fullPath, "RAM:" + code, session);
+      let uResult = UNIVAC(drive, player.fullPath, "RAM:" + code, session, {
+        noScroll: !!(player && player.fillTileCode),
+        playerStatus: getPlayerStatus(player)
+      });
       if (uResult) {
         player.map      = uResult.sector;
         player.z        = uResult.z;
@@ -587,7 +754,9 @@ function plugboard(req, stacker, plugs, drive, session) {
 
   function runfile(filepath) {
     if (typeof UNIVAC === 'function') {
-      let uResult = UNIVAC(drive, player.fullPath, filepath, session);
+      let uResult = UNIVAC(drive, player.fullPath, filepath, session, {
+        playerStatus: getPlayerStatus(player)
+      });
       if (uResult) {
         player.map      = uResult.sector;
         player.z        = uResult.z;
@@ -642,6 +811,19 @@ function plugboard(req, stacker, plugs, drive, session) {
         column = endChat !== -1 ? endChat + 2 : plugs.length;
 
         if (!player.item || player.item === "" || player.item.startsWith('Za') || !player.pubId) break;
+
+        if (player.userKey) {
+          let muteCheck = parsePlayerStatus(player.status);
+          if (muteCheck.expired) {
+            player.status = 'player';
+            saveUserSnapshot(player, session, { status: 'player' });
+            await upstashSaveUser(drive, player.userKey);
+          } else if (muteCheck.type === 'mute') {
+            let untilText = muteCheck.until ? (' until ' + formatTsReadable(muteCheck.until)) : ' permanently';
+            output += 'S^Vh<div style="text-align:center;padding:8px;">You are muted' + untilText + '.</div>--^S';
+            break;
+          }
+        }
 
         let cleanText = String(chatRaw || '')
           .replace(/[\x00-\x1f\x7f]/g, ' ')
@@ -712,9 +894,12 @@ function plugboard(req, stacker, plugs, drive, session) {
           }
         }
 
+
         if (objfile != null) {
           if (typeof UNIVAC === 'function') {
-            let uResult = UNIVAC(drive, player.fullPath, objfile, session);
+            let uResult = UNIVAC(drive, player.fullPath, objfile, session, {
+              playerStatus: getPlayerStatus(player)
+            });
             if (uResult) {
               player.map = uResult.sector;
               player.z = uResult.z;
@@ -765,7 +950,9 @@ function plugboard(req, stacker, plugs, drive, session) {
 
             if (itemId === 'Zj') {
               if (typeof UNIVAC === 'function') {
-                let uResult = UNIVAC(drive, player.fullPath, 'w/f', session);
+                let uResult = UNIVAC(drive, player.fullPath, 'w/f', session, {
+                  playerStatus: getPlayerStatus(player)
+                });
                 if (uResult) {
                   player.map = uResult.sector;
                   player.z = uResult.z;
@@ -970,78 +1157,162 @@ function plugboard(req, stacker, plugs, drive, session) {
         }
 
         let userKey = uName.toLowerCase();
-        let uLoad = DOS.fileLoad(drive, '/', 'u/' + userKey, 'system');
-        if (!uLoad.success || !uLoad.content) {
-          output += "S^LE13^S";
-          refresh = false; skipPostTick = true;
-          column = plugs.length;
-          break;
-        }
-
-        let lines = uLoad.content.split('\n');
-        let exactName  = (lines[0] || uName).trim();
-        let storedHash = (lines[1] || '').trim();
-
-        if (!verifyPassword(uPass, storedHash)) {
-          output += "S^LE09^S";
-          refresh = false; skipPostTick = true;
-          column = plugs.length;
-          break;
-        }
-
-        let alreadyActive = false;
-        for (let [otherSess, otherP] of playerIndex.entries()) {
-          if (otherSess !== session && otherP.drive === drive && otherP.userKey === userKey) {
-            if (Date.now() - (otherP.lastSeen || 0) < 10000) {
-              alreadyActive = true;
+        let lockKey = drive + ':' + userKey;
+        let serverUrl = getRequestServerUrl(req);
+        inFlightUsers.add(lockKey);
+        try {
+          let existedLocally = DOS.fileExists(drive, '/', 'u/' + userKey).exists;
+          let uLoad = existedLocally ? DOS.fileLoad(drive, '/', 'u/' + userKey, 'system') : { success: false };
+          if (!uLoad.success || !uLoad.content) {
+            let remote = await upstashLoadUser(drive, userKey);
+            if (!remote.ok) {
+              output += "S^LE14^S";
+              refresh = false; skipPostTick = true;
+              column = plugs.length;
               break;
-            } else {
-              removePlayerFromWorld(otherP, otherSess);
-              playerIndex.delete(otherSess);
+            }
+            uLoad = DOS.fileLoad(drive, '/', 'u/' + userKey, 'system');
+          }
+
+          let rec = uLoad.success ? parsePlayerRecord(uLoad.content) : null;
+          if (!rec) {
+            if (!existedLocally && !isUserActiveOnDrive(drive, userKey)) {
+              DOS.fileDelete(drive, '/', 'u/' + userKey, 'system');
+            }
+            output += "S^LE09^S";
+            refresh = false; skipPostTick = true;
+            column = plugs.length;
+            break;
+          }
+
+          let exactName  = String(rec.username || uName).trim();
+          let storedHash = String(rec.password || '').trim();
+
+          if (!verifyPassword(uPass, storedHash)) {
+            if (!existedLocally && !isUserActiveOnDrive(drive, userKey)) {
+              DOS.fileDelete(drive, '/', 'u/' + userKey, 'system');
+            }
+            output += "S^LE09^S";
+            refresh = false; skipPostTick = true;
+            column = plugs.length;
+            break;
+          }
+
+          // Lazy status expiration / ban check
+          let stInfo = parsePlayerStatus(rec.status);
+          let statusWasReset = false;
+          if (stInfo.expired) {
+            rec.status = 'player';
+            statusWasReset = true;
+          } else if (stInfo.type === 'ban') {
+            if (!existedLocally && !isUserActiveOnDrive(drive, userKey)) {
+              DOS.fileDelete(drive, '/', 'u/' + userKey, 'system');
+            }
+            output += "S^LE22^S";
+            refresh = false; skipPostTick = true;
+            column = plugs.length;
+            break;
+          }
+
+          // Single-server lock check
+          if (rec.server && rec.server !== serverUrl) {
+            if (statusWasReset) {
+              DOS.fileSave(drive, '/', 'u/' + userKey, serializePlayerRecord(rec), 'system', 'system');
+              await upstashSaveUser(drive, userKey);
+            }
+            if (!existedLocally && !isUserActiveOnDrive(drive, userKey)) {
+              DOS.fileDelete(drive, '/', 'u/' + userKey, 'system');
+            }
+            output += "S^LE23^S";
+            refresh = false; skipPostTick = true;
+            column = plugs.length;
+            break;
+          }
+
+          let alreadyActive = false;
+          let evictedIdle = false;
+          for (let [otherSess, otherP] of playerIndex.entries()) {
+            if (otherSess !== session && otherP.drive === drive && otherP.userKey === userKey) {
+              if (Date.now() - (otherP.lastSeen || 0) < 10000) {
+                alreadyActive = true;
+                break;
+              } else {
+                playerIndex.delete(otherSess);
+                await removePlayerFromWorld(otherP, otherSess);
+                evictedIdle = true;
+              }
             }
           }
+          if (alreadyActive) {
+            if (!existedLocally && !isUserActiveOnDrive(drive, userKey)) {
+              DOS.fileDelete(drive, '/', 'u/' + userKey, 'system');
+            }
+            output += "S^LE20^S";
+            refresh = false; skipPostTick = true;
+            column = plugs.length;
+            break;
+          }
+
+          if (evictedIdle && !DOS.fileExists(drive, '/', 'u/' + userKey).exists) {
+            let remoteAfterEvict = await upstashLoadUser(drive, userKey);
+            if (!remoteAfterEvict.ok) {
+              output += "S^LE14^S";
+              refresh = false; skipPostTick = true;
+              column = plugs.length;
+              break;
+            }
+            uLoad = DOS.fileLoad(drive, '/', 'u/' + userKey, 'system');
+            rec = uLoad.success ? parsePlayerRecord(uLoad.content) : rec;
+            exactName = String(rec.username || uName).trim();
+          }
+
+          if (player.fullPath || player.pubId) {
+            await removePlayerFromWorld(player, session);
+            player.fullPath = null;
+            player.userKey  = null;
+            player.username = null;
+          }
+
+          let sp       = getSpawnDefaults(drive, gfxZBase);
+          let pId      = rec.item || DEFAULT_PLAYER_ITEM;
+          let pSector  = rec.sector || sp.sector;
+          let pZStr    = rec.z || sp.zStr;
+          let pAvatar  = rec.avatar || '';
+          let pContent = rec.inventory !== undefined ? rec.inventory : DEFAULT_PLAYER_INV;
+          let newPubId = UNIVAC.tickOdometer(drive);
+          let nowTs    = DOS.timestamp();
+
+          let restoredPath = 'w/' + pSector + '/' + pId + pZStr + newPubId + pAvatar;
+          DOS.fileSave(drive, '/', restoredPath, pContent, session, session);
+          DOS.fileSave(drive, '/', 'p/' + newPubId, pSector + pZStr + pAvatar, session, session);
+
+          player.fullPath  = restoredPath;
+          player.map       = pSector;
+          player.z         = decodeZ(pZStr, gfxZBase);
+          player.item      = pId + newPubId;
+          player.avatar    = pAvatar;
+          player.pubId     = newPubId;
+          player.username  = exactName;
+          player.userKey   = userKey;
+          player.status    = rec.status || 'player';
+          player.created   = rec.created || nowTs;
+          player.lastLogin = nowTs;
+          player.server    = serverUrl;
+          player.lastSeen  = Date.now();
+
+          saveUserSnapshot(player, session, {
+            password:  rec.password,
+            status:    player.status,
+            created:   player.created,
+            lastLogin: player.lastLogin,
+            server:    serverUrl
+          });
+          await upstashSaveUser(drive, userKey);
+
+          output += "S^LI" + exactName + "--^S";
+        } finally {
+          inFlightUsers.delete(lockKey);
         }
-        if (alreadyActive) {
-          output += "S^LE20^S";
-          refresh = false; skipPostTick = true;
-          column = plugs.length;
-          break;
-        }
-
-        uLoad = DOS.fileLoad(drive, '/', 'u/' + userKey, 'system');
-        lines = (uLoad.content || '').split('\n');
-        let savedParts = (lines[2] || '').split('|');
-
-        if (player.fullPath || player.pubId) {
-          removePlayerFromWorld(player, session);
-          player.fullPath = null;
-          player.userKey  = null;
-          player.username = null;
-        }
-
-        let sp = getSpawnDefaults(drive, gfxZBase);
-        let pId      = savedParts[0] || DEFAULT_PLAYER_ITEM;
-        let pSector  = savedParts[1] || sp.sector;
-        let pZStr    = savedParts[2] || sp.zStr;
-        let pAvatar  = savedParts[3] || '';
-        let pContent = savedParts[4] !== undefined ? savedParts[4] : DEFAULT_PLAYER_INV;
-        let newPubId = UNIVAC.tickOdometer(drive);
-
-        let restoredPath = 'w/' + pSector + '/' + pId + pZStr + newPubId + pAvatar;
-        DOS.fileSave(drive, '/', restoredPath, pContent, session, session);
-        DOS.fileSave(drive, '/', 'p/' + newPubId, pSector + pZStr + pAvatar, session, session);
-
-        player.fullPath = restoredPath;
-        player.map      = pSector;
-        player.z        = decodeZ(pZStr, gfxZBase);
-        player.item     = pId + newPubId;
-        player.avatar   = pAvatar;
-        player.pubId    = newPubId;
-        player.username = exactName;
-        player.userKey  = userKey;
-        player.lastSeen = Date.now();
-
-        output += "S^LI" + exactName + "--^S";
         break;
       }
 
@@ -1070,30 +1341,80 @@ function plugboard(req, stacker, plugs, drive, session) {
         }
 
         let userKey = uName.toLowerCase();
-        if (DOS.fileExists(drive, '/', 'u/' + userKey).exists) {
-          output += "S^LE10^S";
+        let lockKey = drive + ':' + userKey;
+        let serverUrl = getRequestServerUrl(req);
+        inFlightUsers.add(lockKey);
+        try {
+          let existsLocally = DOS.fileExists(drive, '/', 'u/' + userKey).exists;
+          if (!existsLocally) {
+            let remote = await upstashLoadUser(drive, userKey);
+            if (!remote.ok) {
+              output += "S^LE14^S";
+              refresh = false; skipPostTick = true;
+              column = plugs.length;
+              break;
+            }
+            if (remote.status === 'found') {
+              existsLocally = true;
+            }
+          }
+          if (existsLocally) {
+            output += "S^LE10^S";
+            refresh = false; skipPostTick = true;
+            column = plugs.length;
+            break;
+          }
+
+          if (!player.item || player.item.startsWith('Za')) {
+            runtape("Xa" + DEFAULT_PLAYER_ITEM + DEFAULT_PLAYER_INV + "--");
+          }
+
+          let nowTs = DOS.timestamp();
+          player.username  = uName;
+          player.userKey   = userKey;
+          player.status    = 'player';
+          player.created   = nowTs;
+          player.lastLogin = nowTs;
+          player.server    = '';
+          player.lastSeen  = Date.now();
+
+          saveUserSnapshot(player, session, {
+            password:  hashPassword(uPass),
+            status:    'player',
+            created:   nowTs,
+            lastLogin: nowTs,
+            server:    ''
+          });
+
+          let created = await upstashSaveUser(drive, userKey, true);
+          if (!created.ok || created.status === 'exists') {
+            DOS.fileDelete(drive, '/', 'u/' + userKey, 'system');
+            player.username = null;
+            player.userKey  = null;
+            player.server   = '';
+            output += "S^LE" + (created.status === 'exists' ? "10" : "14") + "^S";
+            refresh = false; skipPostTick = true;
+            column = plugs.length;
+            break;
+          }
+
+          if (session) playerIndex.delete(session);
+          await removePlayerFromWorld(player, session);
+          session = null;
+          output += "S^LC" + uName + "--LO--^S";
           refresh = false; skipPostTick = true;
           column = plugs.length;
           break;
+        } finally {
+          inFlightUsers.delete(lockKey);
         }
-
-        if (!player.item || player.item.startsWith('Za')) {
-          runtape("Xa" + DEFAULT_PLAYER_ITEM + DEFAULT_PLAYER_INV + "--");
-        }
-
-        player.username = uName;
-        player.userKey  = userKey;
-        player.lastSeen = Date.now();
-        saveUserSnapshot(player, session, hashPassword(uPass));
-
-        output += "S^LC" + uName + "--^S";
         break;
       }
 
       case 'LO': {
         if (tape) { runtape(tape); tape = ""; }
-        removePlayerFromWorld(player, session);
         if (session) playerIndex.delete(session);
+        await removePlayerFromWorld(player, session);
         session = null;
         output += "S^LO--^S";
         refresh = false; skipPostTick = true;
@@ -1201,6 +1522,844 @@ function plugboard(req, stacker, plugs, drive, session) {
   return respondRetro(stacker, output, session);
 }
 
+// ── DevTeam Remote GFX Map Editor (Independent of Plugboard) ──────────────────
+
+function handleGfxDevCommand(req, res, rawCmd, drive, session) {
+  var player = session ? playerIndex.get(session) : null;
+  var VALID_ITEM_ID_RE = /^[A-Z][a-z0-9_()[\]{}^,:;+\-=%@]$/;
+
+  function sendDev(ok, output, extra) {
+    logRequest(req, 'GFX', drive, (player && player.username) || '-', session, { success: ok });
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify(Object.assign({ ok: !!ok, output: String(output == null ? '' : output) }, extra || {})));
+  }
+
+  // 1. Must be logged in with a real account (not guest, not Za)
+  if (!player || !player.userKey) {
+    return sendDev(false, 'Error: [.4]DevTeam editing requires a logged-in account.[.]');
+  }
+
+  drive = DOS.resolveDriveName(player.drive || drive) || drive;
+  var driveObj = DOS.getDrive(drive);
+  if (!driveObj) {
+    return sendDev(false, 'Error: [.4]Drive "' + drive + '" is not mounted.[.]');
+  }
+  if (driveObj.readOnly) {
+    return sendDev(false, 'Error: [.4]Drive ' + drive + ':/ is read-only (ROM mode).[.]');
+  }
+
+  // 2. Sysop authorization check: /a/ must exist and /a/playerDevTeam must list player.userKey
+  if (!DOS.dirExists(drive, 'a')) {
+    return sendDev(false, 'Error: [.4]/a/ directory does not exist on ' + drive + ':/ (devteam not authorized).[.]');
+  }
+
+  var devLoad = DOS.fileLoad(drive, '/', 'a/playerDevTeam', 'system');
+  var devMembers = (devLoad.success && devLoad.content)
+    ? devLoad.content.split(/\r?\n/).map(function (s) { return s.trim().toLowerCase(); }).filter(Boolean)
+    : [];
+
+  if (devMembers.indexOf(player.userKey) === -1) {
+    return sendDev(false, 'Error: [.4]Permission denied: "' + player.username + '" is not in /a/playerDevTeam.[.]');
+  }
+
+  player.lastSeen = Date.now();
+
+  // 3. Read drive geometry / Z-base config
+  var gfxZBase = 10;
+  var zBaseRes = DOS.fileLoad(drive, '/', 'a/gfxZBase', 'system');
+  if (zBaseRes.success && zBaseRes.content) {
+    var parsedB = parseInt(zBaseRes.content.trim(), 10);
+    if (!isNaN(parsedB) && ((parsedB >= 2 && parsedB <= 36) || parsedB === 52)) gfxZBase = parsedB;
+  }
+
+  var gridWide = 14;
+  var gridTall = 10;
+  var gwRes = DOS.fileLoad(drive, '/', 'a/gfxGridWide', 'system');
+  if (!gwRes.success) gwRes = DOS.fileLoad(drive, '/', 'a/mapx', 'system');
+  if (gwRes.success && gwRes.content) {
+    var gw = parseInt(gwRes.content.trim(), 10);
+    if (!isNaN(gw) && gw > 0) gridWide = gw;
+  }
+  var gtRes = DOS.fileLoad(drive, '/', 'a/gfxGridTall', 'system');
+  if (!gtRes.success) gtRes = DOS.fileLoad(drive, '/', 'a/mapy', 'system');
+  if (gtRes.success && gtRes.content) {
+    var gt = parseInt(gtRes.content.trim(), 10);
+    if (!isNaN(gt) && gt > 0) gridTall = gt;
+  }
+
+  // 4. Parse command
+  var trimmed = String(rawCmd || '').trim();
+  if (!trimmed) return sendDev(false, 'Error: [.4]Empty GFX command.[.]');
+
+  var spIdx  = trimmed.search(/\s/);
+  var sub    = (spIdx === -1 ? trimmed : trimmed.substring(0, spIdx)).toLowerCase();
+  var argStr = spIdx === -1 ? '' : trimmed.substring(spIdx + 1).trim();
+  var args   = argStr ? argStr.split(/\s+/) : [];
+
+  var sector   = player.map || 'Bc';
+  var maxTiles = gridWide * gridTall;
+  var curZ     = parseInt(player.z, 10) || 0;
+  if (curZ < 0) curZ = 0;
+  if (curZ >= maxTiles) curZ = maxTiles - 1;
+  var zStr = encodeZ(curZ, gfxZBase);
+
+  function isValidSectorId(sec) {
+    return /^[A-Z][A-Za-z0-9_()[\]{}^,:;+\-=%@]$/.test(sec);
+  }
+  function isReservedItemId(id) {
+    return id.charAt(0) === 'V' || id.charAt(0) === 'X' || (id >= 'Sa' && id < 'Ua');
+  }
+
+  switch (sub) {
+    case 'tile': {
+      if (!DOS.dirExists(drive, 'w/' + sector)) {
+        return sendDev(false, 'Error: [.4]Sector "' + sector + '" does not exist.[.]');
+      }
+      var mPath = 'w/' + sector + '/m';
+      var mLoad = DOS.fileLoad(drive, '/', mPath, 'system');
+      var mData = (mLoad.success && mLoad.content) ? mLoad.content.replace(/\s+/g, '') : '';
+      while (mData.length < maxTiles * 2) mData += 'Za';
+
+      if (!args[0]) {
+        var curCode = mData.substring(curZ * 2, curZ * 2 + 2) || 'Za';
+        return sendDev(true, 'Tile at ' + sector + ' (' + zStr + ' / Z:' + curZ + ') is [' + curCode + ']', {
+          sector: sector, z: curZ, zStr: zStr, tile: curCode
+        });
+      }
+
+      var tileCode = args[0];
+      if (!/^[A-Za-z0-9]{2}$/.test(tileCode)) {
+        return sendDev(false, 'Error: [.4]Tile code must be 2 alphanumeric characters.[.]');
+      }
+
+      var idx = curZ * 2;
+      mData = mData.substring(0, idx) + tileCode + mData.substring(idx + 2);
+      var saveTile = DOS.fileSave(drive, '/', mPath, mData, session, player.username);
+      if (!saveTile.success) return sendDev(false, 'Error: [.4]' + saveTile.error + '[.]');
+
+      // Remove any temporary Xz marker at this coordinate so permanent edit isn't shadowed
+      var xzSearch = DOS.fileSearch(drive, 'w/' + sector + '/Xz' + zStr + '??');
+      if (xzSearch.success && xzSearch.results.length) {
+        xzSearch.results.forEach(function (r) {
+          if (r.name.length === ('w/' + sector + '/').length + 6) {
+            DOS.fileDelete(drive, '/', r.name, session);
+          }
+        });
+      }
+
+      return sendDev(true, 'Tile at ' + sector + ' (' + zStr + ') set to [' + tileCode + ']', {
+        sector: sector, z: curZ, zStr: zStr, tile: tileCode
+      });
+    }
+    
+    case 'fill': {
+      var fillArg = args[0] ? String(args[0]).trim() : '';
+      if (!fillArg || fillArg.toLowerCase() === 'off' || fillArg.toLowerCase() === 'none') {
+        player.fillTileCode = null;
+        return sendDev(true, '[.2]GFX Fill Mode DISABLED.[.]', { fill: null });
+      }
+      var fillCode = fillArg.substring(0, 2);
+      if (!/^[A-Za-z0-9]{2}$/.test(fillCode)) {
+        return sendDev(false, 'Error: [.4]Tile code must be 2 alphanumeric characters.[.]');
+      }
+      player.fillTileCode = fillCode;
+      return sendDev(true, '[.4]GFX Fill Mode ENGAGED: brush set to [' + fillCode + '][.]', { fill: fillCode });
+    }
+
+
+    case 'obj': {
+      if (!DOS.dirExists(drive, 'w/' + sector)) {
+        return sendDev(false, 'Error: [.4]Sector "' + sector + '" does not exist.[.]');
+      }
+      var objMatch = argStr.match(/^(\S+)(?:\s+(\S+)(?:\s+([\s\S]+))?)?$/);
+      if (!objMatch) return sendDev(false, 'Usage: gfx obj <2-char id> [2-char data] [punchcode]');
+
+      var objId   = objMatch[1];
+      var objData = objMatch[2] || 'Za';
+      var objCode = objMatch[3] || '';
+
+      if (!VALID_ITEM_ID_RE.test(objId)) {
+        return sendDev(false, 'Error: [.4]Invalid object ID "' + objId + '".[.]');
+      }
+
+      var objFilename = objId + zStr + objData;
+      var saveObj = DOS.fileSave(drive, '/', 'w/' + sector + '/' + objFilename, objCode, session, player.username);
+      if (!saveObj.success) return sendDev(false, 'Error: [.4]' + saveObj.error + '[.]');
+
+      return sendDev(true, 'Saved object ' + sector + '/' + objFilename, {
+        sector: sector, z: curZ, zStr: zStr, filename: objFilename
+      });
+    }
+
+    case 'item': {
+      if (!DOS.dirExists(drive, 'w/' + sector)) {
+        return sendDev(false, 'Error: [.4]Sector "' + sector + '" does not exist.[.]');
+      }
+      var itemId = args[0] || '';
+
+      if (!VALID_ITEM_ID_RE.test(itemId)) {
+        return sendDev(false, 'Error: [.4]Invalid item ID "' + itemId + '".[.]');
+      }
+
+      var itemFilename = itemId + zStr;
+      var saveItem = DOS.fileSave(drive, '/', 'w/' + sector + '/' + itemFilename, '', session, player.username);
+      if (!saveItem.success) return sendDev(false, 'Error: [.4]' + saveItem.error + '[.]');
+
+      return sendDev(true, 'Saved item ' + sector + '/' + itemFilename, {
+        sector: sector, z: curZ, zStr: zStr, filename: itemFilename
+      });
+    }
+
+    case 'save': {
+      var saveSector = args[0] || sector;
+      if (!isValidSectorId(saveSector) || !DOS.dirExists(drive, 'w/' + saveSector)) {
+        return sendDev(false, 'Error: [.4]Sector "' + saveSector + '" does not exist.[.]');
+      }
+
+      var dirRes = DOS.getDirEntries(drive, 'w/' + saveSector);
+      var sectorFiles = {};
+      var fileCount = 0;
+
+      for (var si = 0; si < dirRes.files.length; si++) {
+        var fEntry = dirRes.files[si];
+        var fname = DOS.rawBaseName(fEntry.name);
+        if (!fname || fname === DOS.MANIFEST_KEY || fname.charAt(0) === '_') continue;
+        // Skip temporary/expiring items (e.g. dropped items) and active players
+        if (fEntry.timestamp && fEntry.timestamp.charAt(0) === 'X') continue;
+        if (fname.length >= 8) continue;
+        // Skip runtime UNIVAC markers (Vx, Vy, Xz, Xt, Vb, etc.)
+        if ((fname.length === 4 || fname.length === 6) && (fname.charAt(0) === 'V' || fname.charAt(0) === 'X')) continue;
+
+        var fLoaded = DOS.fileLoad(drive, '/', fEntry.name, 'system');
+        if (fLoaded.success) {
+          sectorFiles[fname] = fLoaded.content == null ? '' : String(fLoaded.content);
+          fileCount++;
+        }
+      }
+
+      return sendDev(true, '', {
+        sector: saveSector,
+        count: fileCount,
+        files: sectorFiles
+      });
+    }
+
+    case 'del':
+    case 'rm': {
+      var delId = args[0] || '';
+
+      if (!VALID_ITEM_ID_RE.test(delId)) {
+        return sendDev(false, 'Usage: gfx del <2-char id> (deletes static item/object at cursor)');
+      }
+
+      var prefixPath = 'w/' + sector + '/';
+      var matches = DOS.fileSearch(drive, prefixPath + delId + zStr + '*');
+      var deleted = [];
+      if (matches.success && matches.results.length) {
+        for (var i = 0; i < matches.results.length; i++) {
+          var full = matches.results[i].name;
+          if (full.indexOf(prefixPath) !== 0) continue;
+          var base = full.substring(prefixPath.length);
+          // Only delete 4-char items or 6-char static objects at this exact Z
+          if ((base.length === 4 || base.length === 6) && base.substring(0, 4) === (delId + zStr)) {
+            if (DOS.fileDelete(drive, '/', full, session).success) {
+              deleted.push(base);
+            }
+          }
+        }
+      }
+
+      if (!deleted.length) {
+        return sendDev(false, 'Error: [.4]No matching static object/item "' + delId + zStr + '" at Z:' + curZ + '.[.]');
+      }
+      return sendDev(true, 'Deleted ' + sector + '/' + deleted.join(', '), {
+        sector: sector, z: curZ, deleted: deleted
+      });
+    }
+
+    case 'code': {
+      var codeMatch = argStr.match(/^(\S+)(?:\s+([\s\S]+))?$/);
+
+      if (!codeMatch) {
+        return sendDev(false, 'Usage: gfx code <2-char id | sector/filename> [punchcode|null]');
+      }
+
+      var targetSpec = codeMatch[1];
+      var newCode = codeMatch[2];
+      var targetFile = null;
+      var targetSector = sector;
+      var targetFilename = null;
+
+      if (targetSpec.indexOf('/') !== -1) {
+        var slashParts = targetSpec.split('/');
+        if (
+          slashParts.length !== 2 ||
+          !isValidSectorId(slashParts[0]) ||
+          !/^[A-Z][A-Za-z0-9_()[\]{}^,:;+\-=%@]{5}$/.test(slashParts[1])
+        ) {
+          return sendDev(false, 'Usage: gfx code <2-char id | sector/filename> [punchcode|null]');
+        }
+        targetSector = slashParts[0];
+        targetFilename = slashParts[1];
+        var candidatePath = 'w/' + targetSector + '/' + targetFilename;
+        if (DOS.fileExists(drive, '/', candidatePath).exists) {
+          targetFile = candidatePath;
+        }
+      } else {
+        if (!VALID_ITEM_ID_RE.test(targetSpec)) {
+          return sendDev(false, 'Usage: gfx code <2-char id> [punchcode|null]');
+        }
+        var cId = targetSpec;
+        var cPrefix = 'w/' + sector + '/';
+        var cMatches = DOS.fileSearch(drive, cPrefix + cId + zStr + '??');
+
+        if (cMatches.success && cMatches.results.length) {
+          for (var ci = 0; ci < cMatches.results.length; ci++) {
+            var cFull = cMatches.results[ci].name;
+            var cBase = cFull.substring(cPrefix.length);
+            if (cFull.indexOf(cPrefix) === 0 && cBase.length === 6 && cBase.substring(0, 4) === (cId + zStr)) {
+              targetFile = cFull;
+              targetFilename = cBase;
+              break;
+            }
+          }
+        }
+      }
+
+      if (!targetFile) {
+        return sendDev(false, 'Error: [.4]No 6-char object "' + targetSpec + '" found.[.]');
+      }
+
+      if (newCode === undefined) {
+        var cLoad = DOS.fileLoad(drive, '/', targetFile, session);
+        var loadedCode = (cLoad.success && cLoad.content != null) ? String(cLoad.content) : '';
+        return sendDev(true, targetFile + ' = ' + loadedCode, {
+          sector: targetSector,
+          filename: targetFilename,
+          code: loadedCode
+        });
+      }
+
+      if (newCode === 'null') {
+        newCode = '';
+      }
+
+      var cSave = DOS.fileSave(drive, '/', targetFile, newCode, session, player.username);
+      if (!cSave.success) return sendDev(false, 'Error: [.4]' + cSave.error + '[.]');
+      return sendDev(true, 'Updated punch code for ' + targetFile, {
+        sector: targetSector,
+        filename: targetFilename,
+        code: newCode
+      });
+    }
+
+    case 'exits': {
+      if (!DOS.dirExists(drive, 'w/' + sector)) {
+        return sendDev(false, 'Error: [.4]Sector "' + sector + '" does not exist.[.]');
+      }
+      var ePath = 'w/' + sector + '/e';
+      if (!args[0]) {
+        var eLoad = DOS.fileLoad(drive, '/', ePath, 'system');
+        return sendDev(true, 'Exits for ' + sector + ': ' + ((eLoad.success && eLoad.content) ? eLoad.content : '(none)'));
+      }
+      var newExits = (args[0].toLowerCase() === 'none' || args[0] === '-') ? '' : args[0];
+      if (newExits && (newExits.length % 2 !== 0 || !/^[A-Za-z0-9_()[\]{}^,:;+\-=%@]+$/.test(newExits))) {
+        return sendDev(false, 'Error: [.4]Exits must be concatenated 2-char sector IDs (or "none").[.]');
+      }
+      var eSave = DOS.fileSave(drive, '/', ePath, newExits, session, player.username);
+      if (!eSave.success) return sendDev(false, 'Error: [.4]' + eSave.error + '[.]');
+      return sendDev(true, 'Exits for ' + sector + ' set to: ' + (newExits || '(none)'));
+    }
+
+    case 'sector': {
+      var newSec = args[0] || '';
+      if (!isValidSectorId(newSec)) {
+        return sendDev(false, 'Error: [.4]Invalid sector ID "' + newSec + '".[.]');
+      }
+      if (DOS.dirExists(drive, 'w/' + newSec)) {
+        return sendDev(false, 'Error: [.4]Sector "' + newSec + '" already exists.[.]');
+      }
+      if (!DOS.dirExists(drive, 'w')) {
+        DOS.dirMake(drive, '/', 'w', session);
+      }
+      var mkSec = DOS.dirMake(drive, '/', 'w/' + newSec, session);
+      if (!mkSec.success) return sendDev(false, 'Error: [.4]' + mkSec.error + '[.]');
+      DOS.fileSave(drive, '/', 'w/' + newSec + '/m', 'Za'.repeat(maxTiles), session, player.username);
+      DOS.fileSave(drive, '/', 'w/' + newSec + '/e', '', session, player.username);
+      return sendDev(true, 'Created sector ' + newSec + ' (' + gridWide + 'x' + gridTall + ').');
+    }
+
+    case 'tele': {
+      var targetSec = args[0] || '';
+      if (!isValidSectorId(targetSec) || !DOS.dirExists(drive, 'w/' + targetSec)) {
+        return sendDev(false, 'Error: [.4]Sector "' + targetSec + '" does not exist.[.]');
+      }
+
+      var targetZ = curZ;
+      if (args[1]) {
+        targetZ = /^\d+$/.test(args[1]) ? parseInt(args[1], 10) : decodeZ(args[1], gfxZBase);
+        if (isNaN(targetZ) || targetZ < 0 || targetZ >= maxTiles) {
+          return sendDev(false, 'Error: [.4]Z out of bounds (0..' + (maxTiles - 1) + ').[.]');
+        }
+      }
+
+      var targetZStr = encodeZ(targetZ, gfxZBase);
+      var pId = (player.item && player.item.length >= 2) ? player.item.substring(0, 2) : DEFAULT_PLAYER_ITEM;
+      var newPath = 'w/' + targetSec + '/' + pId + targetZStr + player.pubId + (player.avatar || '');
+
+      var invLoad = player.fullPath ? DOS.fileLoad(drive, '/', player.fullPath, session) : { success: false };
+      var invContent = (invLoad.success && typeof invLoad.content === 'string') ? invLoad.content : DEFAULT_PLAYER_INV;
+
+      var pSave = DOS.fileSave(drive, '/', newPath, invContent, session, session);
+      if (!pSave.success) return sendDev(false, 'Error: [.4]' + pSave.error + '[.]');
+
+      if (player.fullPath && player.fullPath !== newPath) {
+        DOS.fileDelete(drive, '/', player.fullPath, session);
+      }
+      if (player.chatPath) {
+        DOS.fileDelete(drive, '/', player.chatPath, session);
+        player.chatPath = null;
+        player.chatLoc = null;
+      }
+
+      DOS.fileSave(drive, '/', 'p/' + player.pubId, targetSec + targetZStr + (player.avatar || ''), session, session);
+      player.fullPath = newPath;
+      player.map = targetSec;
+      player.z = targetZ;
+
+      return sendDev(true, 'Teleported to sector ' + targetSec + ' (Z:' + targetZ + ')', {
+        sector: targetSec, z: targetZ, zStr: targetZStr
+      });
+    }
+
+    case 'id':
+    case 'mod': {
+      var modMatch = argStr.match(/^(\S+)(?:\s+([\s\S]+))?$/);
+      if (!modMatch || !/^[A-Z][a-z0-9]$/.test(modMatch[1])) {
+        return sendDev(false, 'Usage: gfx mod <2-char ItemID> [description]');
+      }
+      var modId = modMatch[1];
+      var modPath = 'a/gfxItemID';
+      var mods = {};
+      var modLoad = DOS.fileLoad(drive, '/', modPath, 'system');
+      if (modLoad.success && modLoad.content && modLoad.content.trim()) {
+        try {
+          var parsedMods = JSON.parse(modLoad.content);
+          if (parsedMods && typeof parsedMods === 'object' && !Array.isArray(parsedMods)) mods = parsedMods;
+        } catch (e) { mods = {}; }
+      }
+
+      if (modMatch[2] === undefined) {
+        var curDesc = mods[modId];
+        return sendDev(true, modId + (curDesc ? ' mod = ' + curDesc : ' (no server mod set)'));
+      }
+
+      var desc = modMatch[2].trim();
+      if (desc.length >= 2 && ((desc[0] === '"' && desc[desc.length - 1] === '"') || (desc[0] === "'" && desc[desc.length - 1] === "'"))) {
+        desc = desc.slice(1, -1).trim();
+      }
+      if (/[\x00-\x1F\x7F]/.test(desc) || desc.length > 64) {
+        return sendDev(false, 'Error: [.4]Invalid description (max 64 printable characters).[.]');
+      }
+
+      if (desc === '') {
+        delete mods[modId];
+      } else {
+        mods[modId] = desc;
+      }
+
+      if (Object.keys(mods).length === 0) {
+        DOS.fileDelete(drive, '/', modPath, session);
+      } else {
+        var modSave = DOS.fileSave(drive, '/', modPath, JSON.stringify(mods), session, player.username);
+        if (!modSave.success) return sendDev(false, 'Error: [.4]' + modSave.error + '[.]');
+      }
+
+      return sendDev(true, modId + (desc === '' ? ' mod cleared.' : ' mod = ' + desc));
+    }
+
+    case 'export': {
+      var entries = [];
+      var nowTs = DOS.timestamp();
+
+      driveObj.manifestMap.forEach(function (e, key) {
+        if (!key || key === DOS.MANIFEST_KEY) return;
+
+        var isDir = key.charAt(0) === '<';
+        var pathName = isDir ? key.substring(1, key.length - 1) : key;
+
+        var content = '';
+        if (!isDir) {
+          var fLoad = DOS.fileLoad(drive, '/', key, 'system');
+          if (!fLoad.success) return;
+          content = fLoad.content == null ? '' : String(fLoad.content);
+        }
+
+        entries.push({
+          name: pathName,
+          type: isDir ? 'directory' : 'file',
+          content: content,
+          size: e.size,
+          timestamp: e.timestamp,
+          owner: e.owner,
+          session: e.session,
+          readOnly: pathName.endsWith('!')
+        });
+      });
+
+      entries.sort(function (a, b) { return a.name < b.name ? -1 : 1; });
+
+      var archiveJson = JSON.stringify({
+        format: DOS.ARCHIVE_FORMAT,
+        version: DOS.ARCHIVE_VERSION,
+        drive: drive,
+        created: new Date().toISOString(),
+        entries: entries
+      }, null, 2);
+
+      return sendDev(true, 'Exported ' + entries.length + ' entries from ' + drive + ':/', {
+        drive: drive,
+        count: entries.length,
+        archive: archiveJson
+      });
+    }
+
+    default:
+      return sendDev(false, 'Error: [.4]Unknown remote GFX command "' + sub + '".[.]');
+  }
+}
+
+// ── UPSTASH server ───────────────────────────────────────────────────────────────
+
+var UPSTASH_URL   = process.env.UPSTASH_REDIS_REST_URL || '';
+var UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || '';
+
+function getUpstashGfxNamespace(drive) {
+  if (!UPSTASH_URL || !UPSTASH_TOKEN) return null;
+
+  var driveObj = DOS.getDrive(drive);
+  if (!driveObj || driveObj.readOnly) return null;
+
+  var cfg = DOS.fileLoad(drive, '/', 'a/gfxUpstash', 'system');
+  if (!cfg.success || !cfg.content) return null;
+
+  var val = cfg.content.trim();
+  if (!val || val === 'false' || val === '0' || val === 'off') return null;
+
+  // Explicit .gfx name in a/gfxUpstash (e.g. "cylon-queville.gfx")
+  if (/\.gfx$/i.test(val)) return val;
+
+  // Otherwise derive from drive source or drive name
+  var src = (driveObj.source || driveObj.name || drive).split(/[?#]/)[0];
+  var base = path.basename(src);
+  if (/\.json$/i.test(base)) return base.replace(/\.json$/i, '.gfx');
+  if (/\.gfx$/i.test(base))  return base;
+  return driveObj.name + '.gfx';
+}
+
+function getUpstashUserKey(drive, userKey) {
+  var gfx = getUpstashGfxNamespace(drive);
+  if (!gfx) return null;
+  return 'qandy:u:' + gfx + ':' + String(userKey).toLowerCase();
+}
+
+function upstashCmd(args) {
+  if (!UPSTASH_URL || !UPSTASH_TOKEN) {
+    return Promise.resolve({ ok: false, error: 'Upstash not configured' });
+  }
+  return new Promise(function (resolve) {
+    var parsed;
+    try {
+      parsed = new URL(UPSTASH_URL);
+    } catch (e) {
+      return resolve({ ok: false, error: 'Invalid UPSTASH_REDIS_REST_URL' });
+    }
+
+    var body = JSON.stringify(args);
+    var transport = parsed.protocol === 'http:' ? http : https;
+    var settled = false;
+    function done(val) {
+      if (!settled) { settled = true; resolve(val); }
+    }
+
+    var req = transport.request({
+      hostname: parsed.hostname,
+      port: parsed.port || (parsed.protocol === 'http:' ? 80 : 443),
+      path: parsed.pathname + parsed.search,
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + UPSTASH_TOKEN,
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(body, 'utf8')
+      }
+    }, function (res) {
+      var chunks = [];
+      res.on('data', function (c) { chunks.push(c); });
+      res.on('end', function () {
+        if (res.statusCode < 200 || res.statusCode >= 300) {
+          console.warn('[Upstash] HTTP ' + res.statusCode);
+          return done({ ok: false, error: 'HTTP ' + res.statusCode });
+        }
+        try {
+          var data = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+          if (data && data.error) {
+            console.warn('[Upstash] Error:', data.error);
+            return done({ ok: false, error: data.error });
+          }
+          return done({ ok: true, result: data ? data.result : null });
+        } catch (err) {
+          console.warn('[Upstash] Invalid JSON:', err.message);
+          return done({ ok: false, error: err.message });
+        }
+      });
+    });
+
+    req.setTimeout(5000, function () {
+      req.destroy(new Error('Request timed out'));
+    });
+
+    req.on('error', function (err) {
+      console.warn('[Upstash] Request failed:', err.message);
+      done({ ok: false, error: err.message });
+    });
+
+    req.write(body);
+    req.end();
+  });
+}
+
+async function upstashLoadUser(drive, userKey) {
+  var key = getUpstashUserKey(drive, userKey);
+  if (!key) return { ok: true, status: 'disabled', content: null };
+
+  var res = await upstashCmd(['GET', key]);
+  if (!res.ok) {
+    return { ok: false, status: 'error', error: res.error };
+  }
+  if (typeof res.result === 'string' && res.result.length > 0) {
+    DOS.fileSave(drive, '/', 'u/' + userKey, res.result, 'system', 'system');
+    return { ok: true, status: 'found', content: res.result };
+  }
+  return { ok: true, status: 'not_found', content: null };
+}
+
+async function upstashSaveUser(drive, userKey, onlyIfAbsent) {
+  var key = getUpstashUserKey(drive, userKey);
+  if (!key) return { ok: true, status: 'disabled' };
+
+  var uLoad = DOS.fileLoad(drive, '/', 'u/' + userKey, 'system');
+  if (!uLoad.success || typeof uLoad.content !== 'string') {
+    return { ok: false, status: 'error', error: 'missing local user file' };
+  }
+
+  // Using NX on account creation prevents two simultaneous registrations from overwriting each other
+  var cmd = onlyIfAbsent
+    ? ['SET', key, uLoad.content, 'NX']
+    : ['SET', key, uLoad.content];
+
+  var res = await upstashCmd(cmd);
+  if (!res.ok) return { ok: false, status: 'error', error: res.error };
+  if (onlyIfAbsent && res.result === null) return { ok: true, status: 'exists' };
+  return { ok: res.result === 'OK', status: res.result === 'OK' ? 'saved' : 'error' };
+}
+
+var _flushPendingRunning = false;
+
+async function flushPendingUpstashUsers() {
+  if (_flushPendingRunning) return;
+  _flushPendingRunning = true;
+  try {
+    var driveNames = DOS.listDrives();
+    for (var di = 0; di < driveNames.length; di++) {
+      var dn = driveNames[di];
+      if (!getUpstashGfxNamespace(dn)) continue;
+      var uList = DOS.fileList(dn, 'u/', null, 'system');
+      if (!uList.success || !uList.listing) continue;
+      var files = uList.listing.trim().split(/\s+/);
+      for (var fi = 0; fi < files.length; fi++) {
+        var userKey = files[fi];
+        if (!userKey) continue;
+        if (isUserActiveOnDrive(dn, userKey) || inFlightUsers.has(dn + ':' + userKey)) continue;
+        var res = await upstashSaveUser(dn, userKey);
+        if (
+          res && res.ok && res.status === 'saved' &&
+          !isUserActiveOnDrive(dn, userKey) &&
+          !inFlightUsers.has(dn + ':' + userKey)
+        ) {
+          DOS.fileDelete(dn, '/', 'u/' + userKey, 'system');
+        }
+      }
+    }
+  } finally {
+    _flushPendingRunning = false;
+  }
+}
+
+setInterval(flushPendingUpstashUsers, 60000).unref();
+
+async function flushAllPlayersToUpstash() {
+  var tasks = [];
+  for (var entry of playerIndex.entries()) {
+    var sess = entry[0];
+    var p = entry[1];
+    if (p && p.userKey) {
+      p.server = '';
+      saveUserSnapshot(p, sess, { server: '' });
+      tasks.push((function (drive, userKey) {
+        return upstashSaveUser(drive, userKey).then(function (res) {
+          if (res && res.ok && res.status === 'saved') {
+            DOS.fileDelete(drive, '/', 'u/' + userKey, 'system');
+          }
+        });
+      })(p.drive, p.userKey));
+    }
+  }
+  await Promise.allSettled(tasks);
+  await flushPendingUpstashUsers();
+}
+
+function findActiveSession(drive, userKey) {
+  for (var entry of playerIndex.entries()) {
+    var p = entry[1];
+    if (p && p.drive === drive && p.userKey === userKey) {
+      return { session: entry[0], player: p };
+    }
+  }
+  return null;
+}
+
+var upstashAdmin = {
+  isConfigured: function () {
+    return !!(UPSTASH_URL && UPSTASH_TOKEN);
+  },
+
+  getNamespace: function (drive) {
+    return getUpstashGfxNamespace(drive);
+  },
+
+  list: async function (drive, pattern) {
+    var gfx = getUpstashGfxNamespace(drive);
+    if (!gfx) return { ok: false, error: 'Upstash is not enabled on ' + drive + ':/' };
+
+    var prefix = 'qandy:u:' + gfx + ':';
+    var glob = (pattern || '*').toLowerCase();
+    var cursor = '0';
+    var seen = Object.create(null);
+    var names = [];
+
+    do {
+      var res = await upstashCmd(['SCAN', cursor, 'MATCH', prefix + glob, 'COUNT', 100]);
+      if (!res.ok) return { ok: false, error: res.error || 'Upstash SCAN failed' };
+      if (!Array.isArray(res.result) || res.result.length < 2) break;
+      cursor = String(res.result[0]);
+      var keys = Array.isArray(res.result[1]) ? res.result[1] : [];
+      for (var i = 0; i < keys.length; i++) {
+        var k = String(keys[i]);
+        if (k.indexOf(prefix) === 0) {
+          var name = k.substring(prefix.length);
+          if (name && !seen[name]) {
+            seen[name] = true;
+            names.push(name);
+          }
+        }
+      }
+    } while (cursor !== '0');
+
+    names.sort();
+    return { ok: true, gfx: gfx, names: names };
+  },
+
+  view: async function (drive, username) {
+    var gfx = getUpstashGfxNamespace(drive);
+    if (!gfx) return { ok: false, error: 'Upstash is not enabled on ' + drive + ':/' };
+
+    var userKey = String(username || '').trim().toLowerCase();
+    var res = await upstashCmd(['GET', 'qandy:u:' + gfx + ':' + userKey]);
+    if (!res.ok) return { ok: false, error: res.error || 'Upstash GET failed' };
+    if (typeof res.result !== 'string' || !res.result) {
+      return { ok: false, error: 'Player "' + username + '" not found.' };
+    }
+    var rec = parsePlayerRecord(res.result);
+    if (!rec) return { ok: false, error: 'Corrupt player record for "' + username + '".' };
+    return { ok: true, gfx: gfx, record: rec, statusInfo: parsePlayerStatus(rec.status) };
+  },
+
+  setStatus: async function (drive, username, kind, durationArg) {
+    var gfx = getUpstashGfxNamespace(drive);
+    if (!gfx) return { ok: false, error: 'Upstash is not enabled on ' + drive + ':/' };
+
+    var parsedDur = parseDurationToStatus(kind, durationArg);
+    if (!parsedDur.ok) return { ok: false, error: parsedDur.error };
+
+    var userKey = String(username || '').trim().toLowerCase();
+    var key = 'qandy:u:' + gfx + ':' + userKey;
+    var res = await upstashCmd(['GET', key]);
+    if (!res.ok) return { ok: false, error: res.error || 'Upstash GET failed' };
+    if (typeof res.result !== 'string' || !res.result) {
+      return { ok: false, error: 'Player "' + username + '" not found.' };
+    }
+    var rec = parsePlayerRecord(res.result);
+    if (!rec) return { ok: false, error: 'Corrupt player record for "' + username + '".' };
+
+    var newStatus = parsedDur.status;
+    var active = findActiveSession(drive, userKey);
+
+    if (active) {
+      active.player.status = newStatus;
+
+      if (kind === 'ban' && newStatus !== 'player') {
+        playerIndex.delete(active.session);
+        kickedSessions.set(active.session, { msg: 'S^LO--LE22^S', at: Date.now() });
+        await removePlayerFromWorld(active.player, active.session);
+        return { ok: true, username: rec.username || userKey, status: newStatus, kicked: true };
+      }
+
+      if (kind === 'mute' && newStatus !== 'player' && active.player.chatPath) {
+        DOS.fileDelete(drive, '/', active.player.chatPath, active.session);
+        active.player.chatPath = null;
+        active.player.chatLoc = null;
+      }
+
+      saveUserSnapshot(active.player, active.session, { status: newStatus });
+      var saved = await upstashSaveUser(drive, userKey);
+      if (!saved.ok) return { ok: false, error: saved.error || 'Upstash SET failed' };
+      return { ok: true, username: rec.username || userKey, status: newStatus, kicked: false };
+    }
+
+    rec.status = newStatus;
+    var setRes = await upstashCmd(['SET', key, serializePlayerRecord(rec)]);
+    if (!setRes.ok) return { ok: false, error: setRes.error || 'Upstash SET failed' };
+    return { ok: true, username: rec.username || userKey, status: newStatus, kicked: false };
+  },
+
+  del: async function (drive, username) {
+    var gfx = getUpstashGfxNamespace(drive);
+    if (!gfx) return { ok: false, error: 'Upstash is not enabled on ' + drive + ':/' };
+
+    var userKey = String(username || '').trim().toLowerCase();
+    var key = 'qandy:u:' + gfx + ':' + userKey;
+
+    var active = findActiveSession(drive, userKey);
+    if (active) {
+      active.player.userKey = null; // prevent removePlayerFromWorld from re-saving to Upstash
+      playerIndex.delete(active.session);
+      kickedSessions.set(active.session, { msg: 'S^LO--^S', at: Date.now() });
+      await removePlayerFromWorld(active.player, active.session);
+    }
+
+    if (DOS.fileExists(drive, '/', 'u/' + userKey).exists) {
+      DOS.fileDelete(drive, '/', 'u/' + userKey, 'system');
+    }
+
+    var delRes = await upstashCmd(['DEL', key]);
+    if (!delRes.ok) return { ok: false, error: delRes.error || 'Upstash DEL failed' };
+    if (!delRes.result) {
+      return { ok: false, error: 'Player "' + username + '" not found in Upstash.' };
+    }
+    return { ok: true, username: userKey, kicked: !!active };
+  }
+};
+
 // ── HTTP server ───────────────────────────────────────────────────────────────
 
 var server = http.createServer(function (req, res) {
@@ -1217,7 +2376,7 @@ var server = http.createServer(function (req, res) {
   var reqPathname = reqUrl.pathname;
 
   if ((reqPathname === '/qandyland.js') && req.method === 'POST') {
-    readBody(req).then(function (bodyText) {
+    readBody(req).then(async function (bodyText) {
       var command, drive, session;
 
       if (req.headers['content-type'] === 'application/x-www-form-urlencoded') {
@@ -1278,7 +2437,15 @@ var server = http.createServer(function (req, res) {
         drive = DOS.resolveDriveName(drive) || drive;
       }
 
-      plugboard(req, res, command, drive, session);
+      if (drive) {
+        drive = DOS.resolveDriveName(drive) || drive;
+      }
+
+      if (typeof command === 'string' && command.indexOf('GFX:') === 0) {
+        return handleGfxDevCommand(req, res, command.slice(4), drive, session);
+      }
+
+      await plugboard(req, res, command, drive, session);
 
     }).catch(err => {
       console.error("HTTP 500 ERROR:", err.stack || err);
@@ -1308,16 +2475,24 @@ var server = http.createServer(function (req, res) {
 var commandExecutor = Command.createExecutor({
   dos: DOS,
   krystals: Krystals,
+  upstash: upstashAdmin,
   getPlayers: function () { return playerIndex; },
-  shutdown: function () {
+  shutdown: async function () {
+    setTimeout(function () {
+      process.stdout.write('Forcing shutdown...\n');
+      process.exit(0);
+    }, 5000).unref();
+
+    try {
+      await flushAllPlayersToUpstash();
+    } catch (e) {
+      console.warn('[Upstash] Shutdown flush failed:', e.message);
+    }
+
     server.close(function () {
       process.stdout.write('All connections closed. HTTP server stopped.\n\n');
       process.exit(0);
     });
-    setTimeout(function () {
-      process.stdout.write('Forcing shutdown...\n');
-      process.exit(0);
-    }, 3000);
   }
 });
 
@@ -1396,13 +2571,16 @@ async function _proceedWithStartup() {
   });
 })();
 
-process.on('SIGINT', function () {
-  process.exit(0);
-});
+async function shutdownWithFlush() {
+  try {
+    await flushAllPlayersToUpstash();
+  } finally {
+    process.exit(0);
+  }
+}
 
-process.on('SIGTERM', function () {
-  process.exit(0);
-});
+process.on('SIGINT', shutdownWithFlush);
+process.on('SIGTERM', shutdownWithFlush);
 
 process.on('uncaughtException', function (err) {
   console.error("UNCAUGHT EXCEPTION:", err.stack || err);

@@ -1,0 +1,1522 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Queville Multiplayer Client</title>
+    <script src="cylon-sdk.js"></script>
+    <script src="cylon-gfx-itemid.js"></script>
+    <script src="cylon-gfx.js"></script>
+    <style>
+        body, html {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            background: var(--bg-color, #000);
+            color: var(--fg-color, #0f0);
+            font-family: var(--font-face, monospace);
+            overflow: hidden; user-select: none; -webkit-user-select: none;
+        }
+        #queville-stage {
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            width: 100%;
+            height: 100%;
+            box-sizing: border-box;
+        }
+        #queville-stage.thumb-left {
+            flex-direction: row-reverse;
+        }
+        #desktop-wrapper {
+            position: relative;
+            flex: 0 0 auto;
+            background-color: #000;
+            overflow: hidden;
+        }
+        #tiles-layer, #icons-layer { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+        #tiles-layer { z-index: 1; }
+        #icons-layer { z-index: 10; }
+        .icon-wrap { position: absolute; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+        .icon-img {
+            width: 100% !important;
+            height: 100% !important;
+            max-width: 100% !important;
+            max-height: 100% !important;
+            object-fit: fill !important;
+            image-rendering: pixelated;
+            filter: none !important;
+        }
+        .icon-label {
+            display: none;
+        }
+
+        /* --- Side Control Panel (~30% width) --- */
+        #queville-controls {
+            flex: 1 1 0;
+            min-width: 0;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            padding: 6px;
+            box-sizing: border-box;
+        }
+
+        .qpad-util-btn {
+            background: var(--menu-bg, #181818);
+            color: var(--menu-fg, #aaa);
+            border: 1px solid var(--sel-bg, #444);
+            border-radius: 4px;
+            padding: 2px 7px;
+            font-family: inherit;
+            font-size: clamp(10px, 3vh, 12px);
+            cursor: pointer;
+            touch-action: none;
+            flex: 0 0 auto;
+        }
+        .qpad-util-btn:active {
+            background: var(--sel-bg, #444);
+            color: var(--sel-fg, #0f0);
+        }
+
+        /* --- Logged-in HUD (Inventory + Keypad + Username) --- */
+        #qhud-game {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: space-between;
+            width: 100%;
+            height: 100%;
+            gap: clamp(4px, 1.6vh, 10px);
+            box-sizing: border-box;
+            touch-action: none;
+        }
+        #qhud-header {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 4px;
+            flex: 0 0 auto;
+        }
+        #qhud-username {
+            font-weight: bold;
+            font-size: clamp(11px, 3.6vh, 15px);
+            color: var(--fg-color, #0f0);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            min-width: 0;
+            text-align: center;
+        }
+        #qhud-inven {
+            width: 100%;
+            flex: 0 1 auto;
+            min-height: 44px;
+            border: 1px solid var(--sel-bg, #333);
+            border-radius: 4px;
+            background: var(--bg-color, rgba(16, 16, 16, 0.6));
+            padding: 4px;
+            box-sizing: border-box;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .qhud-inven-label {
+            font-size: clamp(9px, 2.6vh, 11px);
+            color: var(--fg-color, #888);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            border-bottom: 1px solid var(--sel-bg, #333);
+            padding-bottom: 2px;
+            text-align: center;
+        }
+        #qhud-inven-grid {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 3px;
+            width: 100%;
+            align-content: flex-start;
+        }
+        .qhud-inven-slot {
+            width: 36px;
+            height: 36px;
+            flex: 0 0 auto;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid var(--sel-bg, #333);
+            border-radius: 3px;
+            background: rgba(0, 0, 0, 0.35);
+            padding: 1px;
+            box-sizing: border-box;
+            cursor: pointer;
+        }
+        .qhud-inven-slot:active {
+            background: var(--sel-bg, #333);
+            border-color: var(--fg-color, #0f0);
+        }
+        .qhud-inven-slot.empty {
+            cursor: default;
+            opacity: 0.35;
+        }
+        .qhud-inven-slot img {
+            width: 32px;
+            height: 32px;
+            object-fit: contain;
+            image-rendering: pixelated;
+            pointer-events: none;
+        }
+
+        .qlogin-input {
+            width: 100%;
+            box-sizing: border-box;
+            padding: clamp(3px, 1.2vh, 6px) 6px;
+            font-family: inherit;
+            font-size: clamp(11px, 3.5vh, 14px);
+            background: var(--input-bg, #000);
+            color: var(--input-fg, #0f0);
+            border: 1px solid var(--fg-color, #0f0);
+            border-radius: 4px;
+        }
+        .qlogin-btn-row {
+            display: flex;
+            gap: 5px;
+        }
+
+        .qlogin-btn:focus,
+        #qBtnGuest:focus {
+            outline: 2px solid #ffeb3b;
+            outline-offset: 1px;
+        }
+
+        .qlogin-btn {
+            flex: 1 1 0;
+            min-width: 0;
+            padding: clamp(4px, 1.2vh, 6px) 4px;
+            font-family: inherit;
+            font-size: clamp(10px, 3.2vh, 13px);
+            font-weight: bold;
+            cursor: pointer;
+            border-radius: 4px;
+            border: 1px solid var(--fg-color, #0f0);
+            background: var(--menu-bg, #111);
+            color: var(--fg-color, #0f0);
+        }
+        .qlogin-btn.primary {
+            background: var(--sel-bg, #333);
+            color: var(--sel-fg, #0f0);
+        }
+        .qlogin-btn:active {
+            opacity: 0.8;
+        }
+        #qLoginErr {
+            color: #ff5555;
+            font-size: clamp(10px, 2.8vh, 12px);
+            line-height: 1.2;
+            text-align: center;
+            min-height: 1.1em;
+            word-wrap: break-word;
+        }
+        #qBtnGuest {
+            display: block;
+            width: 100%;
+            padding: clamp(5px, 1.6vh, 8px) 6px;
+            font-family: inherit;
+            font-size: clamp(12px, 4vh, 16px);
+            font-weight: bold;
+            color: #ffeb3b;
+            background: #0b3d0b;
+            border: 2px solid #00e676;
+            border-radius: 4px;
+            cursor: pointer;
+            text-shadow: 1px 1px 0 #000;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.6);
+            box-sizing: border-box;
+        }
+        #qBtnGuest:active {
+            transform: scale(0.98);
+        }
+        .qlogin-title {
+            font-size: clamp(14px, 5vh, 22px);
+            font-weight: 900;
+            letter-spacing: 1px;
+            background: linear-gradient(180deg, #ffeb3b 0%, #00e676 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            filter: drop-shadow(1px 1px 0 #003300);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* --- Logged-in HUD (Username + Inventory + Keypad) --- */
+        #qhud-game {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            width: 100%;
+            height: 100%;
+            gap: clamp(4px, 1.6vh, 10px);
+            box-sizing: border-box;
+            touch-action: none;
+        }
+        #qhud-header {
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 4px;
+            flex: 0 0 auto;
+        }
+        #qhud-username {
+            font-weight: bold;
+            font-size: clamp(11px, 3.6vh, 15px);
+            color: var(--fg-color, #0f0);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            min-width: 0;
+            align-items: center;
+        }
+        #qhud-inven {
+            width: 100%;
+            flex: 1 1 0;
+            min-height: 44px;
+            border: 1px solid var(--sel-bg, #333);
+            border-radius: 4px;
+            background: var(--bg-color, rgba(16, 16, 16, 0.6));
+            padding: 4px;
+            box-sizing: border-box;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .qhud-inven-label {
+            font-size: clamp(9px, 2.6vh, 11px);
+            color: var(--fg-color, #888);
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            border-bottom: 1px solid var(--sel-bg, #333);
+            padding-bottom: 2px;
+            text-align: center;
+        }
+        #qhud-inven-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 3px;
+            width: 100%;
+            align-content: start;
+        }
+        .qhud-inven-slot {
+            aspect-ratio: 1 / 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 1px solid var(--sel-bg, #333);
+            border-radius: 3px;
+            background: rgba(0, 0, 0, 0.35);
+            padding: 2px;
+            box-sizing: border-box;
+            cursor: pointer;
+        }
+        .qhud-inven-slot:active {
+            background: var(--sel-bg, #333);
+            border-color: var(--fg-color, #0f0);
+        }
+        .qhud-inven-slot.empty {
+            cursor: default;
+            opacity: 0.35;
+        }
+        .qhud-inven-slot img {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            image-rendering: pixelated;
+            pointer-events: none;
+        }
+
+        .qpad-cross {
+            width: min(84%, 40vh, 180px);
+            aspect-ratio: 1 / 1;
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            grid-template-rows: repeat(3, minmax(0, 1fr));
+            gap: clamp(2px, 1vh, 5px);
+            flex: 0 0 auto;
+        }
+        .qpad-btn {
+            background: var(--key-bg, #222);
+            color: var(--key-fg, #fff);
+            border: 1px solid var(--case-fg, #444);
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: inherit;
+            font-size: clamp(13px, 4.4vh, 22px);
+            font-weight: bold;
+            cursor: pointer;
+            touch-action: none;
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            box-sizing: border-box;
+        }
+        .qpad-btn:active,
+        .qpad-btn.active {
+            background: var(--key-hl-bg, #666);
+            color: var(--key-hl-fg, #fff);
+            border-color: var(--key-fg, #888);
+        }
+        .qpad-up    { grid-column: 2; grid-row: 1; }
+        .qpad-left  { grid-column: 1; grid-row: 2; }
+        .qpad-enter {
+            grid-column: 2;
+            grid-row: 2;
+            font-size: clamp(8px, 2.3vh, 12px);
+            letter-spacing: 0;
+        }
+        .qpad-right { grid-column: 3; grid-row: 2; }
+        .qpad-down  { grid-column: 2; grid-row: 3; }
+
+        .qpad-side-btn {
+            width: 68%;
+            height: 68%;
+            justify-self: center;
+            align-self: center;
+            font-size: clamp(10px, 3vh, 16px);
+            padding: 0;
+            margin: 0;
+        }
+        .qpad-side-left {
+            grid-column: 1;
+            grid-row: 3;
+        }
+        .qpad-side-right {
+            grid-column: 3;
+            grid-row: 3;
+            display: none;
+        }
+        #queville-stage.thumb-left .qpad-side-left {
+            display: none;
+        }
+        #queville-stage.thumb-left .qpad-side-right {
+            display: flex;
+        }
+    </style>
+</head>
+<body>
+
+<div id="queville-stage">
+    <div id="desktop-wrapper">
+        <div id="tiles-layer"></div>
+        <div id="icons-layer"></div>
+    </div>
+
+    <div id="queville-controls">
+        <!-- Logged-out View -->
+        <div id="qhud-login">
+            <input id="qLoginUser" class="qlogin-input" type="text" maxlength="15" placeholder="Username" autocomplete="off">
+            <input id="qLoginPass" class="qlogin-input" type="password" maxlength="32" placeholder="Password" autocomplete="off">
+            <div class="qlogin-btn-row">
+                <button type="button" id="qBtnLogin" class="qlogin-btn primary">Login</button>
+            </div>
+            <div id="qLoginErr"></div>
+            <button type="button" id="qBtnGuest">Play Now!</button>
+        </div>
+
+        <!-- Logged-in HUD View -->
+        <div id="qhud-game">
+            <div id="qhud-inven">
+                <div id="qhud-inven-grid"></div>
+            </div>
+            <div class="qpad-cross">
+                <div class="qpad-btn qpad-up" data-key="up" data-pop-passthrough="true">▲</div>
+                <div class="qpad-btn qpad-left" data-key="left" data-pop-passthrough="true">◀</div>
+                <div class="qpad-btn qpad-enter" data-key="enter" data-pop-passthrough="true">ENTER</div>
+                <div class="qpad-btn qpad-right" data-key="right" data-pop-passthrough="true">▶</div>
+                <button type="button" tabindex="-1" class="qpad-btn qpad-side-btn qpad-side-left qpad-thumb-toggle" title="Move controls to left side">&lt;</button>
+                <div class="qpad-btn qpad-down" data-key="down" data-pop-passthrough="true">▼</div>
+                <button type="button" tabindex="-1" class="qpad-btn qpad-side-btn qpad-side-right qpad-thumb-toggle" title="Move controls to right side">&gt;</button>
+            </div>
+            <div id="qhud-header">
+                <span id="qhud-username"></span>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+const SERVER_DRIVE = 'queville.gfx';
+const QUEVILLE_SERVERS = [
+    'http://localhost:8080/qandyland.js',
+    'http://cylon.onrender.com/qandyland.js'
+];
+
+let selectedServerUrl = null;
+let selectingServer = false;
+
+function getItemLabel(id) {
+    if (typeof window.gfxItemID === 'function') return window.gfxItemID(id);
+    if (window.parent && typeof window.parent.gfxItemID === 'function') return window.parent.gfxItemID(id);
+    return id;
+}
+
+function encodeTileZ(z) {
+    return window.CylonGFX.encodeZ(z, window.CylonGFX.gfxZBase || 10);
+}
+
+function decodeTileZ(zStr) {
+    return window.CylonGFX.decodeZ(zStr, window.CylonGFX.gfxZBase || 10);
+}
+
+function flushNetworkNow() {
+    if (window.CylonGFX && !window.CylonGFX.isSyncing) {
+        window.CylonGFX.networkTick();
+    }
+}
+
+let loggedInUser = null;
+
+const LOGIN_ERRORS = {
+    '03': 'Username must be letters and numbers only.',
+    '04': 'Username must be at least 3 characters.',
+    '05': 'Username must be under 16 characters.',
+    '07': 'Password contains invalid characters.',
+    '08': 'Password must be at least 4 characters.',
+    '09': 'Invalid password.',
+    '10': 'That username is already taken.',
+    '13': 'Username does not exist.',
+    '14': 'Player Server Error',
+    '16': 'Username must start with an uppercase letter.',
+    '17': 'Usernames cannot start with "guest".',
+    '20': 'Player is already logged in (wait 10 seconds).',
+    '21': 'Already logged in. Logout first.'
+};
+
+function escapeAttr(s) {
+    return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function setLoginError(msg) {
+    const errEl = document.getElementById('qLoginErr');
+    if (errEl) errEl.textContent = msg || '';
+}
+
+function setSidebarLoggedIn(isLoggedIn) {
+    const loginPane = document.getElementById('qhud-login');
+    const gamePane = document.getElementById('qhud-game');
+    const userLabel = document.getElementById('qhud-username');
+
+    if (loginPane) loginPane.style.display = isLoggedIn ? 'none' : 'flex';
+    if (gamePane) gamePane.style.display = isLoggedIn ? 'flex' : 'none';
+    if (userLabel) userLabel.textContent = isLoggedIn ? (loggedInUser || '') : '';
+}
+
+function focusSidebarLogin(msg) {
+    if (msg) setLoginError(msg);
+    const loginPane = document.getElementById('qhud-login');
+    if (loginPane) {
+        loginPane.classList.add('flash');
+        setTimeout(() => loginPane.classList.remove('flash'), 350);
+    }
+}
+
+function showServerMenuPopup(errorMsg) {
+    if (typeof setPopForce === 'function') setPopForce('visible');
+
+    let linksHtml = '';
+    QUEVILLE_SERVERS.forEach((url, idx) => {
+        linksHtml +=
+            `<a href="gfx:SRV${idx}" ` +
+            `style="display:block; padding:8px 12px; color:var(--menu-fg,#aaa); text-decoration:none; border-radius:2px; cursor:pointer;" ` +
+            `onmouseover="this.style.background='var(--sel-bg,#333)';this.style.color='var(--sel-fg,#0f0)';" ` +
+            `onmouseout="this.style.background='transparent';this.style.color='var(--menu-fg,#aaa)';">` +
+            `${escapeAttr(url)}` +
+            `</a>`;
+    });
+
+    const errHtml = errorMsg
+        ? `<div style="margin-top:6px; padding:6px 10px; color:#ff5555; border-top:1px solid var(--sel-bg,#333); font-size:12px; max-width:300px; word-wrap:break-word;">${escapeAttr(errorMsg)}</div>`
+        : '';
+
+    const html =
+        `<div style="font-family:var(--font-face,monospace); font-size:14px; min-width:240px; display:flex; flex-direction:column;">` +
+        `<div style="padding:6px 12px; font-weight:bold; color:var(--fg-color,#0f0); border-bottom:1px solid var(--sel-bg,#333); margin-bottom:2px;">Select Server</div>` +
+        linksHtml +
+        errHtml +
+        `</div>`;
+
+    if (typeof pop === 'function') pop(html, 'topleft');
+}
+
+function getDriveSourceUrl(mountInfo) {
+    if (!mountInfo || mountInfo.type === 'idb') return null;
+    if (mountInfo.sourceUrl) return mountInfo.sourceUrl;
+
+    let src = String(mountInfo.source || '').trim();
+    if (!src || src === '(inline)' || /^(ram|rom|ls|idb):$/i.test(src)) {
+        return null;
+    }
+
+    const prefixMatch = /^(ram|rom|ls):([\s\S]*)$/i.exec(src);
+    if (prefixMatch) src = prefixMatch[2].trim();
+    if (!src) return null;
+
+    if (/^https?:\/\//i.test(src)) return src;
+
+    if (src.toLowerCase().endsWith('.gfx')) {
+        try {
+            const baseHref = (window.parent && window.parent !== window)
+                ? window.parent.location.href
+                : window.location.href;
+            if (/^https?:\/\//i.test(baseHref)) {
+                return new URL(src, baseHref).href;
+            }
+        } catch (e) {}
+    }
+    return null;
+}
+
+function isDriveFromServer(mountInfo, serverUrl) {
+    if (!mountInfo || mountInfo.type === 'idb') return false;
+    const driveUrlStr = getDriveSourceUrl(mountInfo);
+    if (!driveUrlStr) return false;
+
+    try {
+        const drvUrl = new URL(driveUrlStr);
+        const srvUrl = new URL(serverUrl);
+        if (drvUrl.host.toLowerCase() !== srvUrl.host.toLowerCase()) return false;
+
+        const drvDir = drvUrl.pathname.substring(0, drvUrl.pathname.lastIndexOf('/') + 1);
+        const srvDir = srvUrl.pathname.substring(0, srvUrl.pathname.lastIndexOf('/') + 1);
+        const drvFile = drvUrl.pathname.substring(drvUrl.pathname.lastIndexOf('/') + 1).toLowerCase();
+
+        return drvDir === srvDir && (drvFile === 'cylon-queville.gfx' || drvFile === 'queville.gfx');
+    } catch (e) {
+        return false;
+    }
+}
+
+async function selectServer(serverUrl) {
+    if (selectingServer) return;
+    selectingServer = true;
+
+    try {
+        const dos = window.parent && window.parent.CylonDOS ? window.parent.CylonDOS : window.CylonDOS;
+        if (!dos) {
+            const errMsg = 'Error: CylonDOS is not available.';
+            if (typeof print === 'function') print(errMsg + '\n');
+            showServerMenuPopup(errMsg);
+            return;
+        }
+
+        let localDrive = 'queville';
+        const mnts = await dos.mounts();
+        const existing = mnts.find(m => m.name === 'queville' || m.name === 'queville.gfx')
+                      || mnts.find(m => m.name === 'cylon-queville' || m.name === 'cylon-queville.gfx');
+
+        if (existing) {
+            if (!isDriveFromServer(existing, serverUrl)) {
+                const actualSrc = existing.sourceUrl || existing.source || 'unknown';
+                const errMsg = `Error: Mounted drive "${existing.name}:" has source "${actualSrc}", which does not match "${serverUrl}". Existing drive was not unmounted.`;
+                if (typeof print === 'function') print(errMsg + '\n');
+                showServerMenuPopup(errMsg);
+                return;
+            }
+            localDrive = existing.name;
+        } else {
+            const gfxUrl = new URL('cylon-queville.gfx', serverUrl).href;
+            const mounted = await window.CylonCommand(`mount "${gfxUrl}" ram queville`);
+            if (!mounted) {
+                const errMsg = `Error: Failed to mount ${gfxUrl}`;
+                if (typeof print === 'function') print(errMsg + '\n');
+                showServerMenuPopup(errMsg);
+                return;
+            }
+            localDrive = 'queville';
+        }
+
+        selectedServerUrl = serverUrl;
+        if (typeof setPopForce === 'function') setPopForce('hidden');
+        if (typeof hpop === 'function') hpop();
+
+        // Determine spawn sector from /a/gfxSpawn (defaults to Bc)
+        let startSector = 'Bc';
+        try {
+            const sp = await dos.load(`${localDrive}:/a/gfxSpawn`);
+            if (sp && sp.trim().length === 2) startSector = sp.trim();
+        } catch (e) {}
+
+        // Initialize local map preview without opening a session or polling RF until login
+        window.remoteQandylandUrl = serverUrl;
+        window.desktopDrive = localDrive;
+        window.cylonGfxSession = null;
+        window.playerItem = 'Za';
+        window.playerZ = 0;
+        window.playerAvatar = '';
+        window.playerInven = '';
+        window.playerId = '';
+        window.playerWalk = -1;
+        window.playerDo = '';
+        window.gfxDo = 'RF';
+        window.movingItems = {};
+        window.CylonGFX.mapTiles = {};
+        window.CylonGFX.mapObjs = {};
+        window.CylonGFX._loadedSector = null;
+        window.CylonGFX.lastRenderedItems = null;
+        window.CylonGFX.isLooking = false;
+
+        window.gfxDrive = await window.CylonGFX.resolveServerDrive(serverUrl, SERVER_DRIVE);
+        await window.CylonGFX.init(`${localDrive}:/w/${startSector}`);
+        window.CylonGFX._loadedSector = startSector;
+        await window.CylonGFX.ensureSectorCached(startSector);
+        window.CylonGFX.renderSectorTiles(startSector);
+        window.CylonGFX.renderSectorStaticObjects(startSector);
+        fitDesktopToScreen();
+    } catch (err) {
+        const errMsg = `Error: ${err && err.message ? err.message : String(err)}`;
+        if (typeof print === 'function') print(errMsg + '\n');
+        showServerMenuPopup(errMsg);
+    } finally {
+        selectingServer = false;
+    }
+}
+
+function submitAuth(action) {
+    if (!selectedServerUrl) {
+        showServerMenuPopup('Please select a server first.');
+        return;
+    }
+    const user = (document.getElementById('qLoginUser')?.value || '').trim();
+    const pass = document.getElementById('qLoginPass')?.value || '';
+    if (!user || !pass) {
+        setLoginError('Enter username and password.');
+        return;
+    }
+    setLoginError('');
+    window.CylonGFX.handleGfxCommand(action, { user, pass });
+}
+
+function initLoginControls() {
+    const btnLogin = document.getElementById('qBtnLogin');
+    const btnNew = document.getElementById('qBtnNew');
+    const btnGuest = document.getElementById('qBtnGuest');
+    const passInput = document.getElementById('qLoginPass');
+
+    if (passInput) {
+        passInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !loggedInUser) {
+                e.preventDefault();
+                submitAuth('login');
+            }
+        });
+    }
+
+    if (btnLogin) {
+        btnLogin.addEventListener('click', (e) => {
+            e.stopPropagation();
+            submitAuth('login');
+        });
+    }
+    if (btnNew) {
+        btnNew.addEventListener('click', (e) => {
+            e.stopPropagation();
+            submitAuth('new');
+        });
+    }
+    if (btnGuest) {
+        btnGuest.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (!selectedServerUrl) {
+                showServerMenuPopup('Please select a server first.');
+                return;
+            }
+            setLoginError('');
+            window.CylonGFX.handleGfxCommand('guest', '');
+        });
+    }
+}
+
+function showSayPopup() {
+    if (typeof setPopForce === 'function') setPopForce('visible');
+
+    const commitScript =
+        `(function(el){` +
+        `var msg=(el.value||'').trim();` +
+        `window.proxyInputInPopup=false;` +
+        `if(window.setOSMode)window.setOSMode('app');` +
+        `if(window.hideFullKeyboard)window.hideFullKeyboard();` +
+        `if(window.setPopForce)window.setPopForce('hidden');` +
+        `if(window.hpop)window.hpop();` +
+        `if(!msg)return;` +
+        `var f=document.querySelector('.page-frame.active');` +
+        `if(f&&f.contentWindow){` +
+        `f.contentWindow.postMessage({type:'QANDY_GFX_CMD',cmd:'say',data:msg},` +
+        `(window.location.origin&&window.location.origin!=='null'?window.location.origin:'*'));` +
+        `}` +
+        `})(this)`;
+
+    const cancelScript =
+        `window.proxyInputInPopup=false;` +
+        `if(window.setOSMode)window.setOSMode('app');` +
+        `if(window.hideFullKeyboard)window.hideFullKeyboard();` +
+        `if(window.setPopForce)window.setPopForce('hidden');` +
+        `if(window.hpop)window.hpop();return false;`;
+
+    const html =
+        `<div style="padding:10px 14px; font-family:var(--font-face,monospace);">` +
+        `<div style="font-weight:bold; margin-bottom:6px;">Say Something</div>` +
+        `<input id="qSayInput" type="text" maxlength="80" placeholder="Type message, press ENTER" ` +
+            `onchange="${commitScript}" ` +
+            `style="width:220px; padding:4px; font-family:inherit; background:var(--input-bg,#000); color:var(--input-fg,#0f0); border:1px solid var(--fg-color,#0f0);">` +
+        `<div style="margin-top:6px; text-align:right; font-size:12px;">` +
+            `<a href="#" onclick="${cancelScript}">Cancel</a>` +
+        `</div>` +
+        `</div>`;
+
+    if (typeof pop === 'function') pop(html, 'topleft');
+}
+
+window.onload = async function() {
+    if (!window.CylonCommand || !window.CylonGFX) {
+        document.body.innerHTML = "<h3 style='color:red;'>Requires Cylon OS and CylonGFX</h3>";
+        return;
+    }
+
+    initLoginControls();
+    initQuevilleControls();
+    setSidebarLoggedIn(false);
+
+    // Hook tile clicks & sizing
+    window.CylonGFX.showTargetMenu = handleTileClick;
+    const origGfxRefresh = window.CylonGFX.gfxRefresh.bind(window.CylonGFX);
+    window.CylonGFX.gfxRefresh = async function(sector, zStr, itemsStr) {
+        await origGfxRefresh(sector, zStr, itemsStr);
+        checkAvatarRequired();
+    };
+    window.addEventListener('resize', fitDesktopToScreen);
+
+    // First action: open the topleft server selection popup with PopForce = visible
+    showServerMenuPopup();
+};
+
+// Handle popup <a href="gfx:..."> clicks forwarded from Cylon OS
+window.addEventListener('message', function(e) {
+    if (window.location.origin !== 'null' && e.origin !== window.location.origin) return;
+    if (e.source !== window && e.source !== window.parent) return;
+    if (e.data && e.data.type === 'gfx' && e.data.cmd) {
+        gfxClick(String(e.data.cmd).trim());
+    }
+});
+
+// --- Tile & Entity Click Handling ---
+function handleTileClick(z, clientX, clientY) {
+    if (!selectedServerUrl) {
+        showServerMenuPopup('Please select a server first.');
+        return;
+    }
+    if (!loggedInUser || (window.playerItem && window.playerItem.startsWith('Za'))) {
+        focusSidebarLogin('Please login or click Play Now!');
+        return;
+    }
+    if (!window.playerAvatar) {
+        checkAvatarRequired();
+        return;
+    }
+
+    const zStr = encodeTileZ(z);
+    const menuItems = [];
+
+    document.querySelectorAll(`.icon-wrap.static-obj[data-z="${z}"]`).forEach(el => {
+        const objId = el.getAttribute('data-id');
+        const objZStr = el.getAttribute('data-zstr') || zStr;
+        const label = el.getAttribute('data-label') || getItemLabel(objId);
+        menuItems.push({
+            label: label,
+            action: () => gfxClick(`OD${objId}${objZStr}`)
+        });
+    });
+
+    document.querySelectorAll(`.icon-wrap.dyn-sprite[data-z="${z}"]`).forEach(el => {
+        const code = el.getAttribute('data-code') || '';
+        if (code.length < 4) return;
+        const id = code.substring(0, 2);
+        const itemZStr = code.substring(2, 4);
+        const uniqueId = code.length >= 8 ? code.substring(4, 8) : '';
+        const label = el.getAttribute('data-label') || getItemLabel(id);
+        menuItems.push({
+            label: label,
+            action: () => window.itemdown(`${id}${itemZStr}${uniqueId}`)
+        });
+    });
+
+    if (z === window.playerZ && window.playerItem) {
+        const pId = window.playerItem.substring(0, 2);
+        menuItems.push({
+            label: 'Inventory',
+            action: () => gfxClick(`ID${pId}${zStr}`)
+        });
+        menuItems.push({
+            label: 'Say Something',
+            action: () => showSayPopup()
+        });
+    }
+
+    if (menuItems.length === 0) {
+        window.zdown(z);
+        return;
+    }
+
+    if (z !== window.playerZ) {
+        menuItems.push({
+            label: 'Walk Here',
+            action: () => window.zdown(z)
+        });
+    }
+
+    const popMgr = window.parent && window.parent.CylonPopManager;
+    if (popMgr && typeof popMgr.showContextMenu === 'function') {
+        if (clientX === undefined || clientY === undefined) {
+            const wrapper = document.getElementById('desktop-wrapper');
+            const rect = wrapper.getBoundingClientRect();
+            const cols = window.CylonGFX.gridWide || 14;
+            const rows = window.CylonGFX.gridTall || 10;
+            clientX = rect.left + ((z % cols) + 0.5) * (rect.width / cols);
+            clientY = rect.top + (Math.floor(z / cols) + 0.5) * (rect.height / rows);
+        }
+        popMgr.showContextMenu({ clientX, clientY, view: window }, menuItems);
+    } else {
+        const html = menuItems.map(m => {
+            if (m.label === 'Walk Here') return `<a href="gfx:ZD${zStr}">Walk Here</a>`;
+            return m.label;
+        }).join('<br>');
+        pop(html, 'center');
+    }
+}
+
+function gfxClick(bytecode) {
+    if (bytecode.startsWith('SRV')) {
+        const idx = parseInt(bytecode.substring(3), 10);
+        const url = QUEVILLE_SERVERS[idx];
+        if (url) selectServer(url);
+        return;
+    }
+
+    if (bytecode === 'GUEST') {
+        if (!selectedServerUrl) {
+            showServerMenuPopup('Please select a server first.');
+            return;
+        }
+        if (window.parent && window.parent !== window) {
+            window.parent.postMessage(
+                { type: 'QANDY_APP_CLICKED' },
+                (window.location.origin && window.location.origin !== 'null' ? window.location.origin : '*')
+            );
+        }
+        window.CylonGFX.handleGfxCommand('guest', '');
+        return;
+    }
+
+    if (bytecode === 'AVM') { showAvatarHeadPopup('M'); return; }
+    if (bytecode === 'AVF') { showAvatarHeadPopup('F'); return; }
+    if (bytecode === 'AVB') { showAvatarSexPopup(); return; }
+
+    const type = bytecode.substring(0, 2);
+    const data = bytecode.substring(2);
+
+    switch (type) {
+        case 'LO':
+            window.CylonGFX.handleGfxCommand('logout', '');
+            break;
+        case 'ZD':
+            window.zdown(decodeTileZ(data));
+            break;
+        case 'IN':
+            window.invdown(data);
+            break;
+        case 'ID':
+            window.itemdown(data);
+            break;
+        case 'OD':
+            window.objdown(data);
+            break;
+        case 'SD':
+            if (typeof hpop === 'function') hpop();
+            if (window.gfxDo === 'RF') window.gfxDo = '';
+            window.gfxDo += data;
+            flushNetworkNow();
+            break;
+        case 'VA':
+            avatarWizardStep = 'submitting';
+            avatarSubmitTicks = 0;
+            if (typeof setPopForce === 'function') setPopForce('hidden');
+            if (typeof hpop === 'function') hpop();
+            if (window.gfxDo === 'RF') window.gfxDo = '';
+            window.gfxDo += 'VA' + (data.endsWith('--') ? data : data + '--');
+            flushNetworkNow();
+            break;
+        default:
+            console.warn('Unknown GFX event:', bytecode);
+    }
+}
+
+// --- Client Event Handlers ---
+window.zdown = function(z) {
+    if (!loggedInUser || !window.playerAvatar) return;
+    if (typeof setPopForce === 'function') setPopForce('hidden');
+    if (typeof hpop === 'function') hpop();
+
+    if (z !== window.playerZ) {
+        window.CylonGFX.walkToZ(parseInt(z, 10), '');
+    }
+};
+
+window.objdown = function(code) {
+    if (!loggedInUser || !window.playerAvatar) return;
+    if (typeof hpop === 'function') hpop();
+
+    const itemId = code.substring(0, 2);
+    const itemZStr = code.substring(2, 4);
+    const itemZ = decodeTileZ(itemZStr);
+
+    let cmd = 'OD' + itemId + itemZStr;
+    if (itemId === 'Xt') {
+        const uniqueId = code.length >= 8 ? code.substring(4, 8) : code.substring(4);
+        cmd = 'Xt' + uniqueId;
+    }
+
+    if (window.playerZ === itemZ) {
+        window.playerWalk = -1;
+        window.playerDo = '';
+        if (window.gfxDo === 'RF') window.gfxDo = '';
+        window.gfxDo += cmd;
+        flushNetworkNow();
+    } else {
+        window.CylonGFX.walkToZ(itemZ, cmd);
+    }
+};
+
+window.itemdown = function(code) {
+    if (!loggedInUser || !window.playerAvatar) return;
+    if (typeof setPopForce === 'function') setPopForce('hidden');
+    if (typeof hpop === 'function') hpop();
+
+    const itemId = code.substring(0, 2);
+    const itemZStr = code.substring(2, 4);
+    const itemZ = decodeTileZ(itemZStr);
+    const uniqueId = code.length >= 8 ? code.substring(4, 8) : '';
+
+    if (itemId === window.playerItem && (!uniqueId || uniqueId === window.playerId)) {
+        window.invdown('');
+        return;
+    }
+
+    if (itemId >= 'Sa' && itemId <= 'Sd') {
+        if (window.gfxDo === 'RF') window.gfxDo = '';
+        window.gfxDo += (window.playerItem === 'Za' || !uniqueId)
+            ? ('ID' + itemId + itemZStr)
+            : ('Xt' + uniqueId);
+        flushNetworkNow();
+        return;
+    }
+
+    const cmd = 'ID' + itemId + itemZStr;
+    if (window.playerZ === itemZ) {
+        window.playerWalk = -1;
+        window.playerDo = '';
+        if (window.gfxDo === 'RF') window.gfxDo = '';
+        window.gfxDo += cmd;
+        flushNetworkNow();
+    } else {
+        window.CylonGFX.walkToZ(itemZ, cmd);
+    }
+};
+
+window.invdown = function(code) {
+    if (!loggedInUser || !window.playerAvatar) return;
+    if (typeof setPopForce === 'function') setPopForce('hidden');
+
+    if (!code) {
+        if (window.playerItem) {
+            const zStr = encodeTileZ(window.playerZ);
+            if (window.gfxDo === 'RF') window.gfxDo = '';
+            window.gfxDo += 'ID' + window.playerItem.substring(0, 2) + zStr;
+            flushNetworkNow();
+        }
+        return;
+    }
+
+    if (code.charAt(0) === '-') {
+        const item = code.substring(1, 3);
+        const desc = getItemLabel(item);
+        const zStr = encodeTileZ(window.playerZ);
+        const iconDir = window.CylonGFX.gfxIconDir || 'i/';
+        let html = `<div align="center">`;
+        html += `<strong>${desc}</strong><p>`;
+        html += `<img src="${iconDir}${item}.png" width="32" height="32" style="image-rendering:pixelated;"><p>`;
+        html += `<a href="gfx:SDVd${item}">Drop</a> &nbsp; `;
+        html += `<a href="gfx:ID${window.playerItem.substring(0, 2)}${zStr}">Back</a>`;
+        html += `</div>`;
+        pop(html, 'center');
+        return;
+    }
+
+    window.renderInventory(code);
+
+    let col = 0;
+    let outputItems = '';
+    const wRegisters = {};
+    let wzValue = null;
+    const iconDir = window.CylonGFX.gfxIconDir || 'i/';
+
+    while (col < code.length) {
+        const verb = code.substring(col, col + 2);
+        col += 2;
+        if (!verb || verb.length < 2) break;
+
+        if (verb < 'Pa') {
+            outputItems += `<a href="gfx:IN-${verb}${code}">`;
+            outputItems += `<img src="${iconDir}${verb}.png" width="32" height="32" alt="${verb}" style="image-rendering:pixelated;"></a> &nbsp; `;
+        } else {
+            const valStr = code.substring(col, col + 2);
+            col += 2;
+            if (verb === 'Wz') wzValue = parseInt(valStr, 10) || 0;
+            if (verb.charAt(0) === 'W') wRegisters[verb] = valStr;
+        }
+    }
+
+    let output = '<div align="center">';
+    if (wzValue !== null) {
+        const greenW = Math.max(0, Math.min(100, wzValue));
+        const redW = 100 - greenW;
+        output += `<div style="margin-bottom:8px;"><img src="${iconDir}Zn.png" width="${greenW}" height="6"><img src="${iconDir}Zo.png" width="${redW}" height="6"></div>`;
+    }
+    if (outputItems) output += `<div style="margin-bottom:8px;">${outputItems}</div>`;
+
+    const wKeys = Object.keys(wRegisters).sort();
+    if (wKeys.length) {
+        output += '<div style="text-align:left;">';
+        for (const k of wKeys) {
+            output += `${k} ${wRegisters[k]} ${getItemLabel(k)}<br>`;
+        }
+        output += '</div>';
+    }
+
+    if (loggedInUser && loggedInUser.startsWith('guest')) {
+        output += `<div style="margin-top:8px; font-size:11px; opacity:0.8;">Playing as ${escapeAttr(loggedInUser)}.<br>Run <code>gfx new &lt;user&gt; &lt;pass&gt;</code> to save.</div>`;
+    }
+
+    if (!outputItems && !wKeys.length && wzValue === null) {
+        output += '(Inventory empty)';
+    }
+
+    output += `<div style="margin-top:8px;"><a href="gfx:LO">Logout</a></div>`;
+    output += '</div>';
+
+    pop(output, 'center');
+};
+
+window.serverdown = function(code) {
+    avatarWizardStep = null;
+    avatarSubmitTicks = 0;
+    let col = 0;
+    while (col < code.length) {
+        const verb = code.substring(col, col + 2);
+        col += 2;
+
+        if (verb === 'LI' || verb === 'LG' || verb === 'LC') {
+            const endIdx = code.indexOf('--', col);
+            const name = endIdx < 0 ? code.substring(col) : code.substring(col, endIdx);
+            col = endIdx < 0 ? code.length : endIdx + 2;
+
+            loggedInUser = name || (verb === 'LG' ? ('guest' + (window.playerId || '')) : 'Player');
+            const passEl = document.getElementById('qLoginPass');
+            if (passEl) passEl.value = '';
+            setLoginError('');
+            setSidebarLoggedIn(true);
+
+            if (!window.playerInven) {
+                window.playerInven = 'AaCaCfCgHeHeHeHeGeGeGeGeHaHaHaHa';
+                window.renderInventory();
+            }
+
+            if (typeof setPopForce === 'function') setPopForce('hidden');
+            if (typeof hpop === 'function') hpop();
+
+            if (typeof print === 'function') {
+                if (verb === 'LC') print(`Account saved as ${loggedInUser}.\n`);
+                else print(`Logged in as ${loggedInUser}.\n`);
+            }
+        } else if (verb === 'LO') {
+            const endIdx = code.indexOf('--', col);
+            col = endIdx < 0 ? code.length : endIdx + 2;
+
+            loggedInUser = null;
+            if (window.CylonGFX) {
+                window.CylonGFX.resetSession();
+            }
+            const iconsLayer = document.getElementById('icons-layer');
+            if (iconsLayer) {
+                iconsLayer.querySelectorAll('.dyn-sprite, .chat-bubble, #gfx-sys-cursor').forEach(el => el.remove());
+            }
+            if (typeof setPopForce === 'function') setPopForce('hidden');
+            if (typeof hpop === 'function') hpop();
+
+            setSidebarLoggedIn(false);
+            setLoginError('Logged out.');
+
+            if (typeof print === 'function') print('Logged out.\n');
+        } else if (verb === 'LE') {
+            const errCode = code.substring(col, col + 2);
+            col += 2;
+            const msg = LOGIN_ERRORS[errCode] || ('Login error (' + errCode + ').');
+            if (typeof print === 'function') print(`Error: ${msg}\n`);
+            if (!loggedInUser) {
+                if (window.CylonGFX) {
+                    window.CylonGFX.resetSession();
+                }
+                setSidebarLoggedIn(false);
+                setLoginError(msg);
+            }
+        } else if (verb === 'Vi') {
+            if (typeof setPopForce === 'function') setPopForce('hidden');
+            let endIdx = code.indexOf('--', col);
+            if (endIdx < 0) endIdx = code.indexOf('..', col);
+            if (endIdx < 0) {
+                window.playerInven = code.substring(col);
+                col = code.length;
+            } else {
+                window.playerInven = code.substring(col, endIdx);
+                col = endIdx + 2;
+            }
+            window.invdown(window.playerInven);
+        } else if (verb === 'Vh') {
+            const endIdx = code.indexOf('--', col);
+            const htmlTarget = endIdx < 0 ? code.substring(col) : code.substring(col, endIdx);
+            col = endIdx < 0 ? code.length : endIdx + 2;
+            const popMgr = window.parent && window.parent.CylonPopManager;
+            const menuOpen = popMgr && typeof popMgr.isMenuOpenForWindow === 'function' && popMgr.isMenuOpenForWindow(window);
+            if (htmlTarget && loggedInUser && !menuOpen) {
+                if (typeof setPopForce === 'function') setPopForce('hidden');
+                pop(htmlTarget, 'center');
+            }
+        } else if (verb === 'Vr') {
+            const noun = code.substring(col, col + 2); col += 2;
+            const zStr = code.substring(col, col + 2); col += 2;
+            const el = document.getElementById(`obj_${noun}_${decodeTileZ(zStr)}`);
+            if (el) el.remove();
+        } else if (verb === 'Va') {
+            const endIdx = code.indexOf('--', col);
+            col = endIdx < 0 ? code.length : endIdx + 2;
+        }
+    }
+};
+
+// --- Keyboard Input (supports physical keys + Cylon virtual keyboard) ---
+window.keydown = function(key, e) {
+    if (!loggedInUser || (window.playerItem && window.playerItem.startsWith('Za'))) {
+        return;
+    }
+
+    if (!window.playerAvatar) {
+        if (e) e.preventDefault();
+        checkAvatarRequired();
+        return;
+    }
+
+    const keyStr = (typeof e === 'object' && e && e.key) ? e.key : String(key || '');
+    const lower = keyStr.toLowerCase();
+
+    const popMgr = window.parent && window.parent.CylonPopManager;
+    const menuOpen = popMgr && (
+        typeof popMgr.isMenuOpenForWindow === 'function'
+            ? popMgr.isMenuOpenForWindow(window)
+            : popMgr.isMenuOpen
+    );
+    if (menuOpen) {
+        if (popMgr.handleMenuKey(keyStr)) {
+            if (e) e.preventDefault();
+            return;
+        }
+        if (lower === 'arrowleft' || lower === 'left' ||
+            lower === 'arrowright' || lower === 'right') {
+            if (e) e.preventDefault();
+        }
+        return;
+    }
+
+    if (lower === 'escape' || lower === 'esc') {
+        if (e) e.preventDefault();
+        if (typeof hpop === 'function') hpop();
+        if (window.CylonGFX.isLooking) {
+            window.CylonGFX.isLooking = false;
+            if (window.CylonGFX.lookCanvas) window.CylonGFX.lookCanvas.style.display = 'none';
+            window.gfxDo = 'RF';
+            flushNetworkNow();
+        }
+        return;
+    }
+
+    if (lower === 'enter') {
+        if (e) e.preventDefault();
+        handleTileClick(window.playerZ);
+        return;
+    }
+
+    let dx = 0, dy = 0;
+    if (keyStr === 'ArrowUp' || lower === 'up') dy = -1;
+    else if (keyStr === 'ArrowDown' || lower === 'down') dy = 1;
+    else if (keyStr === 'ArrowLeft' || lower === 'left') dx = -1;
+    else if (keyStr === 'ArrowRight' || lower === 'right') dx = 1;
+
+    if (dx !== 0 || dy !== 0) {
+        if (e) e.preventDefault();
+        if (typeof hpop === 'function') hpop();
+        window.playerWalk = -1;
+        window.playerDo = '';
+        window.CylonGFX.moveCursor(dx, dy);
+    }
+};
+
+let avatarWizardStep = null; // null | 'sex' | 'head' | 'submitting'
+let avatarSubmitTicks = 0;
+
+function needsAvatarSelection() {
+    return Boolean(
+        loggedInUser &&
+        window.playerItem &&
+        !window.playerItem.startsWith('Za') &&
+        !window.playerAvatar
+    );
+}
+
+function checkAvatarRequired() {
+    if (!needsAvatarSelection()) {
+        avatarWizardStep = null;
+        avatarSubmitTicks = 0;
+        return;
+    }
+    if (avatarWizardStep === 'submitting') {
+        avatarSubmitTicks++;
+        if (avatarSubmitTicks < 4) return;
+        avatarWizardStep = null;
+        avatarSubmitTicks = 0;
+    }
+    if (!avatarWizardStep) {
+        showAvatarSexPopup();
+    }
+}
+
+function showAvatarSexPopup() {
+    avatarWizardStep = 'sex';
+    if (typeof setPopForce === 'function') setPopForce('visible');
+    const charDir = (window.CylonGFX && window.CylonGFX.gfxCharDir) ? window.CylonGFX.gfxCharDir : '/c/';
+    const html =
+        `<div style="padding:12px 16px; text-align:center; font-family:var(--font-face,monospace);">` +
+        `<div style="font-weight:bold; margin-bottom:6px;">Select Character</div>` +
+        `<div style="margin-bottom:10px; font-size:12px;">Male or Female?</div>` +
+        `<div style="display:flex; gap:18px; justify-content:center; align-items:flex-end;">` +
+        `<a href="gfx:AVM" style="display:inline-flex; flex-direction:column; align-items:center; text-decoration:none; color:var(--fg-color,#0f0); padding:6px; border:1px solid var(--fg-color,#0f0); border-radius:4px;">` +
+        `<img src="${charDir}B1.png" width="48" height="96" alt="Male" style="image-rendering:pixelated; object-fit:contain;">` +
+        `<span style="margin-top:4px;">Male</span>` +
+        `</a>` +
+        `<a href="gfx:AVF" style="display:inline-flex; flex-direction:column; align-items:center; text-decoration:none; color:var(--fg-color,#0f0); padding:6px; border:1px solid var(--fg-color,#0f0); border-radius:4px;">` +
+        `<img src="${charDir}F1.png" width="48" height="96" alt="Female" style="image-rendering:pixelated; object-fit:contain;">` +
+        `<span style="margin-top:4px;">Female</span>` +
+        `</a>` +
+        `</div>` +
+        `</div>`;
+    if (typeof pop === 'function') pop(html, 'center');
+}
+
+function showAvatarHeadPopup(sex) {
+    avatarWizardStep = 'head';
+    if (typeof setPopForce === 'function') setPopForce('visible');
+    const charDir = (window.CylonGFX && window.CylonGFX.gfxCharDir) ? window.CylonGFX.gfxCharDir : '/c/';
+    const isMale = (sex === 'M');
+    const prefix = isMale ? 'B' : 'F';
+    const body = isMale ? 'D0' : 'H0';
+
+    let headsHtml = '';
+    for (let i = 0; i <= 6; i++) {
+        const head = prefix + i;
+        const avatarCode = head + body;
+        headsHtml +=
+            `<a href="gfx:VA${avatarCode}--" style="display:inline-flex; flex-direction:column; align-items:center; text-decoration:none; padding:4px; border:1px solid var(--fg-color,#0f0); border-radius:4px;">` +
+            `<img src="${charDir}${head}.png" width="40" height="80" alt="${head}" style="image-rendering:pixelated; object-fit:contain;">` +
+            `</a>`;
+    }
+
+    const html =
+        `<div style="padding:12px 14px; text-align:center; font-family:var(--font-face,monospace);">` +
+        `<div style="font-weight:bold; margin-bottom:10px;">Select Head</div>` +
+        `<div style="display:flex; gap:8px; flex-wrap:wrap; justify-content:center; margin-bottom:10px;">` +
+        headsHtml +
+        `</div>` +
+        `<div><a href="gfx:AVB" style="font-size:12px;">Back</a></div>` +
+        `</div>`;
+    if (typeof pop === 'function') pop(html, 'center');
+}
+
+function triggerCylonPress(keyId) {
+    if (window.parent && window.parent !== window && typeof window.parent.press === 'function') {
+        window.parent.press({ id: keyId, toApp: true });
+        return;
+    }
+    const fallbackMap = {
+        up: 'ArrowUp',
+        down: 'ArrowDown',
+        left: 'ArrowLeft',
+        right: 'ArrowRight',
+        enter: 'Enter'
+    };
+    if (typeof window.keydown === 'function' && fallbackMap[keyId]) {
+        window.keydown(fallbackMap[keyId], null);
+    }
+}
+
+function initQuevilleControls() {
+    const stage = document.getElementById('queville-stage');
+
+    if (stage && localStorage.getItem('queville_thumb_side') === 'left') {
+        stage.classList.add('thumb-left');
+    }
+
+    document.querySelectorAll('.qpad-thumb-toggle').forEach((toggleBtn) => {
+        if (!stage) return;
+        toggleBtn.addEventListener('pointerdown', (e) => e.preventDefault());
+        toggleBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const isLeft = stage.classList.toggle('thumb-left');
+            localStorage.setItem('queville_thumb_side', isLeft ? 'left' : 'right');
+        });
+    });
+
+    document.querySelectorAll('#qhud-game .qpad-btn[data-key]').forEach((btn) => {
+        const keyId = btn.getAttribute('data-key');
+        const repeatable = (keyId !== 'enter');
+        let delayTimer = null;
+        let repeatTimer = null;
+        let activePointerId = null;
+
+        const stopPress = (e) => {
+            if (activePointerId !== null && e && e.pointerId !== undefined && e.pointerId !== activePointerId) {
+                return;
+            }
+            activePointerId = null;
+            clearTimeout(delayTimer);
+            clearInterval(repeatTimer);
+            delayTimer = null;
+            repeatTimer = null;
+            btn.classList.remove('active');
+        };
+
+        btn.addEventListener('pointerdown', (e) => {
+            if (e.button !== 0 && e.pointerType === 'mouse') return;
+            e.preventDefault();
+            e.stopPropagation();
+
+            stopPress();
+            activePointerId = e.pointerId;
+            try { btn.setPointerCapture(e.pointerId); } catch (err) {}
+            btn.classList.add('active');
+
+            triggerCylonPress(keyId);
+
+            if (repeatable) {
+                const cycleMs = Math.max(80, (window.CylonGFX && window.CylonGFX.gfxCycle) || 200);
+                delayTimer = setTimeout(() => {
+                    repeatTimer = setInterval(() => triggerCylonPress(keyId), cycleMs);
+                }, 260);
+            }
+        });
+
+        btn.addEventListener('pointerup', stopPress);
+        btn.addEventListener('pointercancel', stopPress);
+        btn.addEventListener('lostpointercapture', stopPress);
+        window.addEventListener('blur', () => stopPress());
+    });
+}
+
+window.renderInventory = function(invenStr) {
+    const grid = document.getElementById('qhud-inven-grid');
+    if (!grid) return;
+
+    const code = (typeof invenStr === 'string') ? invenStr : (window.playerInven || '');
+    const iconDir = (window.CylonGFX && window.CylonGFX.gfxIconDir) ? window.CylonGFX.gfxIconDir : 'i/';
+
+    grid.innerHTML = '';
+
+    let col = 0;
+    while (col < code.length) {
+        const verb = code.substring(col, col + 2);
+        col += 2;
+        if (verb.length < 2) break;
+
+        if (verb === 'Za') {
+            const emptySlot = document.createElement('div');
+            emptySlot.className = 'qhud-inven-slot empty';
+            grid.appendChild(emptySlot);
+            continue;
+        }
+
+        if (verb >= 'Pa') {
+            col += 2;
+            continue;
+        }
+
+        const slot = document.createElement('div');
+        slot.className = 'qhud-inven-slot';
+        slot.title = getItemLabel(verb);
+
+        const img = document.createElement('img');
+        img.src = `${iconDir}${verb}.png`;
+        img.alt = verb;
+        img.onerror = function() { this.style.visibility = 'hidden'; };
+
+        slot.appendChild(img);
+        slot.addEventListener('click', (e) => {
+            e.stopPropagation();
+            window.invdown(`-${verb}${code}`);
+        });
+
+        grid.appendChild(slot);
+    }
+};
+
+function fitDesktopToScreen() {
+    if (!window.CylonGFX) return;
+    const wrapper = document.getElementById('desktop-wrapper');
+    if (!wrapper) return;
+    const cols = window.CylonGFX.gridWide || 14;
+    const rows = window.CylonGFX.gridTall || 10;
+
+    let w, h;
+    if (window.CylonGFX.gfxGridStretch) {
+        const aspect = cols / rows;
+
+        const maxMapW = window.innerWidth * 0.72;
+        h = window.innerHeight * 0.98;
+        w = h * aspect;
+        if (w > maxMapW) {
+            w = maxMapW;
+            h = w / aspect;
+        }
+        w = Math.floor(w);
+        h = Math.floor(h);
+    } else {
+        const tileSize = window.CylonGFX.gfxTileSize || 32;
+        w = cols * tileSize;
+        h = rows * tileSize;
+    }
+
+    wrapper.style.width = w + 'px';
+    wrapper.style.height = h + 'px';
+}
+</script>
+</body>
+</html>

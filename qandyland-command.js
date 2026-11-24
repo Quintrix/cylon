@@ -148,6 +148,8 @@ var HELP_MAIN = [
   '  exam <file>                    Examine file metadata in detail',
   '  search <pattern>               Search across the current drive',
   '  serverstorage [drive]          Inspect raw drive storage & manifest',
+  '  devteam [user|-user]           Manage DevTeam list in /a/playerDevTeam',
+  '  upstash [cmd]                  Manage Upstash player files (type "help upstash")',
   '  krystals [list]                List WebSocket krystal frequencies on server',
   '  players                        List active connected player sessions',
   '  exit                           Shutdown the server (also: shutdown, quit)\n'
@@ -174,6 +176,16 @@ var HELP_KRYSTALS = [
   '  krystals list                  List public WebSocket krystal frequencies\n'
 ].join('\n');
 
+var HELP_UPSTASH = [
+  'Upstash Player Server Help (requires CWD on a .gfx drive):\n',
+  '  upstash                        List all player files',
+  '  upstash list [pattern]         List player files (e.g. upstash list j*)',
+  '  upstash view <player>          View a player file',
+  '  upstash ban <player> [dur]     Ban player (e.g. 30m, 12h, 7d, 0=unban, omit=perm)',
+  '  upstash mute <player> [dur]    Mute player (e.g. 10m, 2h, 0=unmute, omit=perm)',
+  '  upstash del <player> -y        Delete a player file from Upstash\n'
+].join('\n');
+
 // ── Command Executor ──────────────────────────────────────────────────────────
 
 function createExecutor(opts) {
@@ -182,6 +194,7 @@ function createExecutor(opts) {
   var krystals   = opts.krystals || null;
   var getPlayers = opts.getPlayers || null;
   var shutdown   = opts.shutdown || function () { process.exit(0); };
+  var upstash = opts.upstash || null;
 
   if (!dos) throw new Error('qandyland-command: dos dependency is required');
 
@@ -255,6 +268,7 @@ function createExecutor(opts) {
         case 'doshelp':
           if (args[0] === 'mount') return { handled: true, ok: true, output: HELP_MOUNT };
           if (args[0] === 'krystals' || args[0] === 'krystal') return { handled: true, ok: true, output: HELP_KRYSTALS };
+          if (args[0] === 'upstash') return { handled: true, ok: true, output: HELP_UPSTASH };
           return { handled: true, ok: true, output: HELP_MAIN };
 
         case 'mount': {
@@ -727,6 +741,208 @@ function createExecutor(opts) {
             ]);
           });
           return { handled: true, ok: true, output: table(pRows) };
+        }
+
+        case 'devteam': {
+          var dtDrive = null;
+          if (args[0] && DRIVE_TOKEN_RE.test(args[0])) {
+            dtDrive = dos.resolveDriveName(args.shift());
+            if (!dtDrive) throw new Error('drive not mounted');
+          } else {
+            var dtPwd = dos.pwd();
+            if (dtPwd === '(no drive)') throw new Error('no drive mounted');
+            dtDrive = dtPwd.substring(0, dtPwd.indexOf(':'));
+          }
+
+          var dtDriveObj = dos.getDrive(dtDrive);
+          if (!dtDriveObj) throw new Error('drive not mounted: ' + dtDrive);
+
+          if (!dos.dirExists(dtDrive, 'a')) {
+            return {
+              handled: true,
+              ok: false,
+              output: 'Error: /a/ directory does not exist on ' + dtDrive + ':/ (devteam not authorized).'
+            };
+          }
+
+          if (dtDriveObj.readOnly) {
+            return {
+              handled: true,
+              ok: false,
+              output: 'Error: drive ' + dtDrive + ':/ is read-only (ROM mode).'
+            };
+          }
+
+          var dtLoad = dos.fileLoad(dtDrive, '/', 'a/playerDevTeam', 'console');
+          var dtMembers = [];
+          if (dtLoad.success && dtLoad.content) {
+            dtMembers = dtLoad.content
+              .split(/\r?\n/)
+              .map(function (s) { return s.trim().toLowerCase(); })
+              .filter(Boolean);
+          }
+
+          // Bare `devteam` -> list current members
+          if (!args.length) {
+            if (!dtMembers.length) {
+              return { handled: true, ok: true, output: '(no devteam members on ' + dtDrive + ':/)' };
+            }
+            return {
+              handled: true,
+              ok: true,
+              output: 'DevTeam (' + dtDrive + ':/):\n  ' + dtMembers.join('\n  ')
+            };
+          }
+
+          var dtArg = args[0].trim();
+
+          // `devteam -<username>` -> remove member
+          if (dtArg.charAt(0) === '-') {
+            var remUser = dtArg.substring(1).trim().toLowerCase();
+            if (!remUser) {
+              return { handled: true, ok: false, output: usage('devteam [drive:] <username | -username>') };
+            }
+            var remIdx = dtMembers.indexOf(remUser);
+            if (remIdx === -1) {
+              return { handled: true, ok: false, output: 'User "' + remUser + '" is not on the devteam.' };
+            }
+            dtMembers.splice(remIdx, 1);
+            if (dtMembers.length === 0) {
+              dos.fileDelete(dtDrive, '/', 'a/playerDevTeam', 'console');
+            } else {
+              var remSave = dos.fileSave(dtDrive, '/', 'a/playerDevTeam', dtMembers.join('\n') + '\n', 'console', 'console');
+              if (!remSave.success) throw new Error(remSave.error);
+            }
+            return {
+              handled: true,
+              ok: true,
+              output: 'Removed "' + remUser + '" from devteam on ' + dtDrive + ':/'
+            };
+          }
+
+          // `devteam <username>` -> add member
+          if (!/^[A-Za-z0-9]{3,15}$/.test(dtArg) || /^guest/i.test(dtArg)) {
+            return {
+              handled: true,
+              ok: false,
+              output: 'Error: invalid username "' + dtArg + '" (3-15 alphanumeric chars, cannot start with guest).'
+            };
+          }
+          var addUser = dtArg.toLowerCase();
+          if (dtMembers.indexOf(addUser) !== -1) {
+            return { handled: true, ok: true, output: 'User "' + addUser + '" is already on the devteam.' };
+          }
+          dtMembers.push(addUser);
+          var addSave = dos.fileSave(dtDrive, '/', 'a/playerDevTeam', dtMembers.join('\n') + '\n', 'console', 'console');
+          if (!addSave.success) throw new Error(addSave.error);
+
+          var warnNote = '';
+          if (!dos.fileExists(dtDrive, '/', 'u/' + addUser).exists) {
+            warnNote = ' (note: user account not yet registered in u/)';
+          }
+          return {
+            handled: true,
+            ok: true,
+            output: 'Added "' + addUser + '" to devteam on ' + dtDrive + ':/' + warnNote
+          };
+        }
+
+        case 'upstash': {
+          if (!upstash) {
+            return { handled: true, ok: false, output: 'Error: Upstash module not attached.' };
+          }
+          if (!upstash.isConfigured()) {
+            return { handled: true, ok: false, output: 'Error: Upstash is not configured (.env missing UPSTASH_REDIS_REST_URL / UPSTASH_REDIS_REST_TOKEN).' };
+          }
+
+          var uPwd = dos.pwd();
+          if (uPwd === '(no drive)') {
+            return { handled: true, ok: false, output: 'Change directory to a .gfx drive to access user files.' };
+          }
+          var uDrive = uPwd.substring(0, uPwd.indexOf(':'));
+          var uDriveObj = dos.getDrive(uDrive);
+          var isGfx = uDriveObj && ((uDriveObj.source && /\.gfx$/i.test(uDriveObj.source)) || dos.dirExists(uDrive, 'w'));
+          if (!isGfx) {
+            return { handled: true, ok: false, output: 'Change directory to a .gfx drive to access user files.' };
+          }
+          if (uDriveObj.readOnly) {
+            return { handled: true, ok: false, output: 'Error: drive ' + uDrive + ':/ is read-only (ROM mode).' };
+          }
+          if (!upstash.getNamespace(uDrive)) {
+            return { handled: true, ok: false, output: 'Error: Upstash is not enabled on ' + uDrive + ':/ (missing or disabled a/gfxUpstash).' };
+          }
+
+          var sub = (args[0] || 'list').toLowerCase();
+
+          if (sub === 'list' || sub === 'ls') {
+            var pat = args[1] || '*';
+            var lRes = await upstash.list(uDrive, pat);
+            if (!lRes.ok) return { handled: true, ok: false, output: 'Error: ' + lRes.error };
+            if (!lRes.names.length) {
+              return { handled: true, ok: true, output: '(no player files matching "' + pat + '" in ' + lRes.gfx + ')' };
+            }
+            return {
+              handled: true,
+              ok: true,
+              output: 'Players (' + lRes.gfx + ', ' + lRes.names.length + '):\n  ' + lRes.names.join('\n  ')
+            };
+          }
+
+          if (sub === 'view') {
+            if (!args[1]) return { handled: true, ok: true, output: usage('upstash view <player>') };
+            var vRes = await upstash.view(uDrive, args[1]);
+            if (!vRes.ok) return { handled: true, ok: false, output: 'Error: ' + vRes.error };
+            var rec = vRes.record;
+            var statusDisp = rec.status || 'player';
+            if (vRes.statusInfo && vRes.statusInfo.expired) {
+              statusDisp += ' (expired -> reverts to player on next login)';
+            }
+            var lines = [
+              'Player File (' + vRes.gfx + '):',
+              '  Username:   ' + sanitizeForTerminal(rec.username),
+              '  Password:   ' + (rec.password ? '[hashed]' : '(none)'),
+              '  Status:     ' + sanitizeForTerminal(statusDisp),
+              '  Server:     ' + (rec.server ? sanitizeForTerminal(rec.server) : '(offline)'),
+              '  Location:   sector ' + sanitizeForTerminal(rec.sector) + ', z ' + sanitizeForTerminal(rec.z),
+              '  Item/Avat:  ' + sanitizeForTerminal(rec.item || '') + ' / ' + sanitizeForTerminal(rec.avatar || '(none)'),
+              '  Created:    ' + _formatTimestampHuman(rec.created),
+              '  Last Login: ' + _formatTimestampHuman(rec.lastLogin),
+              '  Inventory:  ' + sanitizeForTerminal(rec.inventory || '')
+            ];
+            return { handled: true, ok: true, output: lines.join('\n') };
+          }
+
+          if (sub === 'ban' || sub === 'mute') {
+            if (!args[1]) return { handled: true, ok: true, output: usage('upstash ' + sub + ' <player> [duration]') };
+            var sRes = await upstash.setStatus(uDrive, args[1], sub, args[2]);
+            if (!sRes.ok) return { handled: true, ok: false, output: 'Error: ' + sRes.error };
+            var extra = sRes.kicked ? ' (kicked active session)' : '';
+            return {
+              handled: true,
+              ok: true,
+              output: 'Updated ' + sRes.username + ' status -> ' + sRes.status + extra
+            };
+          }
+
+          if (sub === 'del' || sub === 'delete' || sub === 'rm') {
+            if (!args[1]) return { handled: true, ok: true, output: usage('upstash del <player> -y') };
+            if (!flags.yes) {
+              return {
+                handled: true,
+                ok: true,
+                output: 'This will permanently delete player "' + args[1] + '" from Upstash.\nRe-run to confirm: upstash del ' + args[1] + ' -y'
+              };
+            }
+            var dRes = await upstash.del(uDrive, args[1]);
+            if (!dRes.ok) return { handled: true, ok: false, output: 'Error: ' + dRes.error };
+            return {
+              handled: true,
+              ok: true,
+              output: 'Deleted player "' + dRes.username + '" from Upstash' + (dRes.kicked ? ' (kicked active session)' : '') + '.'
+            };
+          }
+
+          return { handled: true, ok: true, output: HELP_UPSTASH };
         }
 
         case 'exit':

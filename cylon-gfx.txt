@@ -161,8 +161,10 @@ ________________________________________________________________________________
 
        Va Va$$-- avatar: if the player has been assigned a unique player id, then set the
                  player-item's avatar to $$ until -- (ie: VaB0D0La-- = B0D0La)
+                 XnVa has client popup join menu
                  
        Vb
+       
        Vc Vc     city: enters city 
 
        Vd Vd$$   drop: if player has $$ drop it (remove the if 'not drop' then get $$) 
@@ -175,7 +177,7 @@ ________________________________________________________________________________
                  player file, change the Za to the $$ item and remove the item from the map
                  sector directory
                  
-       Vh Vh%%--
+       Vh Vh%%-- Assign text string %% to the object
        
        Vi Vi     inventory - outputs a server plug with the player item's inventory file.
 
@@ -192,7 +194,9 @@ ________________________________________________________________________________
        Vn Vn     north                     
 
        Vo
-       Vp
+
+       Vp Vp$$   render $$ over head .8 of a second
+
        Vq
        
        Vr Vr$$   remove obj $$ from client's current map rendering (re-spawns on scroll),
@@ -234,7 +238,7 @@ ________________________________________________________________________________
        Xe Xe#### if ## equal to ## (use XnXe for not equal to)
 
        Xf
-       Xg
+       Xg Xg     if guest
        Xh
        
        Xi Xi$$   if item $$ is in inventory close switch (if fails switch opens and code
@@ -252,7 +256,7 @@ ________________________________________________________________________________
        
        Xo
        
-       Xp Xp$$   render $$ over head .8 of a second
+       Xp
        
        Xq
        

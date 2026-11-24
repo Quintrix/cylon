@@ -1,0 +1,641 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Upstash Player Manager</title>
+    <script src="cylon-sdk.js"></script>
+    <style>
+        * { box-sizing: border-box; }
+        html, body {
+            margin: 0; padding: 0; width: 100%; height: 100%;
+            background: var(--bg-color, #000);
+            color: var(--fg-color, #0f0);
+            font-family: var(--font-face, monospace);
+            font-size: 13px;
+            overflow: hidden;
+        }
+        #app {
+            display: flex; flex-direction: column;
+            width: 100%; height: 100%; padding: 8px; gap: 8px;
+        }
+        .panel {
+            background: var(--menu-bg, #111);
+            border: 1px solid var(--sel-bg, #333);
+            border-radius: 4px; padding: 8px;
+        }
+        .row {
+            display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+        }
+        .col {
+            display: flex; flex-direction: column; gap: 6px;
+        }
+        input, select, textarea {
+            background: var(--input-bg, #000);
+            color: var(--input-fg, #0f0);
+            border: 1px solid var(--fg-color, #0f0);
+            border-radius: 3px;
+            padding: 4px 6px;
+            font-family: inherit;
+            font-size: 12px;
+        }
+        button {
+            background: var(--key-bg, #222);
+            color: var(--key-fg, #fff);
+            border: 1px solid var(--fg-color, #0f0);
+            border-radius: 3px;
+            padding: 4px 9px;
+            font-family: inherit;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: var(--sel-bg, #333);
+            color: var(--sel-fg, #0f0);
+        }
+        button.danger {
+            border-color: #ff5555;
+            color: #ff8888;
+        }
+        button.warn {
+            border-color: #ffbb33;
+            color: #ffdd77;
+        }
+        #msgBar {
+            font-size: 12px; min-height: 16px;
+            color: var(--sel-fg, #0f0);
+        }
+        #msgBar.err { color: #ff6666; }
+
+        #workspace {
+            display: none;
+            flex: 1 1 0; min-height: 0;
+            gap: 8px;
+        }
+        #workspace.active { display: flex; }
+
+        #listPane {
+            flex: 1 1 52%; min-width: 0; min-height: 0;
+            display: flex; flex-direction: column; gap: 6px;
+        }
+        #tableWrap {
+            flex: 1 1 0; min-height: 0; overflow: auto;
+            border: 1px solid var(--sel-bg, #333);
+            background: var(--bg-color, #000);
+        }
+        table {
+            width: 100%; border-collapse: collapse; font-size: 12px;
+        }
+        th, td {
+            text-align: left; padding: 5px 6px;
+            border-bottom: 1px solid var(--sel-bg, #222);
+            white-space: nowrap;
+        }
+        th {
+            position: sticky; top: 0;
+            background: var(--menu-bg, #111);
+            color: var(--menu-fg, #aaa);
+            z-index: 2;
+        }
+        tr.player-row { cursor: pointer; }
+        tr.player-row:hover, tr.player-row.selected {
+            background: var(--sel-bg, #333);
+            color: var(--sel-fg, #0f0);
+        }
+        .badge {
+            display: inline-block; padding: 1px 5px; border-radius: 3px;
+            font-size: 11px; border: 1px solid currentColor;
+        }
+        .b-ok { color: #55ff55; }
+        .b-ban { color: #ff5555; }
+        .b-mute { color: #ffbb33; }
+        .b-info { color: #66ccff; }
+        .b-corrupt { color: #ff55ff; font-weight: bold; }
+
+        #detailPane {
+            flex: 1 1 48%; min-width: 260px; min-height: 0;
+            overflow-y: auto; display: flex; flex-direction: column; gap: 8px;
+        }
+        .field-grid {
+            display: grid;
+            grid-template-columns: 92px 1fr;
+            gap: 5px 8px;
+            align-items: center;
+        }
+        .field-label {
+            color: var(--menu-fg, #aaa);
+            font-size: 11px;
+        }
+        .section-title {
+            font-weight: bold;
+            border-bottom: 1px solid var(--sel-bg, #333);
+            padding-bottom: 3px;
+            margin-top: 2px;
+        }
+        @media (max-width: 720px) {
+            #workspace.active { flex-direction: column; }
+            #detailPane { min-width: 0; flex: 1 1 55%; }
+            #listPane { flex: 1 1 45%; }
+        }
+    </style>
+</head>
+<body>
+<div id="app">
+    <div class="panel col" id="authPanel">
+        <div class="row" style="justify-content:space-between;">
+            <strong>Upstash Player Manager</strong>
+            <span id="connInfo" style="font-size:11px; opacity:0.8;">Not connected</span>
+        </div>
+        <div class="row" id="loginRow">
+            <select id="serverSelect" title="Qandyland Server"></select>
+            <input id="customServer" type="text" placeholder="Custom qandyland.js URL (optional)" style="flex:1 1 160px;">
+            <input id="driveInput" type="text" value="queville.gfx" placeholder="Drive (e.g. queville.gfx)" style="width:125px;">
+            <input id="userInput" type="text" maxlength="15" placeholder="DevTeam User" style="width:120px;">
+            <input id="passInput" type="password" maxlength="32" placeholder="Password" style="width:120px;">
+            <button type="button" id="btnConnect">Connect</button>
+        </div>
+        <div class="row" id="sessionRow" style="display:none; justify-content:space-between;">
+            <span id="sessionLabel"></span>
+            <div class="row">
+                <button type="button" id="btnRefresh">Refresh List</button>
+                <button type="button" id="btnDisconnect">Disconnect</button>
+            </div>
+        </div>
+        <div id="msgBar">Select a server and log in with a DevTeam account.</div>
+    </div>
+
+    <div id="workspace">
+        <div class="panel" id="listPane">
+            <div class="row">
+                <input id="searchInput" type="text" placeholder="Filter username, status, server..." style="flex:1 1 140px;">
+                <select id="filterSelect">
+                    <option value="all">All</option>
+                    <option value="online">Online</option>
+                    <option value="restricted">Banned / Muted</option>
+                    <option value="corrupt">Corrupted</option>
+                </select>
+                <span id="countLabel" style="font-size:11px;">0 players</span>
+            </div>
+            <div id="tableWrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Player</th>
+                            <th>Status</th>
+                            <th>Server</th>
+                            <th>Loc</th>
+                            <th>Health</th>
+                        </tr>
+                    </thead>
+                    <tbody id="playerTbody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="panel" id="detailPane">
+            <div id="noSelection" style="opacity:0.7; padding:12px;">Select a player to inspect or moderate.</div>
+            <div id="detailContent" class="col" style="display:none;">
+                <div class="row" style="justify-content:space-between;">
+                    <strong id="detTitle" style="font-size:15px;"></strong>
+                    <span id="detOnline"></span>
+                </div>
+
+                <div class="field-grid">
+                    <span class="field-label">User Key</span><span id="detKey"></span>
+                    <span class="field-label">Created</span><span id="detCreated"></span>
+                    <span class="field-label">Server</span><span id="detServer"></span>
+                    <span class="field-label">Health</span><span id="detHealth"></span>
+                </div>
+
+                <div class="section-title">Moderation &amp; Kick</div>
+                <div class="row">
+                    <select id="statusPreset">
+                        <option value="player">player</option>
+                        <option value="mod">mod</option>
+                        <option value="devteam">devteam</option>
+                        <option value="mute">mute</option>
+                        <option value="ban">ban</option>
+                        <option value="custom">custom text...</option>
+                    </select>
+                    <select id="statusDuration">
+                        <option value="perm">Permanent</option>
+                        <option value="15">15 min</option>
+                        <option value="60">1 hour</option>
+                        <option value="1440">24 hours</option>
+                        <option value="10080">7 days</option>
+                    </select>
+                    <input id="statusCustom" type="text" placeholder="Status string (e.g. player, ban 2026...)" style="flex:1 1 150px;">
+                </div>
+                <div class="row">
+                    <button type="button" id="btnSetStatus">Set Status</button>
+                    <button type="button" class="warn" id="btnKick">Kick (Apply Status)</button>
+                    <button type="button" class="warn" id="btnRepair">Repair / Reset Spawn</button>
+                    <button type="button" class="danger" id="btnDelete">Delete Player</button>
+                </div>
+
+                <div class="section-title">State &amp; Data</div>
+                <div class="field-grid">
+                    <span class="field-label">Item</span><input id="edItem" type="text" maxlength="2">
+                    <span class="field-label">Sector</span><input id="edSector" type="text" maxlength="2">
+                    <span class="field-label">Z</span><input id="edZ" type="text" maxlength="4">
+                    <span class="field-label">Avatar</span><input id="edAvatar" type="text" maxlength="64">
+                    <span class="field-label">Inventory</span><input id="edInven" type="text">
+                    <span class="field-label">Forum Posts</span><input id="edPosts" type="number" min="0">
+                    <span class="field-label">Forum Bio</span><input id="edBio" type="text" maxlength="256">
+                </div>
+                <div class="col">
+                    <span class="field-label">World Data (JSON, bounded)</span>
+                    <textarea id="edWorld" rows="3"></textarea>
+                </div>
+                <div class="row">
+                    <button type="button" id="btnSaveFields">Save State Changes</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function () {
+    'use strict';
+
+    const SERVERS = [
+        'http://localhost:8080/qandyland.js',
+        'http://cylon.onrender.com/qandyland.js'
+    ];
+
+    let activeUrl = null;
+    let activeDrive = 'queville.gfx';
+    let adminToken = null;
+    let adminUser = null;
+    let serverId = null;
+    let players = [];
+    let selectedKey = null;
+
+    const $ = (id) => document.getElementById(id);
+
+    function setMsg(text, isErr) {
+        const el = $('msgBar');
+        el.textContent = text || '';
+        el.className = isErr ? 'err' : '';
+    }
+
+    function formatTs(ts) {
+        if (!ts || String(ts).length < 14) return ts || '-';
+        const s = String(ts);
+        return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)} ${s.slice(8, 10)}:${s.slice(10, 12)}:${s.slice(12, 14)}`;
+    }
+
+    function futureTs(minutes) {
+        const d = new Date(Date.now() + minutes * 60000);
+        const p = (n) => String(n).padStart(2, '0');
+        return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+    }
+
+    async function callUpstash(payload) {
+        if (!activeUrl) throw new Error('Not connected to a server.');
+        const body = new URLSearchParams();
+        body.append('c', 'UPSTASH:' + JSON.stringify(payload));
+        body.append('d', activeDrive);
+        if (adminToken) body.append('s', adminToken);
+
+        const res = await fetch(activeUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: body.toString()
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || data.output || 'Request failed');
+        return data;
+    }
+
+    async function connectAndAuth() {
+        const custom = $('customServer').value.trim();
+        const url = custom || $('serverSelect').value;
+        const drive = $('driveInput').value.trim() || 'queville.gfx';
+        const user = $('userInput').value.trim();
+        const pass = $('passInput').value;
+
+        if (!url || !user || !pass) {
+            setMsg('Enter server, drive, username, and password.', true);
+            return;
+        }
+
+        activeUrl = url;
+        activeDrive = drive;
+        adminToken = null;
+        setMsg('Authenticating...');
+
+        try {
+            const res = await callUpstash({ action: 'auth', user, pass });
+            adminToken = res.token;
+            adminUser = res.username;
+            activeDrive = res.drive || drive;
+            serverId = res.serverId || '?';
+            $('passInput').value = '';
+            $('loginRow').style.display = 'none';
+            $('sessionRow').style.display = 'flex';
+            $('workspace').classList.add('active');
+            $('connInfo').textContent = `${serverId} | ${activeDrive}`;
+            $('sessionLabel').textContent = `Logged in as ${adminUser} (DevTeam)`;
+            await loadPlayers();
+        } catch (err) {
+            adminToken = null;
+            setMsg(err.message, true);
+        }
+    }
+
+    function disconnect() {
+        adminToken = null;
+        adminUser = null;
+        players = [];
+        selectedKey = null;
+        $('loginRow').style.display = 'flex';
+        $('sessionRow').style.display = 'none';
+        $('workspace').classList.remove('active');
+        $('connInfo').textContent = 'Not connected';
+        $('playerTbody').innerHTML = '';
+        $('detailContent').style.display = 'none';
+        $('noSelection').style.display = 'block';
+        setMsg('Disconnected.');
+    }
+
+    async function loadPlayers() {
+        setMsg('Scanning Upstash players...');
+        try {
+            const res = await callUpstash({ action: 'list' });
+            players = Array.isArray(res.players) ? res.players : [];
+            renderList();
+            if (selectedKey) {
+                const found = players.find(p => p.userKey === selectedKey);
+                if (found) showDetail(found);
+                else {
+                    selectedKey = null;
+                    $('detailContent').style.display = 'none';
+                    $('noSelection').style.display = 'block';
+                }
+            }
+            setMsg(`Loaded ${players.length} player(s) from ${res.namespace || activeDrive}.`);
+        } catch (err) {
+            setMsg(err.message, true);
+        }
+    }
+
+    function getFilteredPlayers() {
+        const q = $('searchInput').value.trim().toLowerCase();
+        const f = $('filterSelect').value;
+        return players.filter((p) => {
+            if (f === 'online' && !p.server && !p.onlineLocal) return false;
+            if (f === 'restricted' && p.statusKind !== 'ban' && p.statusKind !== 'mute') return false;
+            if (f === 'corrupt' && (!p.issues || p.issues.length === 0)) return false;
+            if (!q) return true;
+            return (p.name || '').toLowerCase().includes(q) ||
+                   (p.userKey || '').toLowerCase().includes(q) ||
+                   (p.status || '').toLowerCase().includes(q) ||
+                   (p.server || '').toLowerCase().includes(q);
+        });
+    }
+
+    function makeStatusBadge(p) {
+        const span = document.createElement('span');
+        span.className = 'badge ';
+        if (p.statusKind === 'ban') span.className += 'b-ban';
+        else if (p.statusKind === 'mute') span.className += 'b-mute';
+        else if (p.status === 'mod' || p.status === 'devteam') span.className += 'b-info';
+        else span.className += 'b-ok';
+        span.textContent = p.status || 'player';
+        return span;
+    }
+
+    function renderList() {
+        const tbody = $('playerTbody');
+        tbody.innerHTML = '';
+        const list = getFilteredPlayers();
+        $('countLabel').textContent = `${list.length} / ${players.length}`;
+
+        list.forEach((p) => {
+            const tr = document.createElement('tr');
+            tr.className = 'player-row' + (p.userKey === selectedKey ? ' selected' : '');
+            tr.onclick = () => {
+                selectedKey = p.userKey;
+                renderList();
+                showDetail(p);
+            };
+
+            const tdName = document.createElement('td');
+            tdName.textContent = p.name || p.userKey;
+
+            const tdStatus = document.createElement('td');
+            tdStatus.appendChild(makeStatusBadge(p));
+
+            const tdSrv = document.createElement('td');
+            tdSrv.textContent = p.server || (p.onlineLocal ? serverId : '-');
+
+            const tdLoc = document.createElement('td');
+            const st = p.state || {};
+            tdLoc.textContent = `${st.sector || '?'}:${st.z || '?'}`;
+
+            const tdHealth = document.createElement('td');
+            if (p.issues && p.issues.length) {
+                const b = document.createElement('span');
+                b.className = 'badge b-corrupt';
+                b.textContent = p.issues.join(',');
+                tdHealth.appendChild(b);
+            } else {
+                tdHealth.textContent = 'OK';
+            }
+
+            tr.appendChild(tdName);
+            tr.appendChild(tdStatus);
+            tr.appendChild(tdSrv);
+            tr.appendChild(tdLoc);
+            tr.appendChild(tdHealth);
+            tbody.appendChild(tr);
+        });
+    }
+
+    function syncStatusInputFromPreset() {
+        const preset = $('statusPreset').value;
+        const dur = $('statusDuration').value;
+        const durDisabled = (preset !== 'ban' && preset !== 'mute');
+        $('statusDuration').disabled = durDisabled;
+
+        if (preset === 'custom') return;
+        if ((preset === 'ban' || preset === 'mute') && dur !== 'perm') {
+            $('statusCustom').value = `${preset} ${futureTs(parseInt(dur, 10))}`;
+        } else {
+            $('statusCustom').value = preset;
+        }
+    }
+
+    function showDetail(p) {
+        $('noSelection').style.display = 'none';
+        $('detailContent').style.display = 'flex';
+        $('detTitle').textContent = p.name || p.userKey;
+        $('detKey').textContent = p.userKey;
+        $('detCreated').textContent = formatTs(p.created);
+        $('detServer').textContent = p.server || 'Offline';
+        $('detOnline').textContent = p.server ? `ONLINE (${p.server})` : 'OFFLINE';
+        $('detHealth').textContent = (p.issues && p.issues.length) ? p.issues.join(', ') : 'OK';
+        $('detHealth').style.color = (p.issues && p.issues.length) ? '#ff55ff' : '';
+
+        const st = p.state || {};
+        $('edItem').value = st.item || '';
+        $('edSector').value = st.sector || '';
+        $('edZ').value = st.z || '';
+        $('edAvatar').value = st.avatar || '';
+        $('edInven').value = st.inven || '';
+        $('edPosts').value = (p.forum && p.forum.posts) ? p.forum.posts : 0;
+        $('edBio').value = (p.forum && p.forum.bio) ? p.forum.bio : '';
+        $('edWorld').value = JSON.stringify(p.world || {}, null, 2);
+
+        const curStatus = p.status || 'player';
+        if (curStatus === 'player' || curStatus === 'mod' || curStatus === 'devteam') {
+            $('statusPreset').value = curStatus;
+            $('statusDuration').disabled = true;
+        } else if (/^ban\b/i.test(curStatus)) {
+            $('statusPreset').value = 'ban';
+            $('statusDuration').disabled = false;
+        } else if (/^mute\b/i.test(curStatus)) {
+            $('statusPreset').value = 'mute';
+            $('statusDuration').disabled = false;
+        } else {
+            $('statusPreset').value = 'custom';
+            $('statusDuration').disabled = true;
+        }
+        $('statusCustom').value = curStatus;
+    }
+
+    async function doSetStatus() {
+        if (!selectedKey) return;
+        const status = $('statusCustom').value.trim() || 'player';
+        try {
+            const res = await callUpstash({ action: 'status', userKey: selectedKey, status });
+            setMsg(res.output || 'Status updated.');
+            await loadPlayers();
+        } catch (err) {
+            setMsg(err.message, true);
+        }
+    }
+
+    async function doKick() {
+        if (!selectedKey) return;
+        const status = $('statusCustom').value.trim();
+        try {
+            const res = await callUpstash({ action: 'kick', userKey: selectedKey, status });
+            setMsg(res.output || 'Player kicked.');
+            await loadPlayers();
+        } catch (err) {
+            setMsg(err.message, true);
+        }
+    }
+
+    async function doRepair() {
+        if (!selectedKey) return;
+        try {
+            const res = await callUpstash({ action: 'repair', userKey: selectedKey });
+            setMsg(res.output || 'Player repaired.');
+            await loadPlayers();
+        } catch (err) {
+            setMsg(err.message, true);
+        }
+    }
+
+    async function doSaveFields() {
+        if (!selectedKey) return;
+        let worldObj = {};
+        const worldRaw = $('edWorld').value.trim();
+        if (worldRaw) {
+            try {
+                worldObj = JSON.parse(worldRaw);
+            } catch (e) {
+                setMsg('Invalid World JSON: ' + e.message, true);
+                return;
+            }
+        }
+        try {
+            const res = await callUpstash({
+                action: 'save',
+                userKey: selectedKey,
+                state: {
+                    item: $('edItem').value.trim(),
+                    sector: $('edSector').value.trim(),
+                    z: $('edZ').value.trim(),
+                    avatar: $('edAvatar').value.trim(),
+                    inven: $('edInven').value.trim()
+                },
+                forum: {
+                    posts: parseInt($('edPosts').value, 10) || 0,
+                    bio: $('edBio').value
+                },
+                world: worldObj
+            });
+            setMsg(res.output || 'Saved.');
+            await loadPlayers();
+        } catch (err) {
+            setMsg(err.message, true);
+        }
+    }
+
+    function doDelete() {
+        if (!selectedKey) return;
+        const target = players.find(p => p.userKey === selectedKey);
+        const label = target ? (target.name || target.userKey) : selectedKey;
+
+        const runDel = async () => {
+            try {
+                if (typeof hpop === 'function') hpop();
+                const res = await callUpstash({ action: 'delete', userKey: selectedKey });
+                setMsg(res.output || 'Deleted.');
+                selectedKey = null;
+                await loadPlayers();
+            } catch (err) {
+                setMsg(err.message, true);
+            }
+        };
+
+        if (typeof pop === 'function') {
+            window._confirmUpstashDelete = runDel;
+            pop(
+                `<div style="padding:12px 16px; text-align:center;">` +
+                `<div style="margin-bottom:8px;">Delete player <strong>${label.replace(/[<>&"]/g, '')}</strong> from Upstash?</div>` +
+                `<button type="button" onclick="(function(){var f=document.querySelector('.page-frame.active');if(f&&f.contentWindow&&f.contentWindow._confirmUpstashDelete)f.contentWindow._confirmUpstashDelete();})()" style="margin-right:8px;color:#ff6666;border-color:#ff6666;">Delete</button>` +
+                `<button type="button" onclick="if(window.hpop)window.hpop();">Cancel</button>` +
+                `</div>`,
+                'center'
+            );
+        } else {
+            runDel();
+        }
+    }
+
+    window.onload = function () {
+        const sel = $('serverSelect');
+        SERVERS.forEach((u) => {
+            const opt = document.createElement('option');
+            opt.value = u;
+            opt.textContent = u;
+            sel.appendChild(opt);
+        });
+
+        $('btnConnect').onclick = connectAndAuth;
+        $('btnDisconnect').onclick = disconnect;
+        $('btnRefresh').onclick = loadPlayers;
+        $('searchInput').oninput = renderList;
+        $('filterSelect').onchange = renderList;
+        $('statusPreset').onchange = syncStatusInputFromPreset;
+        $('statusDuration').onchange = syncStatusInputFromPreset;
+        $('btnSetStatus').onclick = doSetStatus;
+        $('btnKick').onclick = doKick;
+        $('btnRepair').onclick = doRepair;
+        $('btnSaveFields').onclick = doSaveFields;
+        $('btnDelete').onclick = doDelete;
+        $('passInput').addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') { e.preventDefault(); connectAndAuth(); }
+        });
+    };
+})();
+</script>
+</body>
+</html>

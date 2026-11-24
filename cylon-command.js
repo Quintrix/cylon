@@ -731,6 +731,20 @@ async function handleCylonCommand(line) {
             var activeFrame = document.querySelector('.page-frame.active');
             var targetWindow = activeFrame ? activeFrame.contentWindow : window;
 
+            var activeFrame = document.querySelector('.page-frame.active');
+            var targetWindow = activeFrame ? activeFrame.contentWindow : window;
+
+            if ((gfxCmd === 'id' || gfxCmd === 'mod') && (gfxDriveArg || !targetWindow || !targetWindow.remoteQandylandUrl)) {
+                var targetGfx = (targetWindow && targetWindow.CylonGFX && typeof targetWindow.CylonGFX.handleGfxId === 'function')
+                    ? targetWindow.CylonGFX
+                    : (global.CylonGFX && typeof global.CylonGFX.handleGfxId === 'function' ? global.CylonGFX : null);
+                if (!targetGfx) {
+                    return { handled: true, ok: false, output: 'Error: [.4]CylonGFX engine is not available.[.]' };
+                }
+                var idRes = await targetGfx.handleGfxId(gfxData, gfxDriveArg);
+                return { handled: true, ok: idRes.ok, output: idRes.output };
+            }
+
             if (gfxCmd === 'id' || gfxCmd === 'mod') {
                 var targetGfx = (targetWindow && targetWindow.CylonGFX && typeof targetWindow.CylonGFX.handleGfxId === 'function')
                     ? targetWindow.CylonGFX
@@ -1528,6 +1542,17 @@ window.cycleActivePage = function() {
             let maxRight = window.innerWidth;
 
             const inputBar = document.getElementById('input-bar');
+            const kbOverlay = document.getElementById('kb-overlay');
+            const kbOpen = document.body.classList.contains('kb-open') ||
+                           (kbOverlay && kbOverlay.classList.contains('is-open'));
+
+            const barH = inputBar ? inputBar.offsetHeight : 0;
+            const kbH = (kbOpen && kbOverlay) ? kbOverlay.offsetHeight : 0;
+
+            if (barH > 0 || kbH > 0) {
+                maxBottom = Math.min(maxBottom, window.innerHeight - barH - kbH);
+            }
+
             if (inputBar) {
                 const ibRect = inputBar.getBoundingClientRect();
                 if (ibRect.height > 0 && ibRect.top < maxBottom) {
@@ -1535,15 +1560,14 @@ window.cycleActivePage = function() {
                 }
             }
 
-            const kbOverlay = document.getElementById('kb-overlay');
-            if (kbOverlay && kbOverlay.classList.contains('is-open')) {
+            if (kbOpen && kbOverlay) {
                 const kbRect = kbOverlay.getBoundingClientRect();
                 if (kbRect.height > 0 && kbRect.top < maxBottom) {
                     maxBottom = kbRect.top;
                 }
             }
 
-            return { maxRight, maxBottom };
+            return { maxRight, maxBottom: Math.max(0, maxBottom) };
         },
 
         handlePopMessage: function(e) {
@@ -1556,7 +1580,20 @@ window.cycleActivePage = function() {
             const key = this.getContextKeyFromSource(e.source);
 
             if (type === 'CYLON_POP_HTM') {
-                this.callPopHtmForContext(key, e.data.html, e.data.position);
+                let pos = e.data.position;
+                if (pos && typeof pos === 'object' && e.source && e.source !== window && e.source !== window.parent) {
+                    const frames = document.querySelectorAll('iframe');
+                    for (let i = 0; i < frames.length; i++) {
+                        if (frames[i].contentWindow === e.source) {
+                            const fRect = frames[i].getBoundingClientRect();
+                            pos = Object.assign({}, pos);
+                            if (typeof pos.x === 'number') pos.x += fRect.left;
+                            if (typeof pos.y === 'number') pos.y += fRect.top;
+                            break;
+                        }
+                    }
+                }
+                this.callPopHtmForContext(key, e.data.html, pos);
             } else if (type === 'CYLON_POP_HIDE') {
                 this.callHpopForContext(key);
             } else if (type === 'CYLON_POP_WEB') {
@@ -1794,9 +1831,47 @@ window.cycleActivePage = function() {
             }
         },
 
+        getPassthroughTarget: function(clientX, clientY) {
+            const frame = document.querySelector('.page-frame.active');
+            if (!frame || !frame.contentDocument) return null;
+
+            const fRect = frame.getBoundingClientRect();
+            if (clientX < fRect.left || clientX > fRect.right ||
+                clientY < fRect.top || clientY > fRect.bottom) {
+                return null;
+            }
+
+            const target = frame.contentDocument.elementFromPoint(
+                clientX - fRect.left,
+                clientY - fRect.top
+            );
+            if (!target) return null;
+
+            return target.closest('[data-pop-passthrough="true"]');
+        },
+
         getOrCreatePopWrapper: function() {
             let popWrapper = document.getElementById('cylon-pop-wrapper');
             if (!popWrapper) {
+
+                const activePassthrough = new Map();
+                const dismissCandidates = new Set();
+
+                const forwardPointerEvent = (entry, srcEv, typeOverride) => {
+                    const fRect = entry.frame.getBoundingClientRect();
+                    entry.el.dispatchEvent(new PointerEvent(typeOverride || srcEv.type, {
+                        bubbles: true,
+                        cancelable: true,
+                        pointerId: srcEv.pointerId,
+                        pointerType: srcEv.pointerType,
+                        isPrimary: srcEv.isPrimary,
+                        button: srcEv.button,
+                        buttons: srcEv.buttons,
+                        clientX: srcEv.clientX - fRect.left,
+                        clientY: srcEv.clientY - fRect.top
+                    }));
+                };
+
                 popWrapper = document.createElement('div');
                 popWrapper.id = 'cylon-pop-wrapper';
                 popWrapper.style.cssText = `
@@ -1832,13 +1907,39 @@ window.cycleActivePage = function() {
 
                 popWrapper.addEventListener('pointerdown', (ev) => {
                     if (ev.target === popWrapper) {
+                        const pt = this.getPassthroughTarget(ev.clientX, ev.clientY);
+                        if (pt) {
+                            const entry = {
+                                el: pt,
+                                frame: document.querySelector('.page-frame.active')
+                            };
+                            activePassthrough.set(ev.pointerId, entry);
+                            try { popWrapper.setPointerCapture(ev.pointerId); } catch (err) {}
+                            forwardPointerEvent(entry, ev, 'pointerdown');
+                        } else {
+                            dismissCandidates.add(ev.pointerId);
+                        }
                         ev.preventDefault();
                         ev.stopPropagation();
                     }
                 });
 
                 popWrapper.addEventListener('pointerup', (ev) => {
-                    if (ev.target === popWrapper) {
+                    const entry = activePassthrough.get(ev.pointerId);
+                    if (entry) {
+                        activePassthrough.delete(ev.pointerId);
+                        try {
+                            if (popWrapper.hasPointerCapture(ev.pointerId)) {
+                                popWrapper.releasePointerCapture(ev.pointerId);
+                            }
+                        } catch (err) {}
+                        forwardPointerEvent(entry, ev, 'pointerup');
+                        ev.preventDefault();
+                        ev.stopPropagation();
+                        return;
+                    }
+                    const shouldDismiss = dismissCandidates.delete(ev.pointerId);
+                    if (ev.target === popWrapper && shouldDismiss) {
                         if (this.isMenuOpen || window.PopForce !== 'visible') {
                             window.hpop();
                         }
@@ -1846,6 +1947,16 @@ window.cycleActivePage = function() {
                         ev.stopPropagation();
                     }
                 });
+
+                const cancelPassthrough = (ev) => {
+                    dismissCandidates.delete(ev.pointerId);
+                    const entry = activePassthrough.get(ev.pointerId);
+                    if (!entry) return;
+                    activePassthrough.delete(ev.pointerId);
+                    forwardPointerEvent(entry, ev, 'pointercancel');
+                };
+                popWrapper.addEventListener('pointercancel', cancelPassthrough);
+                popWrapper.addEventListener('lostpointercapture', cancelPassthrough);
 
                 let popEl = document.createElement('div');
                 popEl.id = 'cylon-pop';
@@ -1870,10 +1981,7 @@ window.cycleActivePage = function() {
                 });
 
                 popEl.addEventListener('mouseleave', () => {
-                    if (this.isMenuOpen) {
-                        window.hpop();
-                        return;
-                    }
+                    if (this.isMenuOpen) return;
                     if (window.PopUserTouched) {
                         window.PopUpVis = (window.PopForce === 'visible') ? 'visible' : 'hidden';
                         clearTimeout(window.PUV);
@@ -1926,76 +2034,69 @@ window.cycleActivePage = function() {
 
             const bounds = this.getViewportBounds();
 
-            if (pos === 'topleft') {
+                        if (pos === 'topleft') {
                 popEl.style.position = 'absolute';
                 popEl.style.margin = '0';
                 popEl.style.left = '0px';
                 popEl.style.top = '0px';
-            } else if (typeof pos === 'object' && pos.x !== undefined && pos.y !== undefined) {
+            } else if (pos === 'topcenter') {
                 popEl.style.position = 'absolute';
                 popEl.style.margin = '0';
-                popEl.style.left = Math.max(0, pos.x - 12) + 'px';
-                popEl.style.top = Math.max(0, pos.y - 8) + 'px';
+                popEl.style.width = 'max-content';
+                const pxLeft = Math.round(bounds.maxRight / 2);
+                const kbOpen = document.body.classList.contains('kb-open');
+                const pxTop = kbOpen ? Math.round(bounds.maxBottom / 2) : Math.round(bounds.maxBottom * 0.25);
 
-                let r = popEl.getBoundingClientRect();
-                if (r.right > bounds.maxRight - 5) {
-                    popEl.style.left = Math.max(5, bounds.maxRight - r.width - 5) + 'px';
+                popEl.style.left = pxLeft + 'px';
+                popEl.style.top = pxTop + 'px';
+                popEl.style.transform = 'translate(-50%, -50%)';
+
+                const pRect = popEl.getBoundingClientRect();
+                let shiftX = 0, shiftY = 0;
+                if (pRect.left < 5) shiftX = 5 - pRect.left;
+                else if (pRect.right > bounds.maxRight - 5) shiftX = (bounds.maxRight - 5) - pRect.right;
+                if (pRect.top < 5) shiftY = 5 - pRect.top;
+                else if (pRect.bottom > bounds.maxBottom - 5) shiftY = (bounds.maxBottom - 5) - pRect.bottom;
+
+                if (shiftX !== 0 || shiftY !== 0) {
+                    popEl.style.transform = `translate(calc(-50% + ${shiftX}px), calc(-50% + ${shiftY}px))`;
                 }
-                if (r.bottom > bounds.maxBottom - 5) {
-                    popEl.style.top = Math.max(5, bounds.maxBottom - r.height - 5) + 'px';
-                }
-            } else if (pos === 'full') {
-                const screenWrap = document.getElementById('screen-wrapper');
+            } else if (typeof pos === 'object' && (pos.x !== undefined || pos.y !== undefined)) {
                 popEl.style.position = 'absolute';
                 popEl.style.margin = '0';
-                if (screenWrap) {
-                    const rect = screenWrap.getBoundingClientRect();
-                    popEl.style.left = rect.left + 'px';
-                    popEl.style.top = rect.top + 'px';
-                    popEl.style.width = rect.width + 'px';
-                    popEl.style.height = rect.height + 'px';
-                } else {
-                    popEl.style.left = '0px';
-                    popEl.style.top = '0px';
-                    popEl.style.width = '100vw';
-                    popEl.style.height = bounds.maxBottom + 'px';
-                }
-            } else if (targetZ >= 0 && window.CylonGFX) {
-                let cols = window.CylonGFX.gridWide || 8;
-                let rows = window.CylonGFX.gridTall || 4;
 
-                targetZ = Math.max(0, Math.min(targetZ, (cols * rows) - 1));
-
-                let x = targetZ % cols;
-                let y = Math.floor(targetZ / cols);
-
-                let screenWrap = document.getElementById('screen-wrapper');
-                if (screenWrap) {
-                    popEl.style.position = 'absolute';
-                    popEl.style.margin = '0';
-                    let rect = screenWrap.getBoundingClientRect();
-
-                    let tileW = rect.width / cols;
-                    let tileH = rect.height / rows;
-
-                    let pxLeft = rect.left + (x * tileW) + (tileW / 2);
-                    let pxTop = rect.top + (y * tileH) + (tileH / 2);
+                if (pos.center || pos.y === 'topcenter') {
+                    popEl.style.width = 'max-content';
+                    const pxLeft = (typeof pos.x === 'number') ? pos.x : Math.round(bounds.maxRight / 2);
+                    const kbOpen = document.body.classList.contains('kb-open');
+                    const pxTop = (typeof pos.y === 'number')
+                        ? pos.y
+                        : (kbOpen ? Math.round(bounds.maxBottom / 2) : Math.round(bounds.maxBottom * 0.25));
 
                     popEl.style.left = pxLeft + 'px';
                     popEl.style.top = pxTop + 'px';
                     popEl.style.transform = 'translate(-50%, -50%)';
 
-                    let pRect = popEl.getBoundingClientRect();
-                    let shiftX = 0; let shiftY = 0;
-
+                    const pRect = popEl.getBoundingClientRect();
+                    let shiftX = 0, shiftY = 0;
                     if (pRect.left < 5) shiftX = 5 - pRect.left;
                     else if (pRect.right > bounds.maxRight - 5) shiftX = (bounds.maxRight - 5) - pRect.right;
-
                     if (pRect.top < 5) shiftY = 5 - pRect.top;
                     else if (pRect.bottom > bounds.maxBottom - 5) shiftY = (bounds.maxBottom - 5) - pRect.bottom;
 
                     if (shiftX !== 0 || shiftY !== 0) {
                         popEl.style.transform = `translate(calc(-50% + ${shiftX}px), calc(-50% + ${shiftY}px))`;
+                    }
+                } else {
+                    popEl.style.left = Math.max(0, pos.x - 12) + 'px';
+                    popEl.style.top = Math.max(0, pos.y - 8) + 'px';
+
+                    let r = popEl.getBoundingClientRect();
+                    if (r.right > bounds.maxRight - 5) {
+                        popEl.style.left = Math.max(5, bounds.maxRight - r.width - 5) + 'px';
+                    }
+                    if (r.bottom > bounds.maxBottom - 5) {
+                        popEl.style.top = Math.max(5, bounds.maxBottom - r.height - 5) + 'px';
                     }
                 }
             }

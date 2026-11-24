@@ -137,7 +137,8 @@ const PAGES = Object.freeze(new Set([
     'cylon-queville.gfx',
     'cylon-queville.htm',
     'qandyland.js',
-    'qandyland-univac.js'
+    'qandyland-univac.js',
+    'gfx-tileset.htm'
 ]));
 
 // ============================================================================
@@ -327,6 +328,14 @@ window.setOSMode = function(mode, promptText) {
     cursorPos = 0;
     selAnchor = null;
 
+    if (mode !== 'app-edit' && mode !== 'app-textarea') {
+        window.proxyInputInPopup = false;
+        window.proxyInputMask = false;
+        window.proxyInputType = 'text';
+        window.proxyInputMaxLen = null;
+        proxyInputId = null;
+    }
+
     var promptEl = document.getElementById('kb-prompt');
     if (!promptEl) return;
 
@@ -343,36 +352,134 @@ window.setOSMode = function(mode, promptText) {
     if (window.renderInputLine) window.renderInputLine();
 };
 
-window.toggleAppFocus = function() {
+let lastPopFocusedEl = null;
+const POP_FOCUS_SELECTOR = 'input:not([type="hidden"]):not([disabled]), textarea:not([disabled]), select:not([disabled]), button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
+
+function activatePopProxyInput(el) {
+    const rawType = el.tagName === 'INPUT' ? (el.getAttribute('type') || el.type || 'text').toLowerCase() : '';
+    if (el.tagName !== 'TEXTAREA' && !(el.tagName === 'INPUT' && POPUP_PROXY_TYPES.has(rawType))) return false;
+
+    el.setAttribute('inputmode', 'none');
+    if (document.activeElement && document.activeElement !== document.body) {
+        document.activeElement.blur();
+    }
+    window.focus();
+
+    if (!el.id) el.id = 'qandy-pop-input-' + (popAutoIdCounter++);
+
+    if ((osMode === 'app-edit' || osMode === 'app-textarea') && proxyInputId && proxyInputId !== el.id) {
+        window.applyProxyInputToTarget('QANDY_COMMIT_INPUT', proxyInputId, inputBuffer);
+    }
+
+    lastPopFocusedEl = el;
+    window.proxyInputInPopup = true;
+    window.proxyInputType = el.tagName === 'TEXTAREA' ? 'textarea' : rawType;
+    window.proxyInputMask = (rawType === 'password');
+    proxyInputId = el.id;
+    window.proxyInputMaxLen = el.hasAttribute('maxlength') ? parseInt(el.getAttribute('maxlength'), 10) : null;
+
+    const label = el.placeholder || el.title || el.name || el.id;
+    window.setOSMode(
+        el.tagName === 'TEXTAREA' ? 'app-textarea' : 'app-edit',
+        `${label}: `
+    );
+
+    inputBuffer = el.value || "";
+    cursorPos = inputBuffer.length;
+    selAnchor = null;
+
+    window.showFullKeyboard();
+    window.updateOverlayInput();
+    return true;
+}
+
+window.handleTabCycle = function(shiftHeld) {
     if (osMode !== 'app' && osMode !== 'app-cli' && osMode !== 'app-edit' && osMode !== 'app-textarea') return;
-    var activeFrame = document.querySelector('.page-frame.active');
-    
-    if (osMode === 'app' || osMode === 'app-edit' || osMode === 'app-textarea') {
-        // Automatically commit changes to the iframe when switching focus
+    const dir = shiftHeld ? -1 : 1;
+    const activeFrame = document.querySelector('.page-frame.active');
+
+    // Popup focus cycle (when a non-menu popup is open)
+    if (window.popupActive && !(window.CylonPopManager && window.CylonPopManager.isMenuOpen)) {
+        const popRoot = document.getElementById('cylon-pop');
+        const list = popRoot
+            ? Array.from(popRoot.querySelectorAll(POP_FOCUS_SELECTOR)).filter(el => {
+                if (el.readOnly && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) return false;
+                const st = getComputedStyle(el);
+                return st.display !== 'none' && st.visibility !== 'hidden' && el.getClientRects().length > 0;
+            })
+            : [];
+
+        const prevId = (osMode === 'app-edit' || osMode === 'app-textarea') ? proxyInputId : null;
         if (osMode === 'app-edit' || osMode === 'app-textarea') {
-            if (activeFrame) {
-                activeFrame.contentWindow.postMessage({
-                    type: 'QANDY_COMMIT_INPUT',
-                    id: proxyInputId,
-                    value: inputBuffer
-                }, (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
+            window.applyProxyInputToTarget('QANDY_COMMIT_INPUT', proxyInputId, inputBuffer);
+            window.setOSMode('app');
+        }
+
+        if (list.length > 0) {
+            let targetIdx;
+            if (osMode === 'app-cli') {
+                targetIdx = dir === 1 ? 0 : list.length - 1;
+            } else {
+                let curEl = prevId ? (popRoot.querySelector('#' + CSS.escape(prevId))) : null;
+                if (!curEl || !list.includes(curEl)) {
+                    curEl = (document.activeElement && list.includes(document.activeElement))
+                        ? document.activeElement
+                        : lastPopFocusedEl;
+                }
+                const curIdx = curEl ? list.indexOf(curEl) : -1;
+                targetIdx = (curIdx === -1) ? (dir === 1 ? 0 : list.length - 1) : (curIdx + dir);
+            }
+
+            if (targetIdx >= 0 && targetIdx < list.length) {
+                const nextEl = list[targetIdx];
+                if (!activatePopProxyInput(nextEl)) {
+                    lastPopFocusedEl = nextEl;
+                    window.setOSMode('app');
+                    nextEl.focus();
+                }
+                return;
             }
         }
-        
+
+        lastPopFocusedEl = null;
         window.setOSMode('app-cli');
         if (activeFrame) activeFrame.blur();
-        window.focus(); // Pull focus back to OS terminal
-        if (typeof window.hideFullKeyboard === 'function') window.hideFullKeyboard();
-    } else {
-        window.setOSMode('app');
-        if (activeFrame) activeFrame.focus(); // Push focus to iframe
+        window.focus();
+        return;
     }
+
+    if (!activeFrame || !activeFrame.contentWindow) return;
+    const origin = (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*");
+
+    if (osMode === 'app-cli') {
+        activeFrame.contentWindow.postMessage(
+            { type: 'QANDY_TAB_STEP', direction: dir, fromEdge: true },
+            origin
+        );
+        return;
+    }
+
+    const prevId = (osMode === 'app-edit' || osMode === 'app-textarea') ? proxyInputId : null;
+    if (osMode === 'app-edit' || osMode === 'app-textarea') {
+        window.applyProxyInputToTarget('QANDY_COMMIT_INPUT', proxyInputId, inputBuffer);
+        window.setOSMode('app');
+    }
+
+    activeFrame.contentWindow.postMessage(
+        { type: 'QANDY_TAB_STEP', direction: dir, fromEdge: false, currentId: prevId },
+        origin
+    );
+};
+
+window.toggleAppFocus = function() {
+    window.handleTabCycle(false);
 };
 
 window.proxyInputInPopup = false;
 window.proxyInputMask = false;
+window.proxyInputType = 'text';
 
-window.applyProxyInputToTarget = function(type, id, value) {
+window.applyProxyInputToTarget = function(type, id, value, extra) {
     if (!id) return;
     if (window.proxyInputInPopup) {
         var popRoot = document.getElementById('cylon-pop');
@@ -381,60 +488,40 @@ window.applyProxyInputToTarget = function(type, id, value) {
             el.value = value;
             el.dispatchEvent(new Event('input', { bubbles: true }));
             if (type === 'QANDY_COMMIT_INPUT') {
+                lastPopFocusedEl = el;
                 el.dispatchEvent(new Event('change', { bubbles: true }));
                 el.blur();
+                if (extra && extra.submit) {
+                    el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }));
+                }
             }
         }
         return;
     }
     var activeFrame = document.querySelector('.page-frame.active');
     if (activeFrame && activeFrame.contentWindow) {
-        activeFrame.contentWindow.postMessage({
+        activeFrame.contentWindow.postMessage(Object.assign({
             type: type,
             id: id,
             value: value
-        }, (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
+        }, extra || {}), (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
     }
 };
 
 let popAutoIdCounter = 0;
 
+const POPUP_PROXY_TYPES = new Set(['text', 'password', 'email', 'tel', 'url', 'search', 'number']);
+
 function handlePopInputTap(e) {
     const el = e.target;
-    if (!el || !el.closest || !el.closest('#cylon-pop')) return;
-    if (el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && (el.type === 'text' || el.type === 'password'))) {
+    if (!el || !el.closest || !el.closest('#cylon-pop') || el.disabled || el.readOnly) return;
+    const rawType = el.tagName === 'INPUT' ? (el.getAttribute('type') || el.type || 'text').toLowerCase() : '';
+    if (el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && POPUP_PROXY_TYPES.has(rawType))) {
         el.setAttribute('inputmode', 'none');
 
         if (e.type === 'pointerdown' || (e.type === 'mousedown' && e.pointerType === undefined) || e.type === 'touchstart') {
             e.preventDefault();
-            if (document.activeElement && document.activeElement !== document.body) {
-                document.activeElement.blur();
-            }
-            window.focus();
-
-            if (!el.id) el.id = 'qandy-pop-input-' + (popAutoIdCounter++);
-
-            if ((osMode === 'app-edit' || osMode === 'app-textarea') && proxyInputId && proxyInputId !== el.id) {
-                window.applyProxyInputToTarget('QANDY_COMMIT_INPUT', proxyInputId, inputBuffer);
-            }
-
-            window.proxyInputInPopup = true;
-            window.proxyInputMask = (el.type === 'password');
-            proxyInputId = el.id;
-            window.proxyInputMaxLen = el.hasAttribute('maxlength') ? parseInt(el.getAttribute('maxlength'), 10) : null;
-
-            window.setOSMode(
-                el.tagName === 'TEXTAREA' ? 'app-textarea' : 'app-edit',
-                `${el.id}: `
-            );
-
-            inputBuffer = el.value || "";
-            cursorPos = inputBuffer.length;
-            selAnchor = null;
-
-            window.showFullKeyboard();
-            window.updateOverlayInput();
-            // Do not call panToRect: keyboard covers the popup without moving it
+            activatePopProxyInput(el);
         }
     }
 }
@@ -508,18 +595,28 @@ window.addEventListener('message', function(e) {
     let isKnownFrame = Array.from(document.querySelectorAll('iframe')).some(f => f.contentWindow === e.source);
     if (e.source !== window && e.source !== window.parent && !isKnownFrame) return;
     // ------------------------------------------------------
-    
+
     if (e.data.type === 'QANDY_REQ_INPUT') {
+        if ((osMode === 'app-edit' || osMode === 'app-textarea') && proxyInputId && proxyInputId !== e.data.id) {
+            window.applyProxyInputToTarget('QANDY_COMMIT_INPUT', proxyInputId, inputBuffer);
+        }
+
+        window.proxyInputInPopup = false;
+        window.proxyInputType = e.data.inputType || (e.data.isMultiline ? 'textarea' : 'text');
+        window.proxyInputMask = !!e.data.mask || (window.proxyInputType === 'password');
+
+        const promptLabel = e.data.label || e.data.id;
         window.setOSMode(
             e.data.isMultiline ? 'app-textarea' : 'app-edit',
-            `${e.data.id}: `
+            `${promptLabel}: `
         );
         proxyInputId = e.data.id;
         window.proxyInputMaxLen = e.data.maxLength || null;
-        
-        inputBuffer = e.data.value || ""; 
+
+        inputBuffer = e.data.value || "";
         cursorPos = inputBuffer.length;
-        
+        selAnchor = null;
+
         window.showFullKeyboard();
         window.updateOverlayInput();
 
@@ -534,9 +631,10 @@ window.addEventListener('message', function(e) {
     } else if (e.data.type === 'QANDY_PASTE') {
         if (window.pasteText) window.pasteText(e.data.text);
     } else if (e.data.type === 'QANDY_APP_CLICKED') {
-        // If the user clicks the app's visual layer, abort the hybrid CLI mode
         if (osMode === 'app-cli' || osMode === 'app-edit' || osMode === 'app-textarea') {
-            
+            if (osMode === 'app-edit' || osMode === 'app-textarea') {
+                window.applyProxyInputToTarget('QANDY_COMMIT_INPUT', proxyInputId, inputBuffer);
+            }
             // Automatically commit data back to the iframe on click-away
             if (osMode === 'app-edit' || osMode === 'app-textarea') {
                 var activeFrame = document.querySelector('.page-frame.active');
@@ -552,10 +650,21 @@ window.addEventListener('message', function(e) {
             window.setOSMode('app');
             if (typeof window.hideFullKeyboard === 'function') window.hideFullKeyboard();
         }
+    } else if (e.data.type === 'QANDY_TAB') {
+        if (window.press) window.press({ id: 'tab', shift: !!e.data.shift });
+    } else if (e.data.type === 'QANDY_TAB_TO_CLI') {
+        window.setOSMode('app-cli');
+        var activeFrame = document.querySelector('.page-frame.active');
+        if (activeFrame) activeFrame.blur();
+        window.focus();
+    } else if (e.data.type === 'QANDY_TAB_FOCUS_APP') {
+        window.setOSMode('app');
+        var activeFrame = document.querySelector('.page-frame.active');
+        if (activeFrame && document.activeElement !== activeFrame) activeFrame.focus();
     } else if (e.data.type === 'QANDY_PREFILL') {
         // Route SDK prefill requests to the terminal
         if (window.prefillTerminal) window.prefillTerminal(e.data.cmd);
-    }
+    } 
 });
 
 window.addEventListener('copy', function(e) {
@@ -605,26 +714,32 @@ window.addEventListener('paste', function(e) {
 });
 
 // Boot is just the commands a user could type themselves.
+// Boot is just the commands a user could type themselves.
 async function bootMount() {
     var dos = window.CylonDOS;
     var run = function (cmd) { return window.injectAndExecute(cmd, { boot: true }); };
-    
-    var dbs = window.indexedDB && window.indexedDB.databases ? await window.indexedDB.databases() : [];
-    var dbExists = dbs.some(function(db) { return db.name === 'CylonDOS'; });
+    var bootParam = (new URLSearchParams(window.location.search).get('boot') || '').toLowerCase();
 
-    // 1. Installed: boot from the IndexedDB partition
-    if (dbExists) {
-        var parts = await dos.partitions();
-        var boot = parts.filter(function (p) { return p.boot; })[0] ||
-                   parts.filter(function (p) { return p.name === 'cylon'; })[0];
+    // 1. Installed: boot from the IndexedDB partition (unless ?boot=ram is set)
+    if (bootParam !== 'ram') {
+        var dbs = window.indexedDB && window.indexedDB.databases ? await window.indexedDB.databases() : [];
+        var dbExists = dbs.some(function(db) { return db.name === 'CylonDOS'; });
 
-        if (boot && await run('mount ' + boot.name + ' idb')) {
-            await run(boot.name + ':');
-            return;
+        if (dbExists) {
+            var parts = await dos.partitions();
+            var boot = parts.filter(function (p) { return p.boot; })[0] ||
+                       parts.filter(function (p) { return p.name === 'cylon'; })[0];
+
+            if (boot && await run('mount ' + boot.name + ' idb')) {
+                await run(boot.name + ':');
+                return;
+            }
         }
+    } else {
+        printDOS("[.2]Boot override (?boot=ram): bypassing IndexedDB.[.]\n");
     }
 
-    // 2. Not installed: attempt to boot from the cylon.json image into RAM
+    // 2. Not installed (or ?boot=ram): attempt to boot from the cylon.json image into RAM
     printDOS("[.2]It can take up to 1 minute to mount the cylon.json drive...[.]\n");
     if (await run('mount cylon.json ram cylon')) {
         await run('cylon:');
@@ -636,7 +751,6 @@ async function bootMount() {
         printDOS("[.2]Booted to RAM drive (cylon.json not found).\nInput 'export cylon.json' to download your work later[.]\n");
     }
 }
-
 // ============================================================================
 // SYSTEM BOOT - load cylon.cfg
 // ============================================================================
@@ -705,12 +819,16 @@ window.applyThemeFromAlpha = async function() {
         BackgroundColor: vars.themeBackground, ForegroundColor: vars.themeForeground,
         Font: vars.themeFont, MenuBgColor: vars.themeMenuBG, MenuFgColor: vars.themeMenuFG,
         SelectBgColor: vars.themeSelectBG, SelectFgColor: vars.themeSelectFG,
+        InputFgColor: vars.themeInputFG, InputBgColor: vars.themeInputBG,
         KeyBgColor: vars.themeKeyUpBG, KeyFgColor: vars.themeKeyUpFG,
         KeyHlBgColor: vars.themeKeyDownBG, KeyHlFgColor: vars.themeKeyDownFG,
         CaseBgColor: vars.themeCaseBG, CaseFgColor: vars.themeCaseFG,
-        // Expose to apps
-        TextFg0: vars.themeTextFg0, TextFg1: vars.themeTextFg1, TextFg2: vars.themeTextFg2, TextFg3: vars.themeTextFg3, TextFg4: vars.themeTextFg4,
-        TextBg5: vars.themeTextBg5, TextBg6: vars.themeTextBg6, TextBg7: vars.themeTextBg7, TextBg8: vars.themeTextBg8, TextBg9: vars.themeTextBg9
+        TextFg0: vars.themeTextFg0 || vars.themeForeground,
+        TextFg1: vars.themeTextFg1, TextFg2: vars.themeTextFg2, TextFg3: vars.themeTextFg3, TextFg4: vars.themeTextFg4,
+        TextBg5: vars.themeTextBg5 || vars.themeBackground,
+        TextBg6: vars.themeTextBg6, TextBg7: vars.themeTextBg7, TextBg8: vars.themeTextBg8, TextBg9: vars.themeTextBg9,
+        HtmlLink: vars.htmlLink, HtmlVisited: vars.htmlVisited,
+        HtmlHover: vars.htmlHover, HtmlActive: vars.htmlActive
     };
 
     let root = document.documentElement;

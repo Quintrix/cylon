@@ -65,8 +65,8 @@ window.dosExit = function() {
     }
 };
 
-window.sleep = function(ms) { 
-    return new Promise(resolve => setTimeout(resolve, ms)); 
+window.sleep = function(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
 };
 
 window.beep = function(freq, dur, vol) {
@@ -79,8 +79,11 @@ window.beep = function(freq, dur, vol) {
 document.addEventListener('keydown', function(e) {
     if (e.key === 'Tab') {
         e.preventDefault();
-        if (window.parent && window.parent !== window && typeof window.parent.toggleAppFocus === 'function') {
-            window.parent.toggleAppFocus();
+        if (window.parent && window.parent !== window) {
+            window.parent.postMessage(
+                { type: 'QANDY_TAB', shift: !!e.shiftKey },
+                (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*")
+            );
         }
         return;
     }
@@ -93,19 +96,16 @@ document.addEventListener('keydown', function(e) {
 window.CylonCommand = async function(cmdStr) {
     let trimmed = cmdStr.trim();
     let lower = trimmed.toLowerCase();
-    
-    // Prevent race conditions by executing GFX commands locally if the engine is present.
-    // This stops background apps (like the desktop) from accidentally hijacking the
-    // active foreground app when they boot up and request a server connection.
+
     if (lower === 'gfx' || lower.startsWith('gfx ')) {
         if (window.CylonGFX && typeof window.CylonGFX.handleGfxCommand === 'function') {
             let argsStr = trimmed.substring(3).trim();
             let spaceIdx = argsStr.indexOf(' ');
             let gfxCmd = spaceIdx > -1 ? argsStr.substring(0, spaceIdx) : argsStr;
             let gfxData = spaceIdx > -1 ? argsStr.substring(spaceIdx + 1) : "";
-            
+
             if (!gfxCmd) gfxCmd = "refresh";
-            
+
             await window.CylonGFX.handleGfxCommand(gfxCmd, gfxData);
             return true;
         }
@@ -119,16 +119,13 @@ window.CylonCommand = async function(cmdStr) {
 };
 
 // 6. Macro / Batch Script Execution
-// Evaluates a multi-line string of commands, executing each sequentially.
 window.CylonScript = async function(scriptText) {
     if (typeof scriptText !== 'string') return false;
-    
-    // Support both literal newlines and escaped \n strings
+
     let lines = scriptText.replace(/\\n/g, '\n').split('\n');
-    
+
     for (let cmd of lines) {
         cmd = cmd.trim();
-        // Ignore empty lines and comments (// or ;)
         if (cmd && !cmd.startsWith('//') && !cmd.startsWith(';')) {
             await window.CylonCommand(cmd);
         }
@@ -143,11 +140,77 @@ window.CylonPrefill = function(cmdStr) {
 };
 
 // ========================================================================
-// 1. INPUT INTERCEPTION (Keyboard & Textarea handling)
+// 1. INPUT INTERCEPTION (Extensible HTML Input & Textarea Registry)
 // ========================================================================
+const INPUT_TYPES = {
+    // Text-entry types routed through Cylon's proxy keyboard/taskbar
+    text:             { handler: 'proxy',  mask: false, multiline: false },
+    password:         { handler: 'proxy',  mask: true,  multiline: false },
+    email:            { handler: 'proxy',  mask: false, multiline: false },
+    tel:              { handler: 'proxy',  mask: false, multiline: false },
+    url:              { handler: 'proxy',  mask: false, multiline: false },
+    search:           { handler: 'proxy',  mask: false, multiline: false },
+    number:           { handler: 'proxy',  mask: false, multiline: false },
+
+    // Date/time & specialized pickers (kept native until custom Cylon pickers are added)
+    date:             { handler: 'native' },
+    time:             { handler: 'native' },
+    'datetime-local': { handler: 'native' },
+    month:            { handler: 'native' },
+    week:             { handler: 'native' },
+    color:            { handler: 'native' },
+    range:            { handler: 'native' },
+
+    // Selection, file & action controls
+    checkbox:         { handler: 'native' },
+    radio:            { handler: 'native' },
+    file:             { handler: 'native' },
+    submit:           { handler: 'native' },
+    reset:            { handler: 'native' },
+    button:           { handler: 'native' },
+    image:            { handler: 'native' },
+    hidden:           { handler: 'native' }
+};
+
+function getInputSpec(el) {
+    if (!el || el.disabled || el.readOnly) return null;
+    if (el.tagName === 'TEXTAREA') {
+        return { handler: 'proxy', inputType: 'textarea', mask: false, multiline: true };
+    }
+    if (el.tagName === 'INPUT') {
+        const type = (el.getAttribute('type') || el.type || 'text').toLowerCase();
+        const cfg = INPUT_TYPES[type] || INPUT_TYPES.text;
+        return {
+            handler: cfg.handler,
+            inputType: type,
+            mask: !!cfg.mask,
+            multiline: !!cfg.multiline
+        };
+    }
+    return null;
+}
+
+const FOCUS_SELECTOR = 'input:not([type="hidden"]):not([disabled]), textarea:not([disabled]), select:not([disabled]), button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
+
 let autoIdCounter = 0;
 let trackedEl = null;
 let resizeObs = null;
+let lastFocusedEl = null;
+
+function isElementVisible(el) {
+    if (!el || !el.isConnected) return false;
+    const st = getComputedStyle(el);
+    if (st.display === 'none' || st.visibility === 'hidden') return false;
+    return el.getClientRects().length > 0;
+}
+
+function getFocusableElements() {
+    return Array.from(document.querySelectorAll(FOCUS_SELECTOR)).filter(el => {
+        if (el.readOnly && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA')) return false;
+        if (el.getAttribute('tabindex') === '-1') return false;
+        return isElementVisible(el);
+    });
+}
 
 function rectOf(el) {
     const r = el.getBoundingClientRect();
@@ -186,40 +249,54 @@ function getFieldLabel(el) {
     return el.tagName === 'TEXTAREA' ? 'TEXT' : 'INPUT';
 }
 
+function activateProxyInput(el) {
+    const spec = getInputSpec(el);
+    if (!spec || spec.handler !== 'proxy') return false;
+
+    el.setAttribute('inputmode', 'none');
+    if (document.activeElement && document.activeElement !== document.body) {
+        document.activeElement.blur();
+    }
+    if (window.parent && window.parent !== window) {
+        window.parent.focus();
+    }
+    if (!el.id) el.id = 'qandy-input-auto-' + (autoIdCounter++);
+
+    lastFocusedEl = el;
+
+    let maxLen = el.hasAttribute('maxlength') ? parseInt(el.getAttribute('maxlength'), 10) : null;
+    if (Number.isNaN(maxLen)) maxLen = null;
+
+    window.parent.postMessage({
+        type: 'QANDY_REQ_INPUT',
+        id: el.id,
+        value: el.value,
+        inputType: spec.inputType,
+        mask: spec.mask,
+        isMultiline: spec.multiline,
+        label: getFieldLabel(el),
+        rect: rectOf(el),
+        maxLength: maxLen
+    }, (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
+
+    trackElement(el);
+    return true;
+}
+
 function handleInputTap(e) {
     const el = e.target;
-    if (el && (el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && el.type === 'text'))) {
+    const spec = getInputSpec(el);
+
+    if (spec && spec.handler === 'proxy') {
         el.setAttribute('inputmode', 'none');
 
         if (e.type === 'pointerdown' || (e.type === 'mousedown' && e.pointerType === undefined) || e.type === 'touchstart') {
-            
-            // Prevent native input from gaining focus to eliminate the double cursor
             e.preventDefault();
-            if (document.activeElement) document.activeElement.blur();
-            
-            // Pass focus back to the parent so physical keyboard input goes to Qandy terminal!
-            if (window.parent && window.parent !== window) {
-                window.parent.focus();
-            }
-
-            if (!el.id) el.id = 'qandy-input-auto-' + (autoIdCounter++);
-            
-            let maxLen = el.hasAttribute('maxlength') ? parseInt(el.getAttribute('maxlength'), 10) : null;
-
-            window.parent.postMessage({
-                type: 'QANDY_REQ_INPUT',
-                id: el.id,
-                value: el.value,
-                isMultiline: el.tagName === 'TEXTAREA',
-                label: getFieldLabel(el),
-                rect: rectOf(el),
-                maxLength: maxLen // Pass to Qandy OS
-            }, (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
-
-            trackElement(el);
+            activateProxyInput(el);
         }
     } else if (e.type === 'pointerdown') {
-        // If the user clicks any non-input visual surface of an app, alert the parent OS
+        const focusable = el && el.closest ? el.closest(FOCUS_SELECTOR) : null;
+        lastFocusedEl = (focusable && isElementVisible(focusable)) ? focusable : null;
         if (window.parent && window.parent !== window) {
             window.parent.postMessage({ type: 'QANDY_APP_CLICKED' }, (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
         }
@@ -231,22 +308,78 @@ document.addEventListener('mousedown', handleInputTap, { capture: true, passive:
 document.addEventListener('touchstart', handleInputTap, { capture: true, passive: false });
 
 window.addEventListener('message', (e) => {
-    // --- Security Upgrade: Origin and Source Validation ---
     if (window.location.origin !== "null" && e.origin !== window.location.origin) return;
     if (e.source !== window && e.source !== window.parent) return;
-    // ------------------------------------------------------
+    const origin = (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*");
 
     if (e.data.type === 'QANDY_UPDATE_COLORS' && e.data.colors) {
         window.CylonSDK.applyColors(e.data.colors);
     }
 
-    // Catch virtual keystrokes forwarded from the parent OS
     if (e.data.type === 'QANDY_VKEY') {
+        const k = e.data.key;
+        const active = document.activeElement;
+        if ((k === 'Enter' || k === ' ') && active && active !== document.body &&
+            active.matches('button, a[href], input[type="button"], input[type="submit"], input[type="reset"], input[type="checkbox"], input[type="radio"]')) {
+            active.click();
+            return;
+        }
         if (typeof window.keydown === 'function') {
-            window.keydown(e.data.key, null); 
+            window.keydown(k, null);
         }
     }
-     
+
+    if (e.data.type === 'QANDY_TAB_STEP') {
+        const dir = e.data.direction === -1 ? -1 : 1;
+        const fromEdge = !!e.data.fromEdge;
+        const list = getFocusableElements();
+
+        if (list.length === 0) {
+            lastFocusedEl = null;
+            window.parent.postMessage(
+                { type: fromEdge ? 'QANDY_TAB_FOCUS_APP' : 'QANDY_TAB_TO_CLI' },
+                origin
+            );
+            return;
+        }
+
+        let targetIdx;
+        if (fromEdge) {
+            targetIdx = dir === 1 ? 0 : list.length - 1;
+        } else {
+            let curEl = e.data.currentId ? document.getElementById(e.data.currentId) : null;
+            if (!curEl || !list.includes(curEl)) {
+                curEl = (document.activeElement && list.includes(document.activeElement))
+                    ? document.activeElement
+                    : lastFocusedEl;
+            }
+            const curIdx = curEl ? list.indexOf(curEl) : -1;
+            targetIdx = (curIdx === -1)
+                ? (dir === 1 ? 0 : list.length - 1)
+                : (curIdx + dir);
+        }
+
+        if (targetIdx < 0 || targetIdx >= list.length) {
+            lastFocusedEl = null;
+            if (document.activeElement && document.activeElement !== document.body) {
+                document.activeElement.blur();
+            }
+            window.parent.postMessage({ type: 'QANDY_TAB_TO_CLI' }, origin);
+            return;
+        }
+
+        const nextEl = list[targetIdx];
+        const spec = getInputSpec(nextEl);
+        if (spec && spec.handler === 'proxy') {
+            activateProxyInput(nextEl);
+        } else {
+            lastFocusedEl = nextEl;
+            window.parent.postMessage({ type: 'QANDY_TAB_FOCUS_APP' }, origin);
+            nextEl.focus();
+        }
+        return;
+    }
+
     if (e.data.type === 'QANDY_UPDATE_INPUT' || e.data.type === 'QANDY_COMMIT_INPUT') {
         const el = document.getElementById(e.data.id);
         if (el) {
@@ -254,9 +387,13 @@ window.addEventListener('message', (e) => {
             el.dispatchEvent(new Event('input', { bubbles: true }));
 
             if (e.data.type === 'QANDY_COMMIT_INPUT') {
+                lastFocusedEl = el;
                 el.dispatchEvent(new Event('change', { bubbles: true }));
-                el.blur(); 
+                el.blur();
                 stopTracking();
+                if (e.data.submit) {
+                    el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }));
+                }
             } else {
                 requestAnimationFrame(() => reportRect(el));
             }
@@ -269,10 +406,12 @@ window.addEventListener('message', (e) => {
 // ========================================================================
 
 window.CylonSDK = window.CylonSDK || {};
-window.CylonSDK.apps = {}; 
+window.CylonSDK.focusInput = activateProxyInput;
+window.CylonSDK.apps = {};
+window.CylonSDK.INPUT_TYPES = INPUT_TYPES;
 
 /**
- * Sync CSS Variables from the Parent OS
+ * Sync ALL Theme CSS Variables from the Parent OS
  */
 window.CylonSDK.applyColors = function(vars) {
     if (!vars) return;
@@ -284,13 +423,38 @@ window.CylonSDK.applyColors = function(vars) {
     root.style.setProperty('--menu-fg', vars.MenuFgColor || '#aaa');
     root.style.setProperty('--sel-bg', vars.SelectBgColor || '#333');
     root.style.setProperty('--sel-fg', vars.SelectFgColor || '#0f0');
+    root.style.setProperty('--input-fg', vars.InputFgColor || vars.ForegroundColor || '#0f0');
+    root.style.setProperty('--input-bg', vars.InputBgColor || vars.BackgroundColor || '#000');
     root.style.setProperty('--case-bg', vars.CaseBgColor || '#080808');
     root.style.setProperty('--case-fg', vars.CaseFgColor || '#0a0');
     root.style.setProperty('--key-bg', vars.KeyBgColor || '#222');
     root.style.setProperty('--key-fg', vars.KeyFgColor || '#fff');
     root.style.setProperty('--key-hl-bg', vars.KeyHlBgColor || '#666');
     root.style.setProperty('--key-hl-fg', vars.KeyHlFgColor || '#fff');
+
+    for (let i = 0; i <= 4; i++) {
+        if (vars['TextFg' + i] !== undefined) {
+            root.style.setProperty('--text-fg' + i, vars['TextFg' + i]);
+        }
+    }
+    for (let i = 5; i <= 9; i++) {
+        if (vars['TextBg' + i] !== undefined) {
+            root.style.setProperty('--text-bg' + i, vars['TextBg' + i]);
+        }
+    }
+
+    if (vars.HtmlLink) root.style.setProperty('--html-link', vars.HtmlLink);
+    if (vars.HtmlVisited) root.style.setProperty('--html-visited', vars.HtmlVisited);
+    if (vars.HtmlHover) root.style.setProperty('--html-hover', vars.HtmlHover);
+    if (vars.HtmlActive) root.style.setProperty('--html-active', vars.HtmlActive);
 };
+
+// Immediately inherit parent OS colors when any app loads the SDK
+try {
+    if (window.parent && window.parent !== window && window.parent.CylonColors) {
+        window.CylonSDK.applyColors(window.parent.CylonColors);
+    }
+} catch (e) {}
 
 /**
  * Register apps for desktop/popup launching.
@@ -304,14 +468,15 @@ window.CylonSDK.registerApps = function(appMap) {
  */
 window.CylonSDK.injectDesktopStyles = function() {
     if (document.getElementById('cylon-sdk-desktop-styles')) return;
-    
-    // Immediately pull colors from parent before injecting styles
-    if (window.parent && window.parent.CylonColors) {
-        window.CylonSDK.applyColors(window.parent.CylonColors);
-    }
-    
-    let tileSize = parseInt(localStorage.getItem('qandy_display_res')) || 64; 
-    
+
+    try {
+        if (window.parent && window.parent.CylonColors) {
+            window.CylonSDK.applyColors(window.parent.CylonColors);
+        }
+    } catch (e) {}
+
+    let tileSize = parseInt(localStorage.getItem('qandy_display_res')) || 64;
+
     const style = document.createElement('style');
     style.id = 'cylon-sdk-desktop-styles';
     style.textContent = `
@@ -353,7 +518,7 @@ window.CylonSDK.injectDesktopStyles = function() {
 window.CylonSDK.renderIconGrid = function(containerId, items) {
     let container = document.getElementById(containerId);
     if (!container) return;
-    
+
     container.innerHTML = '';
     container.classList.add('cylon-grid-container');
 
@@ -368,11 +533,11 @@ window.CylonSDK.renderIconGrid = function(containerId, items) {
 
         let img = document.createElement('img');
         img.src = item.iconPath || `${iconBase}${item.iconId}.png`;
-        
-        img.onerror = function() { 
-            this.onerror = null; 
-            this.src = `${fallbackBase}file.png`; 
-        }; 
+
+        img.onerror = function() {
+            this.onerror = null;
+            this.src = `${fallbackBase}file.png`;
+        };
 
         let label = document.createElement('div');
         label.className = 'gfx-icon-label';
@@ -394,13 +559,13 @@ window.CylonSDK.renderIconGrid = function(containerId, items) {
  */
 window.CylonSDK.getGFXSectorItems = async function(filename, sectorId) {
     if (!window.parent || !window.parent.CylonDOS) throw new Error("CylonDOS not available.");
-    
+
     let gfxData = await window.parent.CylonDOS.load(filename);
     if (!gfxData) throw new Error("Could not load map file: " + filename);
 
     let items = [];
     let lines = gfxData.split('\n');
-    
+
     for (let line of lines) {
         let eqIdx = line.indexOf('=');
         if (eqIdx === -1) continue;
@@ -410,7 +575,7 @@ window.CylonSDK.getGFXSectorItems = async function(filename, sectorId) {
             let content = line.substring(eqIdx + 1);
             let parts = content.split('.');
             let itemsData = parts[1] || "";
-            
+
             if (itemsData) {
                 itemsData.split('~').forEach(c => {
                     if (!c) return;
@@ -418,9 +583,9 @@ window.CylonSDK.getGFXSectorItems = async function(filename, sectorId) {
                     if (meta.length >= 4) {
                         let id = meta.substring(0, 2);
                         let z = meta.substring(2, 4);
-                        
+
                         let app = window.CylonSDK.apps[id];
-                        
+
                         items.push({
                             iconId: id,
                             label: app ? app.title : id,
@@ -430,7 +595,7 @@ window.CylonSDK.getGFXSectorItems = async function(filename, sectorId) {
                     }
                 });
             }
-            break; 
+            break;
         }
     }
     return items;
@@ -473,7 +638,7 @@ window.CylonSDK.showAppPopup = function(item) {
         if (window.parent.PopAlign !== undefined) window.parent.PopAlign = "click";
         if (item.zLocation) {
             let zBase = (window.parent.CylonGFX && window.parent.CylonGFX.gfxZBase) ? window.parent.CylonGFX.gfxZBase : 10;
-            window.parent.lastClickZ = window.parent.lastClickedZ = parseInt(item.zLocation, zBase); 
+            window.parent.lastClickZ = window.parent.lastClickedZ = parseInt(item.zLocation, zBase);
         }
         window.parent.popHtm(html);
     } else if (typeof popHtm === 'function') {
@@ -491,7 +656,7 @@ window.CylonSDK.showAppPopup = function(item) {
 window.CylonSDK.renderListGrid = function(containerId, items) {
     let container = document.getElementById(containerId);
     if (!container) return;
-    
+
     container.innerHTML = '';
     container.className = '';
     container.style.cssText = 'display: flex; flex-direction: column; padding: 10px; overflow-y: auto; height: 100%; box-sizing: border-box; background-color: var(--bg-color, #000);';
@@ -501,7 +666,7 @@ window.CylonSDK.renderListGrid = function(containerId, items) {
     items.forEach(item => {
         let row = document.createElement('div');
         row.style.cssText = `display: flex; align-items: center; padding: 6px; cursor: pointer; border-bottom: 1px solid var(--fg-color, #0f0); opacity: 0.8; transition: opacity 0.1s;`;
-        
+
         row.onmouseover = () => row.style.opacity = '1';
         row.onmouseout = () => row.style.opacity = '0.8';
 

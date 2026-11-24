@@ -77,6 +77,7 @@ window.CylonGFX = {
     lastKnownSectors: "",
     lastKnownOpponents: {},
     lookCanvas: null,
+    _afterTickQueue: [],
 
     // Cached static sector data for multiplayer mode (loaded once per sector)
     mapTiles: {},
@@ -669,6 +670,7 @@ window.CylonGFX = {
     networkTick: async function() {
         if (this.isSyncing || !window.remoteQandylandUrl) return;
         this.isSyncing = true;
+        let afterThisTick = this._afterTickQueue ? this._afterTickQueue.splice(0) : [];
 
         try {
             let plugs = window.gfxDo || "RF";
@@ -688,7 +690,16 @@ window.CylonGFX = {
         } catch (e) {
             console.error("Network tick error:", e);
         } finally {
-            this.isSyncing = false;
+            try {
+                for (let q of afterThisTick) {
+                    await this.handleGfxCommand(q.cmd, q.data);
+                }
+            } finally {
+                this.isSyncing = false;
+            }
+            if (window.gfxDo && window.gfxDo !== "RF") {
+                this.networkTick();
+            }
         }
     },
     
@@ -712,6 +723,7 @@ window.CylonGFX = {
         window.gfxDo = "RF";
         window.movingItems = {};
         this.lastRenderedItems = null;
+        this.fillTileCode = null;
         this.isLooking = false;
         if (this.lookCanvas) this.lookCanvas.style.display = 'none';
     },
@@ -1267,6 +1279,43 @@ window.CylonGFX = {
     // TERMINAL / LOCAL GFX COMMAND ROUTER
     // ========================================================================
 
+    printTerminal: function(text) {
+        let msg = String(text == null ? '' : text);
+        if (!msg.endsWith('\n')) msg += '\n';
+        if (window.parent && typeof window.parent.printDOS === 'function') {
+            window.parent.printDOS(msg);
+        } else if (window.parent && typeof window.parent.print === 'function') {
+            window.parent.print(msg);
+        } else if (typeof window.print === 'function') {
+            window.print(msg);
+        }
+    },
+
+    sendRemoteGfxCommand: async function(cmdStr) {
+        if (!window.remoteQandylandUrl) return null;
+        if (!window.cylonGfxSession) {
+            this.printTerminal('Error: [.4]Not connected/logged in to server.[.]');
+            return null;
+        }
+        try {
+            let raw = await this.gfxPing('GFX:' + cmdStr);
+            let res;
+            try {
+                res = JSON.parse(raw);
+            } catch (e) {
+                this.printTerminal(raw);
+                return null;
+            }
+            if (res && res.output) {
+                this.printTerminal(res.output);
+            }
+            return res;
+        } catch (err) {
+            this.printTerminal('Error: [.4]' + (err && err.message ? err.message : String(err)) + '[.]');
+            return null;
+        }
+    },
+
     handleGfxCommand: async function(cmd, data) {
         let cmdStr = String(cmd || '').trim();
         let cmdLower = cmdStr.toLowerCase();
@@ -1403,28 +1452,89 @@ window.CylonGFX = {
             }
 
             case 'refresh':
+                if (window.remoteQandylandUrl) {
+                    this._loadedSector = null;
+                    this.lastRenderedItems = null;
+                    this.terrainCache = null;
+                    if (!this.isSyncing) await this.networkTick();
+                    if (this.gfxCommandLog) this.printTerminal('[.3]GFX Engine: Desktop Refreshed.[.]');
+                    break;
+                }
                 await this.init(this.currentPath);
                 if (this.gfxCommandLog && window.parent.print) window.parent.print(`[.3]GFX Engine: Desktop Refreshed.[.]\n`);
                 break;
 
             case 'tile':
+                if (window.remoteQandylandUrl) {
+                    let tArg = data ? data.trim() : '';
+                    let res = await this.sendRemoteGfxCommand(tArg ? ('tile ' + tArg) : 'tile');
+                    if (res && res.ok && tArg && res.sector && res.tile !== undefined && res.z !== undefined) {
+                        if (!this.mapTiles[res.sector]) {
+                            this.mapTiles[res.sector] = 'Za'.repeat(this.gridWide * this.gridTall);
+                        }
+                        let m = this.mapTiles[res.sector];
+                        let idx = res.z * 2;
+                        while (m.length < idx + 2) m += 'Za';
+                        this.mapTiles[res.sector] = m.substring(0, idx) + res.tile + m.substring(idx + 2);
+                        this.terrainCache = null;
+                        this.updateTileDOM(res.z, res.tile);
+                    }
+                    break;
+                }
                 if (typeof this.setTileAtCursor === 'function') {
                     await this.setTileAtCursor(data);
                     this.renderScreen();
                 }
                 break;
 
-            case 'fill':
-                if (data) {
-                    this.fillTileCode = data;
-                    if (this.gfxCommandLog && window.parent.print) window.parent.print(`[.4]GFX Fill Mode ENGAGED: brush set to [${data}][.]\n`);
+            case 'fill': {
+                let fillArg = data ? data.trim() : '';
+                let isOff = !fillArg || fillArg.toLowerCase() === 'off' || fillArg.toLowerCase() === 'none';
+
+                if (window.remoteQandylandUrl) {
+                    let res = await this.sendRemoteGfxCommand(isOff ? 'fill' : ('fill ' + fillArg.substring(0, 2)));
+                    if (res && res.ok) {
+                        this.fillTileCode = res.fill || null;
+                    } else if (isOff) {
+                        this.fillTileCode = null;
+                    }
+                    break;
+                }
+
+                if (!isOff) {
+                    this.fillTileCode = fillArg.substring(0, 2);
+                    if (this.gfxCommandLog) {
+                        this.printTerminal(`[.4]GFX Fill Mode ENGAGED: brush set to [${this.fillTileCode}][.]`);
+                    }
                 } else {
                     this.fillTileCode = null;
-                    if (this.gfxCommandLog && window.parent.print) window.parent.print(`[.2]GFX Fill Mode DISABLED.[.]\n`);
+                    if (this.gfxCommandLog) {
+                        this.printTerminal(`[.2]GFX Fill Mode DISABLED.[.]`);
+                    }
                 }
                 break;
+            }
 
             case 'tele':
+                if (window.remoteQandylandUrl) {
+                    if (!data || !data.trim()) {
+                        this.printTerminal('[.4]Usage: gfx tele <sector> [z][.]');
+                        break;
+                    }
+                    let res = await this.sendRemoteGfxCommand('tele ' + data.trim());
+                    if (res && res.ok && res.sector) {
+                        let drive = window.desktopDrive || this.currentPath.split(':')[0] || 'queville';
+                        window.playerWalk = -1;
+                        window.playerDo = '';
+                        window.playerZ = res.z;
+                        window.map = res.sector;
+                        this.currentPath = `${drive}:/w/${res.sector}`;
+                        this._loadedSector = null;
+                        this.lastRenderedItems = null;
+                        if (!this.isSyncing) await this.networkTick();
+                    }
+                    break;
+                }
                 if (data) {
                     let drive = this.currentPath.split(':')[0] || 'ram';
                     await this.init(`${drive}:/w/${data}`);
@@ -1434,6 +1544,20 @@ window.CylonGFX = {
                 break;
 
             case 'obj':
+                if (window.remoteQandylandUrl) {
+                    let res = await this.sendRemoteGfxCommand('obj ' + String(data || '').trim());
+                    if (res && res.ok && res.filename && res.sector) {
+                        let list = this.mapObjs[res.sector] || [];
+                        let keyPrefix = res.filename.substring(0, 4);
+                        list = list.filter(f => !(f.length === 6 && f.substring(0, 4) === keyPrefix));
+                        list.push(res.filename);
+                        this.mapObjs[res.sector] = list;
+                        this.renderSectorStaticObjects(res.sector);
+                        this.lastRenderedItems = null;
+                        if (!this.isSyncing) await this.networkTick();
+                    }
+                    break;
+                }
                 if (data) {
                     let parts = data.trim().split(/\s+/);
                     let id = parts[0];
@@ -1459,6 +1583,14 @@ window.CylonGFX = {
                 break;
 
             case 'item':
+                if (window.remoteQandylandUrl) {
+                    let res = await this.sendRemoteGfxCommand('item ' + String(data || '').trim());
+                    if (res && res.ok) {
+                        this.lastRenderedItems = null;
+                        if (!this.isSyncing) await this.networkTick();
+                    }
+                    break;
+                }
                 if (data) {
                     let parts = data.trim().split(/\s+/);
                     let id = parts[0];
@@ -1475,18 +1607,378 @@ window.CylonGFX = {
                     }
                 }
                 break;
-            
-            case 'id':
-            case 'mod': {
-                let res = await this.handleGfxId(data, null);
-                if (window.parent && typeof window.parent.printDOS === 'function') {
-                    window.parent.printDOS(res.output + '\n');
-                } else if (window.parent && window.parent.print) {
-                    window.parent.print(res.output + '\n');
+
+            case 'save': {
+
+                let targetSectorArg = data ? data.trim() : '';
+                let res = await this.sendRemoteGfxCommand(targetSectorArg ? ('save ' + targetSectorArg) : 'save');
+                if (!res || !res.ok || !res.sector || !res.files) break;
+
+                let dos = this.getDOS();
+                if (!dos) {
+                    this.printTerminal('Error: [.4]CylonDOS is not available.[.]');
+                    break;
+                }
+
+                let drive = window.desktopDrive || this.currentPath.split(':')[0] || 'queville';
+                let wDir = `${drive}:/w`;
+                let sectorDir = `${wDir}/${res.sector}`;
+
+                try {
+                    if (!(await dos.exists(wDir))) {
+                        await dos.mkdir(wDir);
+                    }
+                    if (!(await dos.exists(sectorDir))) {
+                        await dos.mkdir(sectorDir);
+                    }
+
+                    // Remove local files in /w/<sector>/ that no longer exist on the server (e.g. deleted via gfx del)
+                    let existing = [];
+                    try { existing = await dos.dir(sectorDir); } catch (e) { existing = []; }
+                    let removedCount = 0;
+                    for (let entry of existing) {
+                        if (entry.type !== 'file' || entry.readOnly) continue;
+                        let fname = entry.name.substring(entry.name.lastIndexOf('/') + 1);
+                        if (!fname || fname === '_dir.sys!' || fname.startsWith('_')) continue;
+                        if (!Object.prototype.hasOwnProperty.call(res.files, fname)) {
+                            await dos.delete(`${sectorDir}/${fname}`);
+                            removedCount++;
+                        }
+                    }
+
+                    // Write all current server sector files to the local CylonDOS drive
+                    let savedCount = 0;
+                    for (let fname of Object.keys(res.files)) {
+                        await dos.save(`${sectorDir}/${fname}`, res.files[fname]);
+                        savedCount++;
+                    }
+
+                    // Keep the in-memory sector cache in sync
+                    if (Object.prototype.hasOwnProperty.call(res.files, 'm')) {
+                        let tData = String(res.files.m || '').replace(/\s+/g, '');
+                        let expectedLen = this.gridWide * this.gridTall * 2;
+                        if (tData.length < expectedLen) {
+                            tData += 'Za'.repeat(Math.ceil((expectedLen - tData.length) / 2));
+                        }
+                        this.mapTiles[res.sector] = tData;
+                        this.terrainCache = null;
+                    }
+
+                    let staticList = [];
+                    for (let fname of Object.keys(res.files)) {
+                        if (fname === 'm' || fname === 'e' || fname === 't') continue;
+                        let lead = fname.charAt(0);
+                        if (fname.length === 6 && lead !== 'V' && lead !== 'X') {
+                            staticList.push(fname);
+                        }
+                    }
+                    this.mapObjs[res.sector] = staticList;
+
+                    if (res.sector === window.map) {
+                        this.renderSectorTiles(res.sector);
+                        this.renderSectorStaticObjects(res.sector);
+                        this.lastRenderedItems = null;
+                        if (!this.isSyncing) await this.networkTick();
+                    }
+
+                    let msg = `Saved ${savedCount} file(s) to ${sectorDir}/`;
+                    if (removedCount > 0) msg += ` (removed ${removedCount} stale file(s))`;
+                    this.printTerminal(msg);
+                } catch (err) {
+                    this.printTerminal('Error: [.4]' + (err && err.message ? err.message : String(err)) + '[.]');
                 }
                 break;
             }
+
+            case 'del':
+            case 'rm':
+                if (window.remoteQandylandUrl) {
+                    let res = await this.sendRemoteGfxCommand('del ' + String(data || '').trim());
+                    if (res && res.ok && res.sector && Array.isArray(res.deleted)) {
+                        if (this.mapObjs[res.sector]) {
+                            this.mapObjs[res.sector] = this.mapObjs[res.sector].filter(f => !res.deleted.includes(f));
+                            this.renderSectorStaticObjects(res.sector);
+                        }
+                        this.lastRenderedItems = null;
+                        if (!this.isSyncing) await this.networkTick();
+                    }
+                    break;
+                }
+                this.printTerminal('[.4]gfx del is only available in remote server mode (use the context menu locally).[.]');
+                break;
+
+            case 'code':
+            case 'exits':
+            case 'sector':
+                if (window.remoteQandylandUrl) {
+                    await this.sendRemoteGfxCommand(cmd + (data ? (' ' + data.trim()) : ''));
+                    break;
+                }
+                this.printTerminal(`[.4]gfx ${cmd} is only available in remote server mode.[.]`);
+                break;
+
+            case 'id':
+            case 'mod': {
+                if (window.remoteQandylandUrl) {
+                    await this.sendRemoteGfxCommand(cmd + (data ? (' ' + data.trim()) : ''));
+                    break;
+                }
+                let res = await this.handleGfxId(data, null);
+                this.printTerminal(res.output);
+                break;
+            }
             
+            case 'export': {
+                if (!window.remoteQandylandUrl) {
+                    this.printTerminal('[.4]gfx export requires a remote Qandyland connection (use "export" for local drives).[.]');
+                    break;
+                }
+
+                let rawArgs = String(data || '').trim();
+                let tokens = rawArgs ? rawArgs.split(/\s+/) : [];
+                let forceOverwrite = false;
+                let target = null;
+
+                for (let t of tokens) {
+                    if (t === '-y' || t === '--yes' || t === '-f' || t === '--force') {
+                        forceOverwrite = true;
+                    } else if (!target) {
+                        target = t;
+                    }
+                }
+
+                if (!target) {
+                    this.printTerminal('Usage: gfx export <c> | gfx export <filename.gfx> [-y]');
+                    break;
+                }
+
+                // 1. Pre-check local file existence before pulling from server
+                let dos = this.getDOS();
+                if (target !== '<c>') {
+                    if (!dos) {
+                        this.printTerminal('Error: [.4]CylonDOS is not available.[.]');
+                        break;
+                    }
+                    let alreadyExists = false;
+                    try { alreadyExists = await dos.exists(target); } catch (e) {}
+                    if (alreadyExists && !forceOverwrite) {
+                        let safeName = String(target).replace(/[&<>'"]/g, c => ({
+                            '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+                        }[c]));
+                        let warnHtml =
+                            `<div style="padding:12px 16px; text-align:center; font-family:var(--font-face,monospace);">` +
+                            `<div style="margin-bottom:6px;">File exists: <strong>${safeName}</strong></div>` +
+                            `<div style="font-size:12px;">-y to over-write</div>` +
+                            `</div>`;
+                        if (typeof window.pop === 'function') window.pop(warnHtml, 'center');
+                        this.printTerminal(`File exists: ${target} (-y to over-write)`);
+                        break;
+                    }
+                }
+
+                // 2. Fetch filtered archive from qandyland.js
+                let res = await this.sendRemoteGfxCommand('export');
+                if (!res || !res.ok || !res.archive) break;
+
+                // 3. Output to clipboard (<c>) or save to local CylonDOS drive
+                if (target === '<c>') {
+                    let clip = (window.parent && window.parent.navigator && window.parent.navigator.clipboard)
+                        ? window.parent.navigator.clipboard
+                        : navigator.clipboard;
+
+                    let copied = false;
+                    if (clip && typeof clip.writeText === 'function') {
+                        try {
+                            await clip.writeText(res.archive);
+                            copied = true;
+                        } catch (e) {
+                            copied = false;
+                        }
+                    }
+
+                    if (copied) {
+                        this.printTerminal('Exported map copied to clipboard.');
+                    } else {
+                        // Browser blocked async clipboard write; provide a 1-click gesture popup
+                        try {
+                            if (window.parent && window.parent !== window) {
+                                window.parent._qandyPendingGfxExport = res.archive;
+                            } else {
+                                window._qandyPendingGfxExport = res.archive;
+                            }
+                        } catch (e) {}
+
+                        let copyBtnHtml =
+                            `<div style="padding:12px 16px; text-align:center; font-family:var(--font-face,monospace);">` +
+                            `<div style="margin-bottom:8px;">Export ready (${res.archive.length} bytes)</div>` +
+                            `<button type="button" onclick="(function(){` +
+                                `var txt=window._qandyPendingGfxExport||'';` +
+                                `if(navigator.clipboard&&txt){navigator.clipboard.writeText(txt);}` +
+                                `delete window._qandyPendingGfxExport;` +
+                                `if(window.hpop)window.hpop();` +
+                            `})()" style="padding:6px 12px; cursor:pointer; background:var(--sel-bg,#333); color:var(--sel-fg,#0f0); border:1px solid var(--fg-color,#0f0); font-family:inherit;">Copy to Clipboard</button>` +
+                            `</div>`;
+                        if (typeof window.pop === 'function') window.pop(copyBtnHtml, 'center');
+                        this.printTerminal('Click "Copy to Clipboard" in the popup to finish copying.');
+                    }
+                } else {
+                    try {
+                        await dos.save(target, res.archive);
+                        this.printTerminal('Saved remote export to ' + target);
+                    } catch (err) {
+                        this.printTerminal('Error: [.4]' + (err && err.message ? err.message : String(err)) + '[.]');
+                    }
+                }
+                break;
+            }
+
+            case 'edit': {
+                let dos = this.getDOS();
+                let zStr = this.encodeZ(window.playerZ, this.gfxZBase || 10);
+                let trimmedEdit = dataStr.trim();
+                let editMatch = trimmedEdit ? trimmedEdit.match(/^(\S+)(?:\s+([\s\S]+))?$/) : null;
+                let objId = editMatch ? editMatch[1] : null;
+                let newCode = editMatch ? editMatch[2] : undefined;
+
+                if (objId && !/^[A-Z][A-Za-z0-9_()[\]{}^,:;+\-=%@]$/.test(objId)) {
+                    this.printTerminal('Usage: gfx edit <2-char id> [punchcode|null]');
+                    break;
+                }
+
+                // --- REMOTE QANDYLAND MODE ---
+                if (window.remoteQandylandUrl) {
+                    if (!window.cylonGfxSession) {
+                        this.printTerminal('Error: [.4]Not connected/logged in to server.[.]');
+                        break;
+                    }
+
+                    if (!objId) {
+                        let atZ = (this.mapObjs[window.map] || []).filter(f =>
+                            f.length === 6 && f.substring(2, 4) === zStr
+                        );
+                        if (atZ.length === 1) {
+                            objId = atZ[0].substring(0, 2);
+                        } else if (atZ.length > 1) {
+                            this.printTerminal('Multiple objects at Z:' + window.playerZ + ' (' +
+                                atZ.map(f => f.substring(0, 2)).join(', ') + '). Specify: gfx edit <2-char id>');
+                            break;
+                        } else {
+                            this.printTerminal('Usage: gfx edit <2-char id> [punchcode|null]');
+                            break;
+                        }
+                    }
+
+                    // Inline edit: gfx edit <id> <punchcode|null>
+                    if (newCode !== undefined) {
+                        let res = await this.sendRemoteGfxCommand('code ' + objId + ' ' + newCode);
+                        if (res && res.ok && dos && res.sector && res.filename) {
+                            let cacheDrive = window.desktopDrive || this.currentPath.split(':')[0];
+                            try {
+                                await dos.save(`${cacheDrive}:/w/${res.sector}/${res.filename}`, newCode === 'null' ? '' : newCode);
+                            } catch (e) {}
+                        }
+                        break;
+                    }
+
+                    // Visual compiler edit: fetch live code from server, then open cylon-gfx-compiler.htm
+                    let res = null;
+                    try {
+                        let raw = await this.gfxPing('GFX:code ' + objId);
+                        res = JSON.parse(raw);
+                    } catch (err) {
+                        this.printTerminal('Error: [.4]' + (err && err.message ? err.message : String(err)) + '[.]');
+                        break;
+                    }
+
+                    if (!res || !res.ok) {
+                        this.printTerminal((res && res.output) || 'Error: [.4]Failed to load object punch code.[.]');
+                        break;
+                    }
+
+                    if (!dos) {
+                        this.printTerminal('Error: [.4]CylonDOS is not available.[.]');
+                        break;
+                    }
+
+                    let cacheDrive = window.desktopDrive || this.currentPath.split(':')[0] || 'queville';
+                    let targetPayload = {
+                        mode: 'remote',
+                        path: `${cacheDrive}:/w/${res.sector}/${res.filename}`,
+                        remoteUrl: window.remoteQandylandUrl,
+                        remoteDrive: window.gfxDrive || cacheDrive,
+                        session: window.cylonGfxSession,
+                        sector: res.sector,
+                        filename: res.filename,
+                        itemId: objId,
+                        code: res.code != null ? res.code : ''
+                    };
+                    await dos.save('cylon:/a/gfxEditTarget', JSON.stringify(targetPayload));
+
+                    if (typeof window.CylonCommand === 'function') {
+                        await window.CylonCommand('cylon-gfx-compiler.htm');
+                    } else if (window.parent && typeof window.parent.PageOpen === 'function') {
+                        await window.parent.PageOpen('cylon-gfx-compiler.htm');
+                    } else if (typeof window.PageOpen === 'function') {
+                        await window.PageOpen('cylon-gfx-compiler.htm');
+                    }
+                    break;
+                }
+
+                // --- LOCAL .GFX DRIVE MODE ---
+                if (!dos) {
+                    this.printTerminal('Error: [.4]CylonDOS is not available.[.]');
+                    break;
+                }
+
+                let localDir = this.currentPath.replace(/\/$/, '');
+                let drive = localDir.split(':')[0] || 'ram';
+                let files = [];
+                try { files = await dos.dir(localDir); } catch (e) { files = []; }
+
+                let matches = [];
+                for (let f of files) {
+                    if (f.type !== 'file') continue;
+                    let fname = f.name.substring(f.name.lastIndexOf('/') + 1);
+                    if (fname === 'm' || fname === 't' || fname === 'e' || fname.length < 4) continue;
+                    let fId = fname.substring(0, 2);
+                    let fZ = fname.substring(2, 4);
+                    let fPub = fname.length >= 8 ? fname.substring(4, 8) : '';
+                    if (fId === window.playerItem && (fPub === window.playerId || !window.playerId)) continue;
+                    if (this.decodeZ(fZ, this.gfxZBase || 10) !== window.playerZ) continue;
+                    if (objId && fId !== objId) continue;
+                    matches.push(fname);
+                }
+
+                if (!matches.length) {
+                    this.printTerminal('Error: [.4]No object' + (objId ? ' "' + objId + '"' : '') + ' found at Z:' + window.playerZ + '.[.]');
+                    break;
+                }
+                if (matches.length > 1) {
+                    this.printTerminal('Multiple objects at Z:' + window.playerZ + ' (' +
+                        matches.map(f => f.substring(0, 2)).join(', ') + '). Specify: gfx edit <2-char id>');
+                    break;
+                }
+
+                let fullPath = `${localDir}/${matches[0]}`;
+
+                if (newCode !== undefined) {
+                    let saveVal = (newCode === 'null') ? '' : newCode;
+                    await dos.save(fullPath, saveVal);
+                    this.printTerminal('Updated punch code for ' + fullPath);
+                    break;
+                }
+
+                await dos.save('cylon:/a/gfxEditTarget', fullPath);
+                if (typeof window.CylonCommand === 'function') {
+                    await window.CylonCommand('cylon-gfx-compiler.htm');
+                } else if (window.parent && typeof window.parent.PageOpen === 'function') {
+                    await window.parent.PageOpen('cylon-gfx-compiler.htm');
+                } else if (typeof window.PageOpen === 'function') {
+                    await window.PageOpen('cylon-gfx-compiler.htm');
+                }
+                break;
+            }
+
             case 'say': {
                 if (!window.remoteQandylandUrl) {
                     if (window.parent && window.parent.print) window.parent.print(`[.4]GFX Error: Not connected to a Qandyland server.[.]\n`);
@@ -1966,12 +2458,26 @@ window.CylonGFX = {
                 if (window.gfxDo === "RF") window.gfxDo = "";
                 window.gfxDo += cmd;
                 this.setCursorZ(targetZ);
+                if (this.fillTileCode) {
+                    this._afterTickQueue.push({ cmd: 'tile', data: this.fillTileCode });
+                    if (!this.isSyncing) this.networkTick();
+                }
             } else {
+                if (this.fillTileCode) {
+                    window.playerWalk = -1;
+                    window.playerDo = "";
+                    return;
+                }
+
                 // Edge scroll is authoritative on the server
                 if (window.gfxDo === "RF") window.gfxDo = "";
                 window.gfxDo += cmd;
                 window.playerWalk = -1;
                 window.playerDo = "";
+                if (this.fillTileCode) {
+                    this._afterTickQueue.push({ cmd: 'tile', data: this.fillTileCode });
+                    if (!this.isSyncing) this.networkTick();
+                }
             }
             return;
         }
@@ -1989,23 +2495,29 @@ window.CylonGFX = {
         if (this.gfxAirLock) {
             if (dx > 0) {
                 if (x === this.gridWide - 1) moveBlocked = true;
-                else if (nx === this.gridWide - 1) { dirChar = 'E'; triggersScroll = true; }
+                else if (nx === this.gridWide - 1 && !this.fillTileCode) { dirChar = 'E'; triggersScroll = true; }
             } else if (dx < 0) {
                 if (x === 0) moveBlocked = true;
-                else if (nx === 0) { dirChar = 'W'; triggersScroll = true; }
+                else if (nx === 0 && !this.fillTileCode) { dirChar = 'W'; triggersScroll = true; }
             }
             if (dy > 0) {
                 if (y === this.gridTall - 1) moveBlocked = true;
-                else if (ny === this.gridTall - 1) { dirChar = 'S'; triggersScroll = true; }
+                else if (ny === this.gridTall - 1 && !this.fillTileCode) { dirChar = 'S'; triggersScroll = true; }
             } else if (dy < 0) {
                 if (y === 0) moveBlocked = true;
-                else if (ny === 0) { dirChar = 'N'; triggersScroll = true; }
+                else if (ny === 0 && !this.fillTileCode) { dirChar = 'N'; triggersScroll = true; }
             }
         } else {
-            if (nx >= this.gridWide) { dirChar = 'E'; triggersScroll = true; }
-            else if (nx < 0) { dirChar = 'W'; triggersScroll = true; }
-            if (ny >= this.gridTall) { dirChar = 'S'; triggersScroll = true; }
-            else if (ny < 0) { dirChar = 'N'; triggersScroll = true; }
+            if (nx >= this.gridWide) {
+                if (this.fillTileCode) moveBlocked = true; else { dirChar = 'E'; triggersScroll = true; }
+            } else if (nx < 0) {
+                if (this.fillTileCode) moveBlocked = true; else { dirChar = 'W'; triggersScroll = true; }
+            }
+            if (ny >= this.gridTall) {
+                if (this.fillTileCode) moveBlocked = true; else { dirChar = 'S'; triggersScroll = true; }
+            } else if (ny < 0) {
+                if (this.fillTileCode) moveBlocked = true; else { dirChar = 'N'; triggersScroll = true; }
+            }
         }
 
         let tentativeZ = ny * this.gridWide + nx;
@@ -2208,10 +2720,12 @@ window.CylonGFX = {
             }
         };
 
-        if (y === 0) addScroll('N', 'Scroll North', 0, -1);
-        if (y === this.gridTall - 1) addScroll('S', 'Scroll South', 0, 1);
-        if (x === this.gridWide - 1) addScroll('E', 'Scroll East', 1, 0);
-        if (x === 0) addScroll('W', 'Scroll West', -1, 0);
+        if (!this.fillTileCode) {
+            if (y === 0) addScroll('N', 'Scroll North', 0, -1);
+            if (y === this.gridTall - 1) addScroll('S', 'Scroll South', 0, 1);
+            if (x === this.gridWide - 1) addScroll('E', 'Scroll East', 1, 0);
+            if (x === 0) addScroll('W', 'Scroll West', -1, 0);
+        }
 
         items.push({
             label: 'Walk Here',

@@ -213,7 +213,7 @@ function _getMoveCost(w5Value, tileCode) {
 }
 
 // ── UNIVAC ────────────────────────────────────────────────────────────────────
-function UNIVAC(driveName, itemfile, objfile, sessionToken) {
+function UNIVAC(driveName, itemfile, objfile, sessionToken, options) {
   sessionToken = sessionToken || 'UNIVAC';
 
   if (!_deps) {
@@ -264,6 +264,10 @@ function UNIVAC(driveName, itemfile, objfile, sessionToken) {
   var originalId       = state.id;
   var originalPlayerId = state.playerid;
 
+  var playerStatus = (options && options.playerStatus)
+    ? String(options.playerStatus).toLowerCase()
+    : 'player';
+
   // ── 2. Load the object's punch code (resolving /q/[tag] & whitespace) ─────
   var tape = loadPunchCode(driveName, objfile);
   if (tape === null) {
@@ -300,8 +304,15 @@ function UNIVAC(driveName, itemfile, objfile, sessionToken) {
         var files = listRes.listing.trim().split(/\s+/);
         for (var i = 0; i < files.length; i++) {
           var fname = files[i];
-          if (fname.length === 6 && /^[0-9A-Za-z_()[\]{}^,:;+\-=%@]{2}$/.test(fname.substring(4, 6))) {
-            return fname.substring(4, 6);
+          if (fname.length !== 6) continue;
+
+          // Ignore runtime markers (Vx, Vy, Xz, Xt, Vb, etc.)
+          var prefix = fname.charAt(0);
+          if (prefix === 'V' || prefix === 'X') continue;
+
+          var data = fname.substring(4, 6);
+          if (data !== 'Za' && /^[0-9A-Za-z_()[\]{}^,:;+\-=%@]{2}$/.test(data)) {
+            return data;
           }
         }
       }
@@ -450,6 +461,22 @@ function UNIVAC(driveName, itemfile, objfile, sessionToken) {
         break;
       }
 
+      case 'Xg': {
+        var isGuest = (playerStatus === 'guest');
+        if (ifnot) isGuest = !isGuest;
+        if (!isGuest) { switchopen = true; }
+        ifnot = false;
+        break;
+      }
+
+      case 'Vg': {
+        if (!switchopen) {
+          output += "S^Vg^S";
+        }
+        ifnot = false;
+        break;
+      }
+
       case 'Xs': {
         var regKey = tape.slice(column, column + 2); column += 2;
         var val = tape.slice(column, column + 2); column += 2;
@@ -546,6 +573,24 @@ function UNIVAC(driveName, itemfile, objfile, sessionToken) {
           var cleanInv = state.content.replace(/\s+/g, '');
           output += "S^Vi" + cleanInv + "--^S";
         }
+        break;
+      }
+
+      case 'Vh': {
+        var textStr = "";
+        var endCol = tape.indexOf('--', column);
+        if (endCol !== -1) {
+          textStr = tape.slice(column, endCol);
+          column = endCol + 2;
+        } else {
+          textStr = tape.slice(column);
+          column = tape.length;
+        }
+
+        if (!switchopen && textStr) {
+          output += "Vh" + textStr + "--";
+        }
+        ifnot = false;
         break;
       }
 
@@ -670,6 +715,7 @@ function UNIVAC(driveName, itemfile, objfile, sessionToken) {
           var isEdge      = false;
           var dirChar     = '';
           var moveBlocked = false;
+          var noScroll = !!(options && options.noScroll);
 
           if (airLock) {
             if (word === 'Vn') {
@@ -677,46 +723,46 @@ function UNIVAC(driveName, itemfile, objfile, sessionToken) {
               if (row === 0) moveBlocked = true;
               else {
                 tempZ = currentZ - GFX_COLS;
-                if (Math.floor(tempZ / GFX_COLS) === 0) isEdge = true;
+                if (!noScroll && Math.floor(tempZ / GFX_COLS) === 0) isEdge = true;
               }
             } else if (word === 'Vs') {
               dirChar = 'S';
               if (row === GFX_ROWS - 1) moveBlocked = true;
               else {
                 tempZ = currentZ + GFX_COLS;
-                if (Math.floor(tempZ / GFX_COLS) === GFX_ROWS - 1) isEdge = true;
+                if (!noScroll && Math.floor(tempZ / GFX_COLS) === GFX_ROWS - 1) isEdge = true;
               }
             } else if (word === 'Ve') {
               dirChar = 'E';
               if (col === GFX_COLS - 1) moveBlocked = true;
               else {
                 tempZ = currentZ + 1;
-                if (tempZ % GFX_COLS === GFX_COLS - 1) isEdge = true;
+                if (!noScroll && tempZ % GFX_COLS === GFX_COLS - 1) isEdge = true;
               }
             } else if (word === 'Vw') {
               dirChar = 'W';
               if (col === 0) moveBlocked = true;
               else {
                 tempZ = currentZ - 1;
-                if (tempZ % GFX_COLS === 0) isEdge = true;
+                if (!noScroll && tempZ % GFX_COLS === 0) isEdge = true;
               }
             }
           } else {
             if (word === 'Vn') {
               dirChar = 'N';
-              if (row === 0) isEdge = true;
+              if (row === 0) { if (noScroll) moveBlocked = true; else isEdge = true; }
               else tempZ = currentZ - GFX_COLS;
             } else if (word === 'Vs') {
               dirChar = 'S';
-              if (row === GFX_ROWS - 1) isEdge = true;
+              if (row === GFX_ROWS - 1) { if (noScroll) moveBlocked = true; else isEdge = true; }
               else tempZ = currentZ + GFX_COLS;
             } else if (word === 'Ve') {
               dirChar = 'E';
-              if (col === GFX_COLS - 1) isEdge = true;
+              if (col === GFX_COLS - 1) { if (noScroll) moveBlocked = true; else isEdge = true; }
               else tempZ = currentZ + 1;
             } else if (word === 'Vw') {
               dirChar = 'W';
-              if (col === 0) isEdge = true;
+              if (col === 0) { if (noScroll) moveBlocked = true; else isEdge = true; }
               else tempZ = currentZ - 1;
             }
           }

@@ -355,6 +355,11 @@ let driveIconDir = 'i/';
 let driveTileDir = 't/';
 let driveItemOverrides = {};
 
+// Editor state
+let currentTargetPath = null;
+let originalCode = '';
+let remoteTarget = null;
+
 // Strict QPC tag rule: >= 3 chars, lowercase letters and numerals only
 const VALID_QPC_TAG_RE = /^[a-z0-9]{3,}$/;
 
@@ -363,10 +368,6 @@ const qpcCache = new Map();
 
 // Tracks expanded folder paths so refreshes preserve tree state
 const expandedPaths = new Set();
-
-// Editor state
-let currentTargetPath = null;
-let originalCode = '';
 
 function getDos() {
     return (window.parent && window.parent.CylonDOS) ? window.parent.CylonDOS : window.CylonDOS;
@@ -448,21 +449,38 @@ async function checkEditTarget() {
 
     try {
         if (!(await dos.exists('cylon:/a/gfxEditTarget'))) return false;
-        let targetPath = await dos.load('cylon:/a/gfxEditTarget');
-        targetPath = targetPath ? targetPath.trim() : '';
-        if (!targetPath) return false;
+        let targetRaw = await dos.load('cylon:/a/gfxEditTarget');
+        targetRaw = targetRaw ? targetRaw.trim() : '';
+        if (!targetRaw) return false;
 
         await dos.save('cylon:/a/gfxEditTarget', '');
 
-        const colonIdx = targetPath.indexOf(':');
+        if (targetRaw.startsWith('{')) {
+            let parsed = null;
+            try { parsed = JSON.parse(targetRaw); } catch (e) { parsed = null; }
+            if (parsed && parsed.mode === 'remote') {
+                const cachePath = parsed.path || '';
+                const colonIdx = cachePath.indexOf(':');
+                if (colonIdx > 0) {
+                    const driveName = cachePath.substring(0, colonIdx);
+                    if (window.activeDrive !== driveName) {
+                        await selectDrive(driveName, { skipRender: true });
+                    }
+                }
+                await openRemoteTargetInEditor(parsed);
+                return true;
+            }
+        }
+
+        const colonIdx = targetRaw.indexOf(':');
         if (colonIdx > 0) {
-            const driveName = targetPath.substring(0, colonIdx);
+            const driveName = targetRaw.substring(0, colonIdx);
             if (window.activeDrive !== driveName) {
                 await selectDrive(driveName, { skipRender: false });
             }
         }
 
-        await openFileInEditor(targetPath);
+        await openFileInEditor(targetRaw);
         return true;
     } catch (e) {
         console.warn('Could not read gfxEditTarget', e);
@@ -920,7 +938,33 @@ function formatTargetHeadline(targetPath) {
     return targetPath;
 }
 
+async function openRemoteTargetInEditor(target) {
+    await preloadQpcTags();
+
+    remoteTarget = target;
+    currentTargetPath = target.path || (`${target.sector}/${target.filename}`);
+    document.getElementById('target-file').textContent =
+        formatTargetHeadline(currentTargetPath) + ' [REMOTE]';
+
+    const noticeEl = document.getElementById('editor-notice');
+    noticeEl.textContent = `Remote target on ${target.remoteDrive} (${target.sector}/${target.filename})`;
+    noticeEl.style.display = 'block';
+
+    let content = (target.code != null) ? String(target.code) : '';
+    content = content.replace(/\\n/g, '\n');
+
+    originalCode = content;
+    document.getElementById('punchcodeInput').value = content;
+    document.getElementById('save-btn').disabled = true;
+
+    document.getElementById('tree-view').style.display = 'none';
+    document.getElementById('editor-view').style.display = 'flex';
+
+    decompilepunchcode(content);
+}
+
 async function openFileInEditor(targetPath) {
+    remoteTarget = null;
     const dos = getDos();
     if (!dos) return;
 
@@ -970,6 +1014,7 @@ function showTreeView() {
 }
 
 function cancelEdit() {
+    remoteTarget = null;
     currentTargetPath = null;
     originalCode = '';
     document.getElementById('punchcodeInput').value = '';
@@ -988,16 +1033,66 @@ function onCodeChange() {
 async function saveLogic() {
     if (!currentTargetPath) return;
     const dos = getDos();
-    if (!dos) return;
-
     const currentCode = document.getElementById('punchcodeInput').value;
+
+    if (remoteTarget) {
+        try {
+            const targetRef = (remoteTarget.sector && remoteTarget.filename)
+                ? `${remoteTarget.sector}/${remoteTarget.filename}`
+                : remoteTarget.itemId;
+            const codeArg = (currentCode === '') ? 'null' : currentCode;
+            let driveParam = remoteTarget.remoteDrive || '';
+            if (driveParam && !driveParam.endsWith('.gfx')) driveParam += '.gfx';
+
+            const formData = new URLSearchParams();
+            formData.append('c', `GFX:code ${targetRef} ${codeArg}`);
+            formData.append('d', driveParam);
+            if (remoteTarget.session) formData.append('s', remoteTarget.session);
+
+            const res = await fetch(remoteTarget.remoteUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: formData.toString()
+            });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+
+            const json = await res.json();
+            if (!json.ok) throw new Error(json.output || 'Remote save failed');
+
+            // Keep local RAM cache in sync
+            if (dos && remoteTarget.path) {
+                try { await dos.save(remoteTarget.path, currentCode); } catch (e) {}
+            }
+
+            originalCode = currentCode;
+            document.getElementById('save-btn').disabled = true;
+
+            if (window.popHtm) {
+                window.popHtm(
+                    `<div style="padding:12px 18px; background:var(--menu-bg,#111); border:1px solid var(--fg-color,#0f0); color:var(--fg-color,#0f0); text-align:center;"><b>Saved to Server!</b></div>`,
+                    'center'
+                );
+                setTimeout(() => { if (window.hpop) window.hpop(); }, 900);
+            }
+        } catch (err) {
+            const msg = err && err.message ? err.message : String(err);
+            if (window.parent && window.parent.printDOS) {
+                window.parent.printDOS(`Error saving remote ${currentTargetPath}: [.4]${msg}[.]\n`);
+            }
+            const noticeEl = document.getElementById('editor-notice');
+            noticeEl.textContent = msg.replace(/\[\.[0-9]?\]/g, '');
+            noticeEl.style.display = 'block';
+        }
+        return;
+    }
+
+    if (!dos) return;
 
     try {
         await dos.save(currentTargetPath, currentCode);
         originalCode = currentCode;
         document.getElementById('save-btn').disabled = true;
 
-        // Keep QPC cache in sync immediately if editing a valid /q/<tag> file
         if (isPathInQDir(currentTargetPath)) {
             const tagName = currentTargetPath.substring(currentTargetPath.lastIndexOf('/') + 1);
             if (VALID_QPC_TAG_RE.test(tagName)) {

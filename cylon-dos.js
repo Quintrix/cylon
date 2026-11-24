@@ -479,15 +479,19 @@
   }
 
   async function loadArchiveText(spec, options) {
-    if (options && options.data != null) return options.data;
+    if (options && options.data != null) return { text: String(options.data), url: null };
     spec = String(spec || '').trim();
-    if (spec.charAt(0) === '{') return spec;
-    if (!spec) fail('rom source required (URL or .json file)');
+    if (!spec) return { text: '', url: null };
+    if (spec.charAt(0) === '{') return { text: spec, url: null };
     if (typeof global.fetch !== 'function') fail('fetch is not available');
     var res;
     try { res = await global.fetch(spec); } catch (e) { fail('cannot load ' + spec + ': ' + (e && e.message || e)); }
     if (!res.ok) fail('cannot load ' + spec + ': HTTP ' + res.status);
-    return res.text();
+    var resolvedUrl = res.url || null;
+    if (!resolvedUrl && global.location && global.location.href) {
+      try { resolvedUrl = new URL(spec, global.location.href).href; } catch (e) {}
+    }
+    return { text: await res.text(), url: resolvedUrl };
   }
 
   /* ------------------------------------------------------------------ */
@@ -734,7 +738,8 @@
       m = { name: name || rec.name, type: 'idb', source: 'idb:' + rec.name, partition: rec.name,
             readOnly: !!options.readOnly, backend: idbBackend(rec.name) };
     } else if (kind === 'rom') {
-      var archive = decodeArchive(await loadArchiveText(rest, options));
+      var loaded = await loadArchiveText(rest, options);
+      var archive = decodeArchive(loaded.text);
       var entries = normalizeEntries(archive.entries);
       var total = entries.reduce(function (n, e) { return n + e.size; }, 0);
       if (total > MAX_ROM_BYTES) fail('rom image too large (' + formatSize(total) + ')');
@@ -744,14 +749,17 @@
         (archive.drive && DRIVE_RE.test(String(archive.drive)) ? String(archive.drive) : '');
       if (!name && !DRIVE_RE.test(derived)) fail('cannot derive a drive name; specify one');
       m = { name: name || derived, type: 'rom', source: rest.charAt(0) === '{' ? '(inline)' : rest,
-            readOnly: true, backend: kvBackend('rom', store, { readOnly: true }) };
+            sourceUrl: loaded.url, readOnly: true, backend: kvBackend('rom', store, { readOnly: true }) };
     } else if (kind === 'ram') {
       var store = memStore();
       var quota = options.quota || RAM_DEFAULT_QUOTA;
+      var sourceUrl = null;
       
       // If a file was specified (e.g., ram:cylon.json), load and populate it
       if (rest) {
-        var archive = decodeArchive(await loadArchiveText(rest, options));
+        var loaded = await loadArchiveText(rest, options);
+        sourceUrl = loaded.url;
+        var archive = decodeArchive(loaded.text);
         var entries = normalizeEntries(archive.entries);
         
         var total = entries.reduce(function (n, e) { return n + e.size; }, 0);
@@ -759,8 +767,38 @@
         
         entries.forEach(function (e) { store.set(e.path, e); });
       }
-      m = { name: name || sourceName(rest) || 'ram', type: 'ram', source: rest ? 'ram:' + rest : 'ram:', readOnly: !!options.readOnly,
+      m = { name: name || sourceName(rest) || 'ram', type: 'ram', source: rest ? 'ram:' + rest : 'ram:',
+            sourceUrl: sourceUrl, readOnly: !!options.readOnly,
             backend: kvBackend('ram', store, { quota: quota }) };
+      
+    } else if (kind === 'ls') {
+      if (!global.localStorage) fail('localStorage is not available');
+      
+      // Smart detection: is this a drive name to connect to, or a file to fetch?
+      var isFile = rest.indexOf('/') !== -1 || rest.toLowerCase().endsWith('.gfx') || rest.toLowerCase().endsWith('.json') || rest.toLowerCase().startsWith('http');
+      var actualDriveName = name || (isFile ? sourceName(rest) : rest);
+      
+      if (!DRIVE_RE.test(actualDriveName)) fail('invalid localStorage drive name: ' + actualDriveName);
+      
+      var store = lsStore(actualDriveName);
+      var sourceUrl = null;
+      
+      // If a file was specified, fetch and populate localStorage automatically
+      if (isFile) {
+        var loaded = await loadArchiveText(rest, options);
+        sourceUrl = loaded.url;
+        var archive = decodeArchive(loaded.text);
+        var entries = normalizeEntries(archive.entries);
+        var quota = options.quota || RAM_DEFAULT_QUOTA;
+        
+        var total = entries.reduce(function (n, e) { return n + e.size; }, 0);
+        if (total > quota) fail('ls image too large (' + formatSize(total) + ') for quota (' + formatSize(quota) + ')');
+        
+        entries.forEach(function (e) { store.set(e.path, e); });
+      }
+      
+      m = { name: actualDriveName, type: 'ls', source: 'ls:' + rest, sourceUrl: sourceUrl,
+            readOnly: !!options.readOnly, backend: kvBackend('ls', store, { quota: options.quota || RAM_DEFAULT_QUOTA }) };
       
     } else if (kind === 'ls') {
       if (!global.localStorage) fail('localStorage is not available');
@@ -808,7 +846,7 @@
       var m = mounts[mountOrder[i]];
       var u = await m.backend.usage();
       rows.push({
-        name: m.name, type: m.type, source: m.source, readOnly: m.readOnly,
+        name: m.name, type: m.type, source: m.source, sourceUrl: m.sourceUrl || null, readOnly: m.readOnly,
         current: m.name === currentName, mounted: m.mounted, cwd: '/' + m.cwd,
         used: u.used, count: u.count, quota: u.quota
       });

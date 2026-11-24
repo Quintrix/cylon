@@ -334,18 +334,18 @@ function keyboard() {
         renderInputLine();
     }
 
-    function sendProxyInput(type) {
+    function sendProxyInput(type, extra) {
         if (typeof window.applyProxyInputToTarget === 'function') {
-            window.applyProxyInputToTarget(type, proxyInputId, inputBuffer);
+            window.applyProxyInputToTarget(type, proxyInputId, inputBuffer, extra);
             return;
         }
         var activeFrame = document.querySelector('.page-frame.active');
         if (activeFrame && activeFrame.contentWindow) {
-            activeFrame.contentWindow.postMessage({
+            activeFrame.contentWindow.postMessage(Object.assign({
                 type: type,
                 id: proxyInputId,
                 value: inputBuffer
-            }, (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
+            }, extra || {}), (window.location.origin && window.location.origin !== "null" ? window.location.origin : "*"));
         }
     }
 
@@ -474,11 +474,25 @@ function keyboard() {
         cursorPos = range[0];
         selAnchor = null;
     }
-    
+
+    const PROXY_CHAR_FILTERS = {
+        number: /^[0-9.\-+eE]$/,
+        tel:    /^[0-9+\-(). *#]$/
+    };
+
+    function filterProxyText(str) {
+        if (osMode !== 'app-edit' && osMode !== 'app-textarea') return str;
+        const re = PROXY_CHAR_FILTERS[window.proxyInputType];
+        if (!re) return str;
+        return Array.from(str).filter(ch => re.test(ch)).join('');
+    }
+
     // Expose for external copy/paste events from host OS
     window.pasteText = function(text) {
+        text = filterProxyText(text);
+        if (!text) return;
         if (hasSelection()) deleteSelection();
-        
+
         if (window.proxyInputMaxLen !== null && typeof window.proxyInputMaxLen !== 'undefined') {
             let available = window.proxyInputMaxLen - inputBuffer.length;
             if (available <= 0) return;
@@ -488,12 +502,12 @@ function keyboard() {
         inputBuffer = inputBuffer.slice(0, cursorPos) + text + inputBuffer.slice(cursorPos);
         cursorPos += text.length;
         renderInputLine();
-        
+
         if (osMode === 'app-edit' || osMode === 'app-textarea') {
             sendProxyInput('QANDY_UPDATE_INPUT');
         }
     };
-
+    
     window.press = function(e) {
         if (e && e.toApp && osMode !== 'app' && osMode !== 'app-edit' && osMode !== 'app-textarea') {
             if (document.body.classList.contains('app-mode') && typeof window.setOSMode === 'function') {
@@ -570,7 +584,7 @@ function keyboard() {
         } else if (e.id === 'enter') {
             if (osMode === 'app') { window.sendVirtualKey('Enter'); return; }
             if (osMode === 'app-edit') {
-                sendProxyInput('QANDY_COMMIT_INPUT');
+                sendProxyInput('QANDY_COMMIT_INPUT', { submit: true });
                 window.setOSMode('app');
                 window.hideFullKeyboard();
             } else if (osMode === 'app-textarea') {
@@ -585,18 +599,20 @@ function keyboard() {
                 cursorPos = 0;
                 selAnchor = null;
                 if (window.updatePrompt) window.updatePrompt();
-                
+
                 // Bounce back to standard app control immediately after submitting DOS command
                 if (osMode === 'app-cli') {
-                    window.setOSMode('app'); 
+                    window.setOSMode('app');
                     var activeFrame = document.querySelector('.page-frame.active');
                     if (activeFrame) activeFrame.focus();
                 }
-                
+
                 hideFullKeyboard();
             }
         } else if (e.id === 'tab') {
-            if (typeof window.toggleAppFocus === 'function') window.toggleAppFocus();
+            if (typeof window.handleTabCycle === 'function') window.handleTabCycle(shiftHeld);
+            else if (typeof window.toggleAppFocus === 'function') window.toggleAppFocus();
+            return;
         } else if (e.id === 'esc') {
             // Priority 1: Hide Virtual Keyboard if open
             if (window.isVirtualKeyboardOpen && window.isVirtualKeyboardOpen()) {
@@ -631,13 +647,15 @@ function keyboard() {
             
         } else if (e.char) {
             if (osMode === 'app') { window.sendVirtualKey(e.char); return; }
+            const ch = filterProxyText(e.char);
+            if (!ch) return;
             if (hasSelection()) deleteSelection();
-            
+
             let willAddLength = insertMode || cursorPos === inputBuffer.length;
             if (window.proxyInputMaxLen !== null && typeof window.proxyInputMaxLen !== 'undefined' && willAddLength && inputBuffer.length >= window.proxyInputMaxLen) return;
 
-            if (insertMode) { inputBuffer = inputBuffer.slice(0, cursorPos) + e.char + inputBuffer.slice(cursorPos); }
-            else { inputBuffer = inputBuffer.slice(0, cursorPos) + e.char + inputBuffer.slice(cursorPos + 1); }
+            if (insertMode) { inputBuffer = inputBuffer.slice(0, cursorPos) + ch + inputBuffer.slice(cursorPos); }
+            else { inputBuffer = inputBuffer.slice(0, cursorPos) + ch + inputBuffer.slice(cursorPos + 1); }
             cursorPos++;
         }
         renderInputLine();
