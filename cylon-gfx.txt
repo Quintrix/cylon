@@ -163,7 +163,7 @@ ________________________________________________________________________________
                  player-item's avatar to $$ until -- (ie: VaB0D0La-- = B0D0La)
                  XnVa has client popup join menu
                  
-       Vb
+       Vb Vb%%-- Chat Bubbles
        
        Vc Vc     city: enters city 
 
@@ -210,7 +210,7 @@ ________________________________________________________________________________
                  'Xn' (not) flag is set, it will teleport the player if item ## is in their
                  inventory even if the teleport is not a valid destination.
 
-       Vu
+       Vu        Wear an item
                           
        Vw Vw     west
        

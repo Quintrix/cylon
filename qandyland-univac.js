@@ -212,6 +212,7 @@ function _getMoveCost(w5Value, tileCode) {
   }
 }
 
+
 // ── UNIVAC ────────────────────────────────────────────────────────────────────
 function UNIVAC(driveName, itemfile, objfile, sessionToken, options) {
   sessionToken = sessionToken || 'UNIVAC';
@@ -445,8 +446,25 @@ function UNIVAC(driveName, itemfile, objfile, sessionToken, options) {
           column += 2;
         }
 
-        if (!switchopen && state.playerid) {
-          state.avatar = avatarStr;
+        if (!switchopen && state.playerid && /^[ABEF][0-9][CDGH][0-9]$/.test(avatarStr)) {
+          state.avatar = avatarStr + state.avatar.slice(4);
+        }
+        break;
+      }
+
+      case 'Vu': {
+        var noun = tape.slice(column, column + 2); column += 2;
+        if (!switchopen && state.playerid && /^[LMN][a-z0-9_()[\]{}^,:;+\-=%@]$/.test(noun)) {
+          if (state.content.indexOf(noun) > -1) {
+            var re = new RegExp(noun.charAt(0) + '.');
+            if (state.avatar.indexOf(noun) > -1) {
+              state.avatar = state.avatar.replace(noun, '');
+            } else if (re.test(state.avatar)) {
+              state.avatar = state.avatar.replace(re, noun);
+            } else {
+              state.avatar += noun;
+            }
+          }
         }
         break;
       }
@@ -1518,23 +1536,23 @@ function calculateTargetSector(currentSector, dirChar, maxMapBounds, roundWorld)
   return String.fromCharCode(yCode) + String.fromCharCode(xCode);
 }
 
+
 function flipAvatarDirection(avatarStr, cmd) {
   if (!avatarStr || (cmd !== 'Ve' && cmd !== 'Vw')) return avatarStr;
 
-  var parts = avatarStr.split('-');
-  var base = parts[0];
-  var popup = parts.length > 1 ? '-' + parts.slice(1).join('-') : '';
+  var headBody = avatarStr.slice(0, 4);
+  var rest = avatarStr.slice(4);
 
   if (cmd === 'Ve') {
-    base = base.replace(/[ACEGIKMO]/g, function(c) {
+    headBody = headBody.replace(/[ACEG]/g, function(c) {
       return String.fromCharCode(c.charCodeAt(0) + 1);
     });
   } else {
-    base = base.replace(/[BDFHJLNP]/g, function(c) {
+    headBody = headBody.replace(/[BDFH]/g, function(c) {
       return String.fromCharCode(c.charCodeAt(0) - 1);
     });
   }
-  return base + popup;
+  return headBody + rest;
 }
 
 // ── Exports ───────────────────────────────────────────────────────────────────

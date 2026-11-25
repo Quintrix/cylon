@@ -770,7 +770,7 @@ async function plugboard(req, stacker, plugs, drive, session) {
   }
 
   var player = playerIndex.get(session);
-
+  
   if (!player) {
     player = {
       drive: drive,
@@ -791,6 +791,8 @@ async function plugboard(req, stacker, plugs, drive, session) {
       runtape("Va" + cleanAvatar + "--");
     }
   }
+  
+  var avatarBeforeTape = player.avatar;
 
   let tape = "";
   if (DOS.fileExists(drive, '/', 'w/b').exists) runfile('w/b');
@@ -847,6 +849,13 @@ async function plugboard(req, stacker, plugs, drive, session) {
           player.chatPath = bPath;
           player.chatLoc  = bLoc;
         }
+        break;
+      }
+
+      case 'Vu': {
+        if (!player.item || player.item === "" || player.item.startsWith('Za')) { column += 2; break; }
+        let useItem = plugs.slice(column, column + 2); column += 2;
+        tape += code + useItem;
         break;
       }
 
@@ -1430,6 +1439,10 @@ async function plugboard(req, stacker, plugs, drive, session) {
   }
 
   if (tape) { runtape(tape); tape = ""; }
+
+  if (!skipPostTick && session && player.userKey && player.avatar !== avatarBeforeTape) {
+    saveUserSnapshot(player, session);
+  }
 
   if (!skipPostTick && session) {
     if (player.item && player.item.length >= 2) {

@@ -1934,10 +1934,25 @@ window.cycleActivePage = function() {
                             }
                         } catch (err) {}
                         forwardPointerEvent(entry, ev, 'pointerup');
+                        if (ev.button === 0 || ev.pointerType !== 'mouse') {
+                            const hit = this.getPassthroughTarget(ev.clientX, ev.clientY);
+                            if (hit && (hit === entry.el || entry.el.contains(hit))) {
+                                const fRect = entry.frame.getBoundingClientRect();
+                                entry.el.dispatchEvent(new MouseEvent('click', {
+                                    bubbles: true,
+                                    cancelable: true,
+                                    button: ev.button,
+                                    buttons: ev.buttons,
+                                    clientX: ev.clientX - fRect.left,
+                                    clientY: ev.clientY - fRect.top
+                                }));
+                            }
+                        }
                         ev.preventDefault();
                         ev.stopPropagation();
                         return;
                     }
+                    
                     const shouldDismiss = dismissCandidates.delete(ev.pointerId);
                     if (ev.target === popWrapper && shouldDismiss) {
                         if (this.isMenuOpen || window.PopForce !== 'visible') {

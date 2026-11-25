@@ -858,6 +858,27 @@ window.CylonGFX = {
         }
     },
 
+    // Build a single tile <img>. Records data-src so we can diff cheaply later.
+    _makeTileEl: function(z, code) {
+        let x = z % this.gridWide;
+        let y = Math.floor(z / this.gridWide);
+        let src = `${this.gfxTileDir}${code}.png`;
+
+        let img = document.createElement('img');
+        img.src = src;
+        img.setAttribute('data-src', src);
+        img.onerror = function() { this.style.display = 'none'; };
+        img.style.position = 'absolute';
+        img.style.left = ((x / this.gridWide) * 100) + '%';
+        img.style.top = ((y / this.gridTall) * 100) + '%';
+        img.style.width = ((1 / this.gridWide) * 100) + '%';
+        img.style.height = ((1 / this.gridTall) * 100) + '%';
+        img.style.imageRendering = 'pixelated';
+        img.id = `gfx-tile-${z}`;
+        return img;
+    },
+
+    // Full rebuild (sector change / explicit edits only).
     renderSectorTiles: function(sector) {
         const tilesLayer = document.getElementById('tiles-layer');
         if (!tilesLayer) return;
@@ -868,57 +889,106 @@ window.CylonGFX = {
         for (let z = 0; z < total; z++) {
             let code = tData.substring(z * 2, z * 2 + 2);
             if (code && code !== 'Za') {
-                let x = z % this.gridWide;
-                let y = Math.floor(z / this.gridWide);
-
-                let img = document.createElement('img');
-                img.src = `${this.gfxTileDir}${code}.png`;
-                img.onerror = function() { this.style.display = 'none'; };
-                img.style.position = 'absolute';
-                img.style.left = ((x / this.gridWide) * 100) + '%';
-                img.style.top = ((y / this.gridTall) * 100) + '%';
-                img.style.width = ((1 / this.gridWide) * 100) + '%';
-                img.style.height = ((1 / this.gridTall) * 100) + '%';
-                img.style.imageRendering = 'pixelated';
-                img.id = `gfx-tile-${z}`;
-                tilesLayer.appendChild(img);
+                tilesLayer.appendChild(this._makeTileEl(z, code));
             }
         }
     },
 
+    // Flicker-free refresh: only touches tiles whose image actually changed.
+    // Result in the DOM is identical to renderSectorTiles().
+    syncSectorTiles: function(sector) {
+        const tilesLayer = document.getElementById('tiles-layer');
+        if (!tilesLayer) return;
+
+        let existing = new Map();
+        for (let el of Array.from(tilesLayer.children)) existing.set(el.id, el);
+
+        let tData = this.mapTiles[sector] || '';
+        let total = this.gridWide * this.gridTall;
+        for (let z = 0; z < total; z++) {
+            let code = tData.substring(z * 2, z * 2 + 2);
+            let want = (code && code !== 'Za') ? code : null;
+            let id = `gfx-tile-${z}`;
+            let el = existing.get(id);
+            existing.delete(id);
+
+            if (!want) {
+                if (el) el.remove();
+                continue;
+            }
+            let src = `${this.gfxTileDir}${want}.png`;
+            if (!el) {
+                tilesLayer.appendChild(this._makeTileEl(z, want));
+            } else if (el.getAttribute('data-src') !== src) {
+                el.src = src;
+                el.setAttribute('data-src', src);
+                el.style.display = '';
+            }
+        }
+        // Anything left over has no valid id/slot any more
+        existing.forEach(el => el.remove());
+    },
+
+    // Build one static object element from its filename (e.g. "Ta0cZa").
+    // data-base-code remembers the pristine filename so we can diff/reset later.
+    _buildStaticObj: function(sector, fname) {
+        let drive = window.desktopDrive || this.currentPath.split(':')[0] || 'capflag';
+        let iconId = fname.substring(0, 2);
+        let zHex = fname.substring(2, 4);
+        let z = this.decodeZ(zHex, this.gfxZBase);
+        if (isNaN(z)) return null;
+
+        let x = z % this.gridWide;
+        let y = Math.floor(z / this.gridWide);
+        let labelText = this.getItemName(iconId);
+        let fullPath = `${drive}:/w/${sector}/${fname}`;
+
+        let wrap = this.buildSprite(iconId, x, y, z, labelText, fullPath, "");
+        if (wrap) {
+            wrap.classList.add('static-obj');
+            wrap.setAttribute('data-orig-id', iconId);
+            wrap.setAttribute('data-id', iconId);
+            wrap.setAttribute('data-zstr', zHex);
+            wrap.setAttribute('data-code', fname);
+            wrap.setAttribute('data-base-code', fname);
+            wrap.id = `obj_${iconId}_${z}`;
+        }
+        return wrap;
+    },
+
+    // Full rebuild (sector change / explicit object edits). Also clears dynamic
+    // sprites and chat bubbles, as before.
     renderSectorStaticObjects: function(sector) {
         const iconsLayer = document.getElementById('icons-layer');
-
-        if (iconsLayer) {
-          iconsLayer.querySelectorAll('.dyn-sprite, .chat-bubble').forEach(el => el.remove());
-        }
-
         if (!iconsLayer) return;
 
+        iconsLayer.querySelectorAll('.dyn-sprite, .chat-bubble').forEach(el => el.remove());
         iconsLayer.querySelectorAll('.static-obj').forEach(el => el.remove());
 
         let objs = this.mapObjs[sector] || [];
-        let drive = window.desktopDrive || this.currentPath.split(':')[0] || 'capflag';
+        for (let fname of objs) this._buildStaticObj(sector, fname);
+    },
 
-        for (let fname of objs) {
-            let iconId = fname.substring(0, 2);
-            let zHex = fname.substring(2, 4);
-            let z = this.decodeZ(zHex, this.gfxZBase);
-            if (isNaN(z)) continue;
+    // Flicker-free refresh: keeps existing static objects in the DOM, only
+    // adding new ones and removing ones that no longer exist.
+    syncSectorStaticObjects: function(sector) {
+        const iconsLayer = document.getElementById('icons-layer');
+        if (!iconsLayer) return;
 
-            let x = z % this.gridWide;
-            let y = Math.floor(z / this.gridWide);
-            let labelText = this.getItemName(iconId);
-            let fullPath = `${drive}:/w/${sector}/${fname}`;
+        let want = this.mapObjs[sector] || [];
+        let wantSet = new Set(want);
+        let have = new Map();
 
-            let wrap = this.buildSprite(iconId, x, y, z, labelText, fullPath, "");
-            if (wrap) {
-                wrap.classList.add('static-obj');
-                wrap.setAttribute('data-orig-id', iconId);
-                wrap.setAttribute('data-id', iconId);
-                wrap.setAttribute('data-zstr', zHex);
-                wrap.setAttribute('data-code', fname);
-                wrap.id = `obj_${iconId}_${z}`;
+        iconsLayer.querySelectorAll('.static-obj').forEach(el => {
+            let key = el.getAttribute('data-base-code');
+            if (!key || !wantSet.has(key) || have.has(key)) el.remove();
+            else have.set(key, el);
+        });
+
+        for (let fname of want) {
+            if (!have.has(fname)) {
+                let w = this._buildStaticObj(sector, fname);
+                if (w) have.set(fname, w);
             }
         }
     },
@@ -968,17 +1038,27 @@ window.CylonGFX = {
         }
         this.lastRenderedItems = itemsStr;
 
-        // Re-sync baseline static tiles/objects before applying current active V/X markers
-        // (so expired 1-minute markers cleanly revert)
+        // Re-sync baseline tiles/objects with a DIFF (no wipe-and-rebuild, so no flicker).
+        // Expired V/X markers are reverted below, after we know which ones are still active.
         if (!sectorChanged) {
-            this.renderSectorTiles(sector);
-            this.renderSectorStaticObjects(sector);
+            this.syncSectorTiles(sector);
+            this.syncSectorStaticObjects(sector);
         }
 
         const iconsLayer = document.getElementById('icons-layer');
+
+        // Pool of existing dynamic sprites, so unchanged ones can be reused rather than rebuilt
+        let dynPool = new Map();
+        let allDyn = [];
+        let claimedDyn = new Set();
         if (iconsLayer) {
-            iconsLayer.querySelectorAll('.dyn-sprite').forEach(el => el.remove());
+            allDyn = Array.from(iconsLayer.querySelectorAll('.dyn-sprite'));
+            for (let el of allDyn) {
+                let k = el.getAttribute('data-unique-id');
+                if (k && !dynPool.has(k)) dynPool.set(k, el);
+            }
         }
+        let touchedStatic = new Set();
 
 
         let entries = itemsStr ? itemsStr.split('~').filter(Boolean) : [];
@@ -1010,24 +1090,32 @@ window.CylonGFX = {
                 if (iId === 'Vx') {
                     let objEl = document.querySelector(`.static-obj[data-orig-id="${param1}"]`);
                     if (objEl) {
-                        objEl.setAttribute('data-id', param2);
-                        let zHex = objEl.getAttribute('data-zstr') || '00';
-                        objEl.setAttribute('data-code', param2 + zHex + 'Za');
-                        let img = objEl.querySelector('.icon-img');
-                        if (img) img.src = `${this.gfxIconDir}${param2}.png`;
+                        touchedStatic.add(objEl);
+                        objEl.setAttribute('data-dirty', '1');
+                        if (objEl.getAttribute('data-id') !== param2) {
+                            objEl.setAttribute('data-id', param2);
+                            let zHex = objEl.getAttribute('data-zstr') || '00';
+                            objEl.setAttribute('data-code', param2 + zHex + 'Za');
+                            let img = objEl.querySelector('.icon-img');
+                            if (img) img.src = `${this.gfxIconDir}${param2}.png`;
+                        }
                     }
                 } else if (iId === 'Vy') {
                     let objEl = document.querySelector(`.static-obj[data-orig-id="${param1}"]`);
                     if (objEl) {
+                        touchedStatic.add(objEl);
+                        objEl.setAttribute('data-dirty', '1');
                         let newZ = this.decodeZ(param2, this.gfxZBase);
-                        let nx = newZ % this.gridWide;
-                        let ny = Math.floor(newZ / this.gridWide);
-                        objEl.setAttribute('data-z', newZ);
-                        objEl.setAttribute('data-zstr', param2);
-                        let curId = objEl.getAttribute('data-id') || param1;
-                        objEl.setAttribute('data-code', curId + param2 + 'Za');
-                        objEl.style.left = ((nx / this.gridWide) * 100) + '%';
-                        objEl.style.top = ((ny / this.gridTall) * 100) + '%';
+                        if (objEl.getAttribute('data-z') !== String(newZ)) {
+                            let nx = newZ % this.gridWide;
+                            let ny = Math.floor(newZ / this.gridWide);
+                            objEl.setAttribute('data-z', newZ);
+                            objEl.setAttribute('data-zstr', param2);
+                            let curId = objEl.getAttribute('data-id') || param1;
+                            objEl.setAttribute('data-code', curId + param2 + 'Za');
+                            objEl.style.left = ((nx / this.gridWide) * 100) + '%';
+                            objEl.style.top = ((ny / this.gridTall) * 100) + '%';
+                        }
                     }
                 } else if (iId === 'Xz') {
                     let targetZ = this.decodeZ(param1, this.gfxZBase);
@@ -1068,9 +1156,13 @@ window.CylonGFX = {
 
             let isLocalPlayer = (iId === window.playerItem && (pubId === window.playerId || !window.playerId));
             if (isLocalPlayer) {
+                let avatarChanged = (window.playerAvatar !== avatar);
                 window.playerAvatar = avatar;
                 if (nextMovingItems[window.playerItem]) {
                     nextMovingItems[window.playerItem].avatar = avatar;
+                }
+                if (avatarChanged && typeof window.renderInventory === 'function') {
+                    window.renderInventory();
                 }
                 continue;
             }
@@ -1096,17 +1188,54 @@ window.CylonGFX = {
 
             let fullDosPath = `${drive}:/w/${sector}/${entry}`;
 
+            // Reuse an existing sprite if it looks the same (same item, label & avatar).
+            // Multi-tile T*/U* items are only reused when the entry is byte-identical,
+            // because their size/offset is applied once in img.onload.
+            let sig = iId + '|' + labelText + '|' + avatar;
+            let prev = dynPool.get(uniqueId);
+            let isMulti = (iId.charAt(0) === 'T' || iId.charAt(0) === 'U');
+            if (prev && !claimedDyn.has(prev) && prev.getAttribute('data-sig') === sig &&
+                (prev.getAttribute('data-code') === entry || (pubId && !isMulti))) {
+                claimedDyn.add(prev);
+                prev.setAttribute('data-code', entry);
+                prev.setAttribute('data-path', fullDosPath);
+                if (prev.getAttribute('data-z') !== String(renderZ)) {
+                    prev.setAttribute('data-z', renderZ);
+                    prev.style.left = ((x / this.gridWide) * 100) + '%';
+                    prev.style.top = ((y / this.gridTall) * 100) + '%';
+                }
+                continue;
+            }
+
             let wrap = this.buildSprite(iId, x, y, renderZ, labelText, fullDosPath, avatar);
             if (wrap) {
                 wrap.classList.add('dyn-sprite');
                 wrap.setAttribute('data-code', entry);
                 wrap.setAttribute('data-unique-id', uniqueId);
+                wrap.setAttribute('data-sig', sig);
+                claimedDyn.add(wrap);
             }
+        }
+
+        // Remove dynamic sprites that are no longer present in the server state
+        for (let el of allDyn) {
+            if (!claimedDyn.has(el)) el.remove();
+        }
+
+        // Revert static objects whose Vx/Vy marker has expired (rebuild just those, in place)
+        if (iconsLayer) {
+            iconsLayer.querySelectorAll('.static-obj[data-dirty="1"]').forEach(el => {
+                if (touchedStatic.has(el)) return;
+                let base = el.getAttribute('data-base-code');
+                let fresh = base ? this._buildStaticObj(sector, base) : null;
+                if (fresh) el.replaceWith(fresh);
+                else el.remove();
+            });
         }
 
         window.movingItems = nextMovingItems;
         this.renderCursor();
-        this.renderChatBubbles(chatBubbles);
+        this.syncChatBubbles(chatBubbles);
         
     },
 
@@ -2054,9 +2183,27 @@ window.CylonGFX = {
         const partOrder = ['body', 'head', 'hat', 'sword', 'shield'];
         const currentParts = {};
 
+        const facingLeft = /^[ACEG]/.test(avatarStr);
+        const wornMap = {
+            'L': { type: 'hat',    left: 'I', right: 'J' },
+            'M': { type: 'sword',  left: 'M', right: 'N' },
+            'N': { type: 'shield', left: 'O', right: 'P' }
+        };
+
         for (let i = 0; i < avatarStr.length; i += 2) {
-            const partCode = avatarStr.substring(i, i + 2);
-            const type = typeMap[partCode.charAt(0)];
+            let partCode = avatarStr.substring(i, i + 2);
+            const c0 = partCode.charAt(0);
+            const c1 = partCode.charAt(1);
+
+            let type = typeMap[c0];
+            if (wornMap[c0] && c1 >= 'a' && c1 <= 'z') {
+                const spec = wornMap[c0];
+                type = spec.type;
+                const num = c1.charCodeAt(0) - 97; // 'a'->0, 'b'->1, 'c'->2, 'd'->3 ...
+                const suffix = (num >= 0 && num <= 9) ? String(num) : c1;
+                partCode = (facingLeft ? spec.left : spec.right) + suffix;
+            }
+
             if (type && !currentParts[type]) {
                 currentParts[type] = partCode;
             }
@@ -2305,8 +2452,13 @@ window.CylonGFX = {
         cursorEl.style.width = ((1 / this.gridWide) * 100) + '%';
         cursorEl.style.height = ((1 / this.gridTall) * 100) + '%';
 
-        cursorEl.innerHTML = '';
-        this.buildAvatarOrIcon(cursorEl, window.playerItem || 'Za', window.playerAvatar);
+        // Only rebuild the avatar layers when what they show has actually changed
+        let cursorSig = [window.playerItem || 'Za', window.playerAvatar || '', this.gfxIconDir, this.gfxCharDir].join('|');
+        if (cursorEl.getAttribute('data-sig') !== cursorSig || !cursorEl.firstChild) {
+            cursorEl.innerHTML = '';
+            this.buildAvatarOrIcon(cursorEl, window.playerItem || 'Za', window.playerAvatar);
+            cursorEl.setAttribute('data-sig', cursorSig);
+        }
         
         if (window.playerId) {
             iconsLayer.querySelectorAll(`.chat-bubble[data-pubid="${window.playerId}"]`).forEach(el => {
@@ -2314,6 +2466,24 @@ window.CylonGFX = {
             });
         }
 
+    },
+
+    // Diff chat bubbles: drop ones that are gone, add only the new ones.
+    syncChatBubbles: function(bubbles) {
+        const iconsLayer = document.getElementById('icons-layer');
+        if (!iconsLayer) return;
+        bubbles = bubbles || [];
+
+        let wantKeys = new Set(bubbles.map(b => `${b.z}|${b.pubId}|${b.text}`));
+        let haveKeys = new Set();
+        iconsLayer.querySelectorAll('.chat-bubble').forEach(el => {
+            let k = `${el.getAttribute('data-z')}|${el.getAttribute('data-pubid')}|${el.getAttribute('data-text')}`;
+            if (!wantKeys.has(k) || haveKeys.has(k)) el.remove();
+            else haveKeys.add(k);
+        });
+
+        let fresh = bubbles.filter(b => !haveKeys.has(`${b.z}|${b.pubId}|${b.text}`));
+        this.renderChatBubbles(fresh);
     },
 
     renderChatBubbles: function(bubbles) {
@@ -2328,6 +2498,7 @@ window.CylonGFX = {
             el.className = 'chat-bubble';
             el.setAttribute('data-z', b.z);
             el.setAttribute('data-pubid', b.pubId);
+            el.setAttribute('data-text', b.text);
             el.textContent = b.text; // XSS-safe
 
             let isTopRows = (y < 2);
@@ -2867,23 +3038,14 @@ window.CylonGFX = {
         }
 
         if (existing) {
-            existing.src = `${this.gfxTileDir}${code}.png`;
+            let src = `${this.gfxTileDir}${code}.png`;
+            if (existing.getAttribute('data-src') !== src) {
+                existing.src = src;
+                existing.setAttribute('data-src', src);
+            }
             existing.style.display = '';
         } else {
-            let x = z % this.gridWide;
-            let y = Math.floor(z / this.gridWide);
-
-            let img = document.createElement('img');
-            img.src = `${this.gfxTileDir}${code}.png`;
-            img.onerror = function() { this.style.display = 'none'; };
-            img.style.position = 'absolute';
-            img.style.left = ((x / this.gridWide) * 100) + '%';
-            img.style.top = ((y / this.gridTall) * 100) + '%';
-            img.style.width = ((1 / this.gridWide) * 100) + '%';
-            img.style.height = ((1 / this.gridTall) * 100) + '%';
-            img.style.imageRendering = 'pixelated';
-            img.id = `gfx-tile-${z}`;
-            tilesLayer.appendChild(img);
+            tilesLayer.appendChild(this._makeTileEl(z, code));
         }
     },
 

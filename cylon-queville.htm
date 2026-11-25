@@ -92,6 +92,12 @@
             outline: 1px solid var(--fg-color, #0f0);
             border-radius: 4px;
         }
+        .qhud-inven-slot.worn {
+            background: var(--sel-bg, #333);
+            color: var(--sel-fg, #0f0);
+            border-color: var(--fg-color, #0f0);
+            box-shadow: 0 0 6px var(--fg-color, #0f0), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+        }
 
         /* --- Logged-out Login Sidebar --- */
         .qlogin-input {
@@ -381,13 +387,13 @@
     <div id="queville-controls">
         <!-- Logged-out View -->
         <div id="qhud-login">
-            <input id="qLoginUser" class="qlogin-input" type="text" maxlength="15" placeholder="Username" autocomplete="off">
-            <input id="qLoginPass" class="qlogin-input" type="password" maxlength="32" placeholder="Password" autocomplete="off">
+            <input id="qLoginUser" class="qlogin-input" type="text" maxlength="15" placeholder="Username" autocomplete="off" data-pop-passthrough="true">
+            <input id="qLoginPass" class="qlogin-input" type="password" maxlength="32" placeholder="Password" autocomplete="off" data-pop-passthrough="true">
             <div class="qlogin-btn-row">
-                <button type="button" id="qBtnLogin" class="qlogin-btn primary">Login</button>
+                <button type="button" id="qBtnLogin" class="qlogin-btn primary" data-pop-passthrough="true">Login</button>
             </div>
             <div id="qLoginErr"></div>
-            <button type="button" id="qBtnGuest">Play Now!</button>
+            <button type="button" id="qBtnGuest" data-pop-passthrough="true">Play as Guest!</button>
         </div>
 
         <!-- Logged-in HUD View -->
@@ -496,6 +502,58 @@ function hideHoverTooltip() {
     if (tip) tip.style.display = 'none';
 }
 
+function getWornAvatarParts() {
+    const raw = String(window.playerAvatar || '');
+    const dashIdx = raw.indexOf('-');
+    const base = dashIdx === -1 ? raw : raw.substring(0, dashIdx);
+    const parts = [];
+    for (let i = 0; i + 1 < base.length; i += 2) {
+        parts.push(base.substring(i, i + 2));
+    }
+    return parts;
+}
+
+function getWearMatchCodes(itemId) {
+    if (!itemId || itemId.length !== 2) return null;
+    const c0 = itemId.charAt(0);
+    if (c0 === 'L' || c0 === 'M' || c0 === 'N') return [itemId];
+    return null;
+}
+
+function getWearSlotVerb(itemId, isWorn) {
+    const c0 = itemId.charAt(0);
+    if (isWorn) return 'Remove';
+    if (c0 === 'M') return 'Wield';
+    return 'Wear';
+}
+
+function isItemWorn(itemId) {
+    const codes = getWearMatchCodes(itemId);
+    if (!codes) return false;
+    const parts = getWornAvatarParts();
+    return parts.some(p => codes.includes(p));
+}
+
+function getInventoryActions(itemId) {
+    const label = getItemLabel(itemId);
+    const actions = [];
+
+    if (getWearMatchCodes(itemId)) {
+        const worn = isItemWorn(itemId);
+        actions.push({
+            label: `${getWearSlotVerb(itemId, worn)} ${label}`,
+            action: () => gfxClick(`SDVu${itemId}`)
+        });
+    }
+
+    actions.push({
+        label: `Drop ${label}`,
+        action: () => gfxClick(`SDVd${itemId}`)
+    });
+
+    return actions;
+}
+
 function encodeTileZ(z) {
     return window.CylonGFX.encodeZ(z, window.CylonGFX.gfxZBase || 10);
 }
@@ -558,32 +616,50 @@ function focusSidebarLogin(msg) {
     }
 }
 
+const PREVIEW_SPAWN_TILES = 'U7U6U6U5U0U0U0U0U0U0U5U6U6U7U6U6U5U1A0A0A0A0A0A0U2U5U6U6U6U5U0A2D2G0D3G0G0G0A3U0U5U6U5U5U1A4G1B0G1G0G0G0A5U2U5U5U5U0A2G1G1B4B1B6G0R2G0A3U0U5U5U0A2G1G1G1G1B0G0R0F4A3U0U5U0U1A4G0G1G1B5B3G1F4F4A5U2U0U0A2G0G0G0B5B3G0G1F4G1G0A3U0U0A2G0G0G0B4B6G0G0G1G1G0A3U0U0A2G0G0G0G0B0G0G0G0G0G0A3U0';
+
+async function renderPreviewMap() {
+    let hostOrigin = '';
+    const dos = window.parent && window.parent.CylonDOS ? window.parent.CylonDOS : window.CylonDOS;
+    if (dos) {
+        try {
+            const saved = await dos.load('cylon:/a/cylonHostOrigin');
+            if (saved) hostOrigin = saved.trim();
+        } catch (e) {}
+    }
+    if (hostOrigin && !hostOrigin.endsWith('/')) hostOrigin += '/';
+
+    window.CylonGFX.gridWide = 14;
+    window.CylonGFX.gridTall = 10;
+    window.CylonGFX.gfxTileDir = hostOrigin + 't/';
+    window.CylonGFX.mapTiles['Bc'] = PREVIEW_SPAWN_TILES;
+
+    fitDesktopToScreen();
+    window.CylonGFX.renderSectorTiles('Bc');
+}
+
+
 function showServerMenuPopup(errorMsg) {
-    if (typeof setPopForce === 'function') setPopForce('visible');
+    if (errorMsg) setLoginError(errorMsg);
 
-    let linksHtml = '';
-    QUEVILLE_SERVERS.forEach((url, idx) => {
-        linksHtml +=
-            `<a href="gfx:SRV${idx}" ` +
-            `style="display:block; padding:8px 12px; color:var(--menu-fg,#aaa); text-decoration:none; border-radius:2px; cursor:pointer;" ` +
-            `onmouseover="this.style.background='var(--sel-bg,#333)';this.style.color='var(--sel-fg,#0f0)';" ` +
-            `onmouseout="this.style.background='transparent';this.style.color='var(--menu-fg,#aaa)';">` +
-            `${escapeAttr(url)}` +
-            `</a>`;
-    });
+    const popMgr = window.parent && window.parent.CylonPopManager;
+    if (popMgr && typeof popMgr.showContextMenu === 'function') {
+        // Ensure OS focus & mode route arrow/Enter keys to the app instead of CLI history
+        if (window.parent && window.parent !== window) {
+            window.parent.postMessage(
+                { type: 'QANDY_TAB_FOCUS_APP' },
+                (window.location.origin && window.location.origin !== 'null' ? window.location.origin : '*')
+            );
+        }
 
-    const errHtml = errorMsg
-        ? `<div style="margin-top:6px; padding:6px 10px; color:#ff5555; border-top:1px solid var(--sel-bg,#333); font-size:12px; max-width:300px; word-wrap:break-word;">${escapeAttr(errorMsg)}</div>`
-        : '';
+        const items = QUEVILLE_SERVERS.map(url => ({
+            label: url,
+            action: () => selectServer(url)
+        }));
+        popMgr.showContextMenu({ pos: 'topleft', view: window }, items);
+        return;
+    }
 
-    const html =
-        `<div style="font-family:var(--font-face,monospace); font-size:14px; min-width:240px; display:flex; flex-direction:column;">` +
-        `<div style="padding:6px 12px; font-weight:bold; color:var(--fg-color,#0f0); border-bottom:1px solid var(--sel-bg,#333); margin-bottom:2px;">Select Server</div>` +
-        linksHtml +
-        errHtml +
-        `</div>`;
-
-    if (typeof pop === 'function') pop(html, 'topleft');
 }
 
 function getDriveSourceUrl(mountInfo) {
@@ -710,6 +786,8 @@ async function selectServer(serverUrl) {
         window.CylonGFX.renderSectorTiles(startSector);
         window.CylonGFX.renderSectorStaticObjects(startSector);
         fitDesktopToScreen();
+
+        await showSplashPopup();
         
         window.CylonGFX.renderSectorStaticObjects(startSector);
         fitDesktopToScreen();
@@ -843,6 +921,8 @@ window.onload = async function() {
     };
     window.addEventListener('resize', fitDesktopToScreen);
 
+    renderPreviewMap();
+    
     // First action: open the topleft server selection popup with PopForce = visible
     showServerMenuPopup();
 };
@@ -1290,16 +1370,6 @@ window.serverdown = function(code) {
 
 // --- Keyboard Input (supports physical keys + Cylon virtual keyboard) ---
 window.keydown = function(key, e) {
-    if (!loggedInUser || (window.playerItem && window.playerItem.startsWith('Za'))) {
-        return;
-    }
-
-    if (!window.playerAvatar) {
-        if (e) e.preventDefault();
-        checkAvatarRequired();
-        return;
-    }
-
     const keyStr = (typeof e === 'object' && e && e.key) ? e.key : String(key || '');
     const lower = keyStr.toLowerCase();
 
@@ -1318,6 +1388,16 @@ window.keydown = function(key, e) {
             lower === 'arrowright' || lower === 'right') {
             if (e) e.preventDefault();
         }
+        return;
+    }
+
+    if (!loggedInUser || (window.playerItem && window.playerItem.startsWith('Za'))) {
+        return;
+    }
+
+    if (!window.playerAvatar) {
+        if (e) e.preventDefault();
+        checkAvatarRequired();
         return;
     }
 
@@ -1352,6 +1432,7 @@ window.keydown = function(key, e) {
         window.playerDo = '';
         window.CylonGFX.moveCursor(dx, dy);
     }
+
     if (
         window.CylonGFX &&
         window.CylonGFX.fillTileCode &&
@@ -1362,7 +1443,7 @@ window.keydown = function(key, e) {
         const cur = window.CylonGFX.fillTileCode.padEnd(2, 'a').slice(0, 2);
         let c1 = cur[0];
         let c2 = cur[1];
-    
+
         if (/^[A-Z]$/.test(keyStr)) {
             c1 = keyStr;
         } else if (/^[a-z0-9_()[\]{}^,:;+\-=@]$/.test(keyStr)) { // adjust allowed symbols as needed
@@ -1595,6 +1676,8 @@ window.renderInventory = function(invenStr) {
 
     const code = (typeof invenStr === 'string') ? invenStr : (window.playerInven || '');
     const iconDir = (window.CylonGFX && window.CylonGFX.gfxIconDir) ? window.CylonGFX.gfxIconDir : 'i/';
+    const wornParts = getWornAvatarParts();
+    const usedWornIdx = new Set();
 
     hideHoverTooltip();
     grid.innerHTML = '';
@@ -1623,6 +1706,15 @@ window.renderInventory = function(invenStr) {
         slot.className = 'qhud-inven-slot';
         slot.setAttribute('aria-label', label);
 
+        const matchCodes = getWearMatchCodes(verb);
+        if (matchCodes) {
+            const matchIdx = wornParts.findIndex((p, idx) => !usedWornIdx.has(idx) && matchCodes.includes(p));
+            if (matchIdx !== -1) {
+                usedWornIdx.add(matchIdx);
+                slot.classList.add('worn');
+            }
+        }
+
         const img = document.createElement('img');
         img.src = `${iconDir}${verb}.png`;
         img.alt = label;
@@ -1643,14 +1735,68 @@ window.renderInventory = function(invenStr) {
     }
 };
 
-function showSplashPopup() {
-    if (typeof setPopForce === 'function') setPopForce('hidden');
+function toLogoDataUri(raw) {
+    if (!raw) return '';
+    const trimmed = String(raw).trim();
+    if (!trimmed) return '';
+    if (/^data:image\//i.test(trimmed)) return trimmed;
+
+    const b64 = trimmed.replace(/\s+/g, '');
+    let mime = 'image/png';
+    if (b64.startsWith('R0lGOD')) mime = 'image/gif';
+    else if (b64.startsWith('/9j/')) mime = 'image/jpeg';
+    else if (b64.startsWith('PHN2Zy') || b64.startsWith('PD94bW')) mime = 'image/svg+xml';
+    else if (b64.startsWith('UklGR')) mime = 'image/webp';
+    return `data:${mime};base64,${b64}`;
+}
+
+async function loadLogoImageInfo() {
+    const dos = window.parent && window.parent.CylonDOS ? window.parent.CylonDOS : window.CylonDOS;
+    if (!dos) return null;
+
+    let raw = null;
+    try { raw = await dos.load('cylon:/cylon-queville.b64'); } catch (e) {}
+    if (!raw) {
+        try { raw = await dos.load('cylon-queville.b64'); } catch (e) {}
+    }
+
+    const src = toLogoDataUri(raw);
+    if (!src) return null;
+
+    return await new Promise((resolve) => {
+        const img = new Image();
+        img.onload = () => resolve({ src, width: img.naturalWidth, height: img.naturalHeight });
+        img.onerror = () => resolve(null);
+        img.src = src;
+    });
+}
+
+async function showSplashPopup() {
+    if (typeof setPopForce === 'function') setPopForce('visible');
+
+    const logo = await loadLogoImageInfo();
+    let logoHtml = '';
+    if (logo && logo.src) {
+        const maxW = Math.max(160, Math.floor(window.innerWidth * 0.55));
+        const maxH = Math.max(80, Math.floor(window.innerHeight * 0.35));
+        let w = logo.width || maxW;
+        let h = logo.height || maxH;
+        const scale = Math.min(1, maxW / w, maxH / h);
+        w = Math.max(1, Math.round(w * scale));
+        h = Math.max(1, Math.round(h * scale));
+
+        logoHtml =
+            `<div style="margin:8px 0;">` +
+            `<img src="${logo.src}" width="${w}" height="${h}" alt="Queville" style="display:block; margin:0 auto; image-rendering:pixelated;">` +
+            `</div>`;
+    }
 
     const html =
         `<div style="padding:10px 16px; text-align:center; font-family:var(--font-face,monospace); line-height:1.5;">` +
         `<div>An epic tale of Romance and Adventure...</div>` +
+        logoHtml +
         `<div style="margin-top:6px;">` +
-        `<a href="gfx:GUEST">Play Queville Now!</a>` +
+        `<a href="gfx:GUEST">Play Now as a Guest Player!</a>` +
         `</div>` +
         `</div>`;
 
