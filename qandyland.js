@@ -9,6 +9,9 @@ var sysopOffline = true;            // only serves files to localHost
 var sysopCardWidth = 160;           // "Front-and-back punch card" limit
 var sysopGfx = 'cylon-desktop.gfx'; // default .gfx file
 
+var IDLE_LOGOUT_MS = 60000;  // 1 minute without any ping removes disconnected player from /w/
+var IDLE_AFK_MS    = 60000;  // 1 minute without a non-RF command logs player off
+
 const UNIVAC   = require('./qandyland-univac.js');
 const Krystals = require('./qandyland-krystals.js');
 const DOS      = require('./qandyland-dos.js');
@@ -769,8 +772,20 @@ async function plugboard(req, stacker, plugs, drive, session) {
     }
   }
 
-  var player = playerIndex.get(session);
-  var player = playerIndex.get(session);
+  var isIdlePoll = (plugs === 'RF');
+  var player = session ? playerIndex.get(session) : null;
+
+  if (
+    player &&
+    isIdlePoll &&
+    (player.username || (player.item && !player.item.startsWith('Za'))) &&
+    player.lastActive &&
+    (Date.now() - player.lastActive >= IDLE_AFK_MS)
+  ) {
+    playerIndex.delete(session);
+    await removePlayerFromWorld(player, session);
+    return respondRetro(stacker, 'S^LO--LE24^S', null);
+  }
   
   if (!player) {
     player = {
@@ -1141,14 +1156,15 @@ async function plugboard(req, stacker, plugs, drive, session) {
           session = secret;
 
           player = {
-            drive:    drive,
-            fullPath: null,
-            map:      "A1",
-            item:     "",
-            z:        0,
-            avatar:   "",
-            pubId:    pubId,
-            lastSeen: Date.now()
+            drive:      drive,
+            fullPath:   null,
+            map:        "A1",
+            item:       "",
+            z:          0,
+            avatar:     "",
+            pubId:      pubId,
+            lastSeen:   Date.now(),
+            lastActive: Date.now()
           };
           playerIndex.set(session, player);
 
@@ -1195,6 +1211,9 @@ async function plugboard(req, stacker, plugs, drive, session) {
         player.username = guestName;
         player.userKey  = null;
         player.lastSeen = Date.now();
+        player.lastSeen   = Date.now();
+        player.lastActive = player.lastSeen;
+
         output += "S^LG" + guestName + "--^S";
         break;
       }
@@ -1359,6 +1378,8 @@ async function plugboard(req, stacker, plugs, drive, session) {
           player.lastLogin = nowTs;
           player.server    = serverUrl;
           player.lastSeen  = Date.now();
+          player.lastSeen   = Date.now();
+          player.lastActive = player.lastSeen;
 
           saveUserSnapshot(player, session, {
             password:  rec.password,
@@ -1529,7 +1550,11 @@ async function plugboard(req, stacker, plugs, drive, session) {
       player.chatLoc  = null;
     }
 
-    player.lastSeen = Date.now();
+    var now = Date.now();
+    player.lastSeen = now;
+    if (!isIdlePoll || !player.lastActive) {
+      player.lastActive = now;
+    }
     playerIndex.set(session, player);
   }
 
@@ -1626,6 +1651,8 @@ function handleGfxDevCommand(req, res, rawCmd, drive, session) {
   }
 
   player.lastSeen = Date.now();
+  player.lastSeen   = Date.now();
+  player.lastActive = player.lastSeen;
 
   // 3. Read drive geometry / Z-base config
   var gfxZBase = 10;

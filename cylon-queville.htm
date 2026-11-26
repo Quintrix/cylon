@@ -577,7 +577,8 @@ const LOGIN_ERRORS = {
     '20': 'Player is already logged in (wait 10 seconds).',
     '21': 'Already logged in. Logout first.',
     '22': 'Account is banned.',
-    '23': 'Already logged in on another server.'
+    '23': 'Already logged in on another server.',
+    '24': 'Logged out due to inactivity.'
 };
 
 function escapeAttr(s) {
@@ -1263,6 +1264,7 @@ window.serverdown = function(code) {
     avatarWizardStep = null;
     avatarSubmitTicks = 0;
     const dialogParts = [];
+    let pendingLogoutSplash = null;
     let col = 0;
     while (col < code.length) {
         const verb = code.substring(col, col + 2);
@@ -1328,10 +1330,10 @@ window.serverdown = function(code) {
                 const savedUser = pendingNewUser;
                 pendingNewUser = null;
                 if (typeof print === 'function') print('Logged out. Log in with your new account.\n');
-                showSplashPopup('Account saved! Log in to continue.', savedUser);
+                pendingLogoutSplash = { msg: 'Account saved! Log in to continue.', user: savedUser };
             } else {
                 if (typeof print === 'function') print('Logged out.\n');
-                showSplashPopup('Logged out.');
+                pendingLogoutSplash = { msg: 'Logged out.', user: '' };
             }
         } else if (verb === 'LE') {
             const errCode = code.substring(col, col + 2);
@@ -1350,6 +1352,8 @@ window.serverdown = function(code) {
 
             if (joinErrEl) {
                 joinErrEl.textContent = msg;
+            } else if (pendingLogoutSplash) {
+                pendingLogoutSplash.msg = msg;
             } else if (splashMsgEl) {
                 if (window.CylonGFX) window.CylonGFX.resetSession();
                 setSidebarLoggedIn(false);
@@ -1395,6 +1399,10 @@ window.serverdown = function(code) {
         } else if (verb === 'Vg') {
             showJoinModalPopup();
         }
+    }
+
+    if (pendingLogoutSplash) {
+        showSplashPopup(pendingLogoutSplash.msg, pendingLogoutSplash.user);
     }
 
     if (dialogParts.length > 0) {

@@ -1,0 +1,31 @@
+
+
+Player Hat Cart:
+================================================================================================
+
+Xg XeW@Za VhWould_you_like_a_hat-- Vh to_save_your_player_file_in?-- Vh-- Xh01 VhYes!-- Xc
+Xg XeW@01 Vg Xc
+
+XnXg XeW@Za XnXiLc XnXiLd VhWhat_color?-- Vh-- XhLcVhBlue-- XhLdVhPink-- Xc
+
+XnXg XeW@Lc XrZaLc Vi Xc
+XnXg XeW@Ld XrZaLd Vi Xc
+
+XsW@00 XiLc XsW@01 Xc XiLd XsW@01 Xc
+XeW@01 VhThanks_for_playing!--
+
+
+
+Firepit:
+================================================================================================
+
+XiCe XrCeZa VmZj Xc
+
+
+
+Fire
+================================================================================================
+
+
+
+
