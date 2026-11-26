@@ -98,6 +98,7 @@
     '  alpha [path]                   List variables and their contents',
     '  krystals [action] [opts]       Manage WebSocket hardware (type "help krystals")',
     '  export [drive] [filename]      Export a drive as JSON',
+    '  livecd [drive] <file|<c>>      Export core Live CD JSON to file or clipboard',
     '  import <file> [type] [drive]   Import JSON (creates/mounts drive if type given)',
     '  install [desktop file] [-y]    Install Cylon OS with selected desktop',
     '  uninstall [-y]                 Delete Cylon DOS from indexDB',
@@ -1073,6 +1074,87 @@ async function handleCylonCommand(line) {
             return { handled: true, output: 'Drive exported to ' + fileName };
           }
           return { handled: true, output: result };
+
+        case 'livecd':
+          if (typeof LIVECD === 'undefined') {
+            throw new Error('LIVECD is not defined (cylon.htm did not load)');
+          }
+
+          var lcdDrive = null;
+          var lcdFile = null;
+          if (args.length >= 2) {
+            lcdDrive = args[0];
+            lcdFile = args[1];
+          } else if (args.length === 1) {
+            lcdFile = args[0];
+          } else {
+            return { handled: true, output: usage('livecd [drive] <filename|<c>>') };
+          }
+
+          var exactFiles = [];
+          var dirPrefixes = [];
+          LIVECD.forEach(function (item) {
+            var clean = String(item).replace(/^\/+/, '');
+            if (clean.endsWith('/')) {
+              dirPrefixes.push({ raw: item, dir: clean.slice(0, -1) });
+            } else if (clean) {
+              exactFiles.push({ raw: item, path: clean });
+            }
+          });
+
+          var matched = Object.create(null);
+          var entryCount = 0;
+
+          var lcdJson = await dos.exportDrive(lcdDrive, {
+            compact: true,
+            filter: function (entry) {
+              var p = entry.path;
+              for (var i = 0; i < exactFiles.length; i++) {
+                if (p === exactFiles[i].path) {
+                  matched[exactFiles[i].raw] = true;
+                  entryCount++;
+                  return true;
+                }
+              }
+              for (var j = 0; j < dirPrefixes.length; j++) {
+                var d = dirPrefixes[j].dir;
+                if (p === d || p.indexOf(d + '/') === 0) {
+                  matched[dirPrefixes[j].raw] = true;
+                  entryCount++;
+                  return true;
+                }
+              }
+              return false;
+            }
+          });
+
+          var missing = [];
+          LIVECD.forEach(function (item) {
+            if (!matched[item]) missing.push(item);
+          });
+          var warn = missing.length ? ('Warning: missing on drive: ' + missing.join(', ') + '\n') : '';
+          var stats = ' (' + entryCount + ' entries, ' + dos.formatSize(lcdJson.length) + ')';
+
+          if (lcdFile === '<c>') {
+            if (!navigator.clipboard) {
+              return { handled: true, output: 'Error: [.4]Clipboard API not supported in this environment.[.]' };
+            }
+            try {
+              await navigator.clipboard.writeText(lcdJson);
+              return { handled: true, output: warn + 'Live CD exported to clipboard' + stats + '.' };
+            } catch (e) {
+              return { handled: true, output: 'Error writing to clipboard: [.4]' + e.message + '[.]' };
+            }
+          }
+
+          var lcdBlob = new Blob([lcdJson], { type: 'application/json' });
+          var lcdUrl = URL.createObjectURL(lcdBlob);
+          var lcdAnchor = document.createElement('a');
+          lcdAnchor.href = lcdUrl;
+          lcdAnchor.download = lcdFile;
+          lcdAnchor.click();
+          setTimeout(function () { URL.revokeObjectURL(lcdUrl); }, 1000);
+          return { handled: true, output: warn + 'Live CD exported to ' + lcdFile + stats };
 
         case 'import':
           if (!args[0]) return { handled: true, output: usage('import <file|<c>> [type] [drive]') };

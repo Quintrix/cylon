@@ -111,6 +111,25 @@ let dosInitialized = false;
 let dosInitializing = null;
 window.proxyInputMaxLen = null; // NEW
 
+const LIVECD = Object.freeze(new Set([
+    'cylon.htm',
+    'cylon.cfg',
+    'cylon-theme.htm',
+    'cylon-command.htm',
+    'cylon-desktop.htm',
+    'cylon-desktop.gfx',
+    'cylon-files.gfx',
+    'cylon-calc.htm',
+    'cylon-piano.htm',
+    'cylon-gfx.js',
+    'cylon-gfx-itemid.js',
+    'cylon-capflag.htm',
+    'cylon-queville.htm',
+    'cylon-queville.b64',
+    'a/',
+    'cylon-theme/',
+]));
+
 const PAGES = Object.freeze(new Set([
     'cylon.htm',
     'cylon.cfg',
@@ -742,7 +761,7 @@ async function bootMount() {
     }
 
     // 2. Not installed (or ?boot=ram): attempt to boot from the cylon.json image into RAM
-    printDOS("[.2]It can take up to 1 minute to mount the cylon.json drive...[.]\n");
+    // printDOS("[.2]It can take up to 1 minute to mount the cylon.json drive...[.]\n");
     if (await run('mount cylon.json ram cylon')) {
         await run('cylon:');
         printDOS("[.2]System booted to RAM drive, run 'install' to setup indexDB[.]\n");

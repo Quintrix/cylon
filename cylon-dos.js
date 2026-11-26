@@ -1146,20 +1146,38 @@
     return manifestText(await m.backend.all());
   }
 
-  async function exportDrive(name) {
+async function exportDrive(name, options) {
+    options = options || {};
     var m = name ? mounts[String(name).replace(/:$/, '')] : current();
     if (!m) fail(name ? 'drive not mounted: ' + name : 'no drive mounted');
     var entries = await m.backend.all();
+    if (typeof options.filter === 'function') {
+      entries = entries.filter(options.filter);
+    }
     entries.sort(function (a, b) { return a.path < b.path ? -1 : 1; });
+
+    var mapped = entries.map(function (e) {
+      return { name: e.path, type: e.type, content: e.type === 'file' ? e.content : undefined,
+               size: e.size, timestamp: e.timestamp, owner: e.owner, session: e.session, readOnly: !!e.readOnly };
+    });
+
+    if (options.compact) {
+      var head = JSON.stringify({
+        format: ARCHIVE_FORMAT,
+        version: ARCHIVE_VERSION,
+        drive: m.name,
+        created: new Date().toISOString()
+      });
+      var lines = mapped.map(function (e) { return JSON.stringify(e); });
+      return head.slice(0, -1) + ',"entries":[\n' + lines.join(',\n') + '\n]}';
+    }
+
     return JSON.stringify({
       format: ARCHIVE_FORMAT, version: ARCHIVE_VERSION, drive: m.name, created: new Date().toISOString(),
-      entries: entries.map(function (e) {
-        return { name: e.path, type: e.type, content: e.type === 'file' ? e.content : undefined,
-                 size: e.size, timestamp: e.timestamp, owner: e.owner, session: e.session, readOnly: !!e.readOnly };
-      })
-    }, null, 2); // Added null, 2 for pretty-printing
-  }
-  
+      entries: mapped
+    }, null, 2);
+  }  
+
   async function importDrive(input, options) {
     options = options || {};
     var m = options.drive ? mounts[String(options.drive).replace(/:$/, '')] : current();
