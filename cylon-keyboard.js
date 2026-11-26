@@ -420,25 +420,10 @@ function keyboard() {
     // frameRect: the on-screen document coordinates of the iframe that holds
     // the app the rect came from (i.e. #browser-layer-container's box with
     // --kb-pan treated as 0 - the frame's resting position before any pan).
-    window.panToRect = function(rect) {
-        if (!document.body.classList.contains('kb-open')) return;
-        if (osMode !== 'app-edit' && osMode !== 'app-textarea') return;
-
-        var kbH = getKbHeightPx();
-        var barH = getBarHeightPx();
-        var kbTop = window.innerHeight - kbH - barH; // top edge of the keyboard, resting-frame coords
-        var margin = 12;
-
-        // #screen-wrapper sits at top:0 and the app layer fills it with no
-        // offset, so the rect the app reported is already in resting-frame
-        // document coordinates - no need to add an iframe offset.
-        var shift = Math.max(0, rect.bottom - (kbTop - margin));
-        shift = Math.min(shift, kbH); // never pan further than the keyboard is tall
-        document.documentElement.style.setProperty('--kb-pan', shift + 'px');
-    };
+    window.panToRect = function() {};
 
     window.resetPan = function() {
-        document.documentElement.style.setProperty('--kb-pan', '0px');
+        document.documentElement.style.removeProperty('--kb-pan');
     };
 
     window.isVirtualKeyboardOpen = function() {
@@ -508,6 +493,134 @@ function keyboard() {
         }
     };
     
+    var taMirror = null;
+
+    function getTextareaMirror(taView) {
+        if (!taMirror) {
+            taMirror = document.createElement('div');
+            taMirror.style.cssText = 'position:fixed;left:-99999px;top:-99999px;visibility:hidden;pointer-events:none;white-space:pre-wrap;word-wrap:break-word;box-sizing:border-box;';
+            document.body.appendChild(taMirror);
+        }
+        var cs = getComputedStyle(taView);
+        taMirror.style.width = taView.clientWidth + 'px';
+        taMirror.style.padding = cs.padding;
+        taMirror.style.border = cs.border;
+        taMirror.style.fontFamily = cs.fontFamily;
+        taMirror.style.fontSize = cs.fontSize;
+        taMirror.style.fontWeight = cs.fontWeight;
+        taMirror.style.fontStyle = cs.fontStyle;
+        taMirror.style.lineHeight = cs.lineHeight;
+        taMirror.style.letterSpacing = cs.letterSpacing;
+        taMirror.style.wordSpacing = cs.wordSpacing;
+        return taMirror;
+    }
+
+    function getVisualRowsForLine(mirror, lineStr, globalStart) {
+        mirror.textContent = lineStr + '\u200B';
+        var tn = mirror.firstChild;
+        var range = document.createRange();
+        var rows = [];
+        for (var i = 0; i <= lineStr.length; i++) {
+            range.setStart(tn, i);
+            range.setEnd(tn, i + 1);
+            var rect = range.getBoundingClientRect();
+            if (!rect || (rect.width === 0 && rect.height === 0)) continue;
+            var lastRow = rows.length ? rows[rows.length - 1] : null;
+            if (!lastRow || Math.abs(rect.top - lastRow.top) > 2) {
+                rows.push({ top: rect.top, pts: [{ idx: globalStart + i, x: rect.left }] });
+            } else {
+                lastRow.pts.push({ idx: globalStart + i, x: rect.left });
+            }
+        }
+        if (rows.length === 0) {
+            rows.push({ top: 0, pts: [{ idx: globalStart, x: 0 }] });
+        }
+        return rows;
+    }
+
+    function closestIdxInRow(row, targetX) {
+        var best = row.pts[0];
+        var bestDist = Math.abs(best.x - targetX);
+        for (var i = 1; i < row.pts.length; i++) {
+            var d = Math.abs(row.pts[i].x - targetX);
+            if (d < bestDist) {
+                bestDist = d;
+                best = row.pts[i];
+            }
+        }
+        return best.idx;
+    }
+
+    function moveTextareaVertical(dir, shiftHeld) {
+        if (shiftHeld) { if (selAnchor === null) selAnchor = cursorPos; }
+        else { selAnchor = null; }
+
+        var text = inputBuffer;
+        var curStart = text.lastIndexOf('\n', cursorPos - 1) + 1;
+        var curEnd = text.indexOf('\n', cursorPos);
+        if (curEnd === -1) curEnd = text.length;
+
+        var taView = document.getElementById('kb-textarea-view');
+        if (taView && taView.clientWidth > 0) {
+            var mirror = getTextareaMirror(taView);
+            var curRows = getVisualRowsForLine(mirror, text.slice(curStart, curEnd), curStart);
+            var rowIdx = 0;
+            var curX = curRows[0].pts[0].x;
+            for (var r = 0; r < curRows.length; r++) {
+                var found = curRows[r].pts.find(function(p) { return p.idx === cursorPos; });
+                if (found) {
+                    rowIdx = r;
+                    curX = found.x;
+                    break;
+                }
+            }
+
+            if (dir < 0) {
+                if (rowIdx > 0) {
+                    cursorPos = closestIdxInRow(curRows[rowIdx - 1], curX);
+                    return;
+                }
+                if (curStart > 0) {
+                    var prevEnd = curStart - 1;
+                    var prevStart = text.lastIndexOf('\n', prevEnd - 1) + 1;
+                    var prevRows = getVisualRowsForLine(mirror, text.slice(prevStart, prevEnd), prevStart);
+                    cursorPos = closestIdxInRow(prevRows[prevRows.length - 1], curX);
+                    return;
+                }
+                return;
+            } else {
+                if (rowIdx < curRows.length - 1) {
+                    cursorPos = closestIdxInRow(curRows[rowIdx + 1], curX);
+                    return;
+                }
+                if (curEnd < text.length) {
+                    var nextStart = curEnd + 1;
+                    var nextEnd = text.indexOf('\n', nextStart);
+                    if (nextEnd === -1) nextEnd = text.length;
+                    var nextRows = getVisualRowsForLine(mirror, text.slice(nextStart, nextEnd), nextStart);
+                    cursorPos = closestIdxInRow(nextRows[0], curX);
+                    return;
+                }
+                return;
+            }
+        }
+
+        // Fallback if #kb-textarea-view is not laid out
+        var col = cursorPos - curStart;
+        if (dir < 0) {
+            if (curStart === 0) return;
+            var pEnd = curStart - 1;
+            var pStart = text.lastIndexOf('\n', pEnd - 1) + 1;
+            cursorPos = Math.min(pEnd, pStart + col);
+        } else {
+            if (curEnd >= text.length) return;
+            var nStart = curEnd + 1;
+            var nEnd = text.indexOf('\n', nStart);
+            if (nEnd === -1) nEnd = text.length;
+            cursorPos = Math.min(nEnd, nStart + col);
+        }
+    }
+
     window.press = function(e) {
         if (e && e.toApp && osMode !== 'app' && osMode !== 'app-edit' && osMode !== 'app-textarea') {
             if (document.body.classList.contains('app-mode') && typeof window.setOSMode === 'function') {
@@ -573,16 +686,33 @@ function keyboard() {
             cursorPos = inputBuffer.length;
         } else if (e.id === 'up') {
             if (osMode === 'app') { window.sendVirtualKey('ArrowUp'); return; }
-            navigateHistory(-1);
-            cursorPos = inputBuffer.length;
-            selAnchor = null;
+            if (osMode === 'app-edit') { return; }
+            if (osMode === 'app-textarea') { moveTextareaVertical(-1, shiftHeld); }
+            else {
+                navigateHistory(-1);
+                cursorPos = inputBuffer.length;
+                selAnchor = null;
+            }
         } else if (e.id === 'down') {
             if (osMode === 'app') { window.sendVirtualKey('ArrowDown'); return; }
-            navigateHistory(1);
-            cursorPos = inputBuffer.length;
-            selAnchor = null;
+            if (osMode === 'app-edit') { return; }
+            if (osMode === 'app-textarea') { moveTextareaVertical(1, shiftHeld); }
+            else {
+                navigateHistory(1);
+                cursorPos = inputBuffer.length;
+                selAnchor = null;
+            }
         } else if (e.id === 'enter') {
-            if (osMode === 'app') { window.sendVirtualKey('Enter'); return; }
+            if (osMode === 'app') {
+                if (window.popupActive && document.activeElement &&
+                    document.activeElement.closest && document.activeElement.closest('#cylon-pop') &&
+                    document.activeElement.matches('button, a[href], input[type="button"], input[type="submit"], input[type="reset"], input[type="checkbox"], input[type="radio"]')) {
+                    document.activeElement.click();
+                    return;
+                }
+                window.sendVirtualKey('Enter');
+                return;
+            }
             if (osMode === 'app-edit') {
                 sendProxyInput('QANDY_COMMIT_INPUT', { submit: true });
                 window.setOSMode('app');
@@ -614,10 +744,22 @@ function keyboard() {
             else if (typeof window.toggleAppFocus === 'function') window.toggleAppFocus();
             return;
         } else if (e.id === 'esc') {
+            // Collapse proxy input / textarea overlay and keyboard without losing edits
+            if (osMode === 'app-textarea' || osMode === 'app-edit') {
+                sendProxyInput('QANDY_COMMIT_INPUT');
+                window.setOSMode('app');
+                window.hideFullKeyboard();
+                if (!window.popupActive) {
+                    var activeFrame = document.querySelector('.page-frame.active');
+                    if (activeFrame) activeFrame.focus();
+                }
+                return;
+            }
+
             // Priority 1: Hide Virtual Keyboard if open
             if (window.isVirtualKeyboardOpen && window.isVirtualKeyboardOpen()) {
                 window.hideFullKeyboard();
-                return; // Stop here
+                return;
             }
 
             // Priority 2: Close Popup / Shield if active (unless forced visible)
@@ -625,28 +767,32 @@ function keyboard() {
             let isMenu = window.CylonPopManager && window.CylonPopManager.isMenuOpen;
             if (shield && shield.style.display !== 'none' && (window.PopForce !== 'visible' || isMenu)) {
                 if (typeof window.hpop === 'function') window.hpop();
-                return; // Stop here (Staggered behavior)
+                return;
             }
 
-            // Priority 3: Clear the Input Buffer if it has text
-            if (inputBuffer.length > 0) {
+            // Priority 3: Clear the CLI Input Buffer if it has text
+            if ((osMode === 'terminal' || osMode === 'app-cli') && inputBuffer.length > 0) {
                 inputBuffer = "";
                 cursorPos = 0;
                 selAnchor = null;
                 renderInputLine();
-                
-                // If we are actively typing into an app field, clear it on the app side too
-                if (osMode === 'app-edit' || osMode === 'app-textarea') {
-                    sendProxyInput('QANDY_UPDATE_INPUT');
-                }
-                return; // Stop here
+                return;
             }
 
             // Priority 4: If nothing else to do, pass ESC to the active App
             if (osMode === 'app') { window.sendVirtualKey('Escape'); return; }
             
         } else if (e.char) {
-            if (osMode === 'app') { window.sendVirtualKey(e.char); return; }
+            if (osMode === 'app') {
+                if (e.char === ' ' && window.popupActive && document.activeElement &&
+                    document.activeElement.closest && document.activeElement.closest('#cylon-pop') &&
+                    document.activeElement.matches('button, a[href], input[type="button"], input[type="submit"], input[type="reset"], input[type="checkbox"], input[type="radio"]')) {
+                    document.activeElement.click();
+                    return;
+                }
+                window.sendVirtualKey(e.char);
+                return;
+            }
             const ch = filterProxyText(e.char);
             if (!ch) return;
             if (hasSelection()) deleteSelection();

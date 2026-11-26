@@ -139,6 +139,21 @@ function _parseItemPath(itemfile, zBase) {
   return { sector: sector, filename: filename, id: id, z: z, zStr: zStr, playerid: playerid, avatar: avatar };
 }
 
+function _parseObjPath(objfile, zBase) {
+  if (!objfile || objfile.substring(0, 4) === 'RAM:') return null;
+  var p = objfile.replace(/^\//, '');
+  var parts = p.split('/');
+  if (parts.length < 3 || parts[0] !== 'w') return null;
+  var filename = parts[2];
+  if (filename.length < 4) return null;
+  return {
+    sector: parts[1],
+    id: filename.substring(0, 2),
+    zStr: filename.substring(2, 4),
+    data: filename.length >= 6 ? filename.substring(4, 6) : 'Za'
+  };
+}
+
 function _isValidExit(driveName, currentSector, targetSector) {
   var eLoad = _deps.fileLoad(driveName, '/', 'w/' + currentSector + '/e', 'UNIVAC');
   if (!eLoad.success) return true;
@@ -247,10 +262,14 @@ function UNIVAC(driveName, itemfile, objfile, sessionToken, options) {
     content = itemLoad.content;
   }
 
-  var _userRegMatches = content.match(/W[a-z@][0-9A-Za-z][0-9A-Za-z_()[\]{}^,:;+\-=%@]/g) || [];
+  var _userRegMatches = content.match(/W[a-z][0-9A-Za-z][0-9A-Za-z_()[\]{}^,:;+\-=%@]/g) || [];
   _userRegMatches.forEach(function(m) {
     register[m.substring(0, 2)] = m.substring(2, 4);
   });
+
+  register['W@'] = (options && options.opt != null && String(options.opt).length >= 2)
+    ? String(options.opt).substring(0, 2)
+    : '00';
 
   var state = {
     id       : parsedItem ? parsedItem.id       : 'Za',
@@ -359,6 +378,7 @@ function UNIVAC(driveName, itemfile, objfile, sessionToken, options) {
 
   var switchopen = false;
   var ifnot = false;
+  var linkOpt = null;
 
   while (column < tape.length) {
     var word = tape.slice(column, column + 2);
@@ -372,6 +392,7 @@ function UNIVAC(driveName, itemfile, objfile, sessionToken, options) {
       case 'Xc':
         ifnot = false;
         switchopen = false;
+        linkOpt = null;
         break;
 
       case 'Xa': {
@@ -421,7 +442,7 @@ function UNIVAC(driveName, itemfile, objfile, sessionToken, options) {
           }
 
           if (appliedXa) {
-            state.content = state.content.replace(/(W[a-z@])([0-9A-Za-z][0-9A-Za-z_()[\]{}^,:;+\-=%@])?/g, function(match, rk, val) {
+            state.content = state.content.replace(/(W[a-z])([0-9A-Za-z][0-9A-Za-z_()[\]{}^,:;+\-=%@])?/g, function(match, rk, val) {
               if (val) {
                 register[rk] = val;
                 return match;
@@ -447,7 +468,7 @@ function UNIVAC(driveName, itemfile, objfile, sessionToken, options) {
         }
 
         if (!switchopen && state.playerid && /^[ABEF][0-9][CDGH][0-9]$/.test(avatarStr)) {
-          state.avatar = avatarStr + state.avatar.slice(4);
+          state.avatar = avatarStr;          
         }
         break;
       }
@@ -568,19 +589,37 @@ function UNIVAC(driveName, itemfile, objfile, sessionToken, options) {
         break;
       }
 
+      case 'Xh': {
+        var xhOpt = tape.slice(column, column + 2); column += 2;
+        if (!switchopen) {
+          linkOpt = (xhOpt.charAt(0) === 'W') ? (register[xhOpt] || '00') : xhOpt;
+        }
+        break;
+      }
+
       case 'Vh': {
-        var htmlTarget = "";
+        var textStr = "";
         var endCol = tape.indexOf('--', column);
         if (endCol !== -1) {
-          htmlTarget = tape.slice(column, endCol);
+          textStr = tape.slice(column, endCol);
           column = endCol + 2;
         } else {
-          htmlTarget = tape.slice(column);
+          textStr = tape.slice(column);
           column = tape.length;
         }
 
-        if (!switchopen && htmlTarget) {
-          output += "S^Vh" + htmlTarget + "--^S";
+        if (!switchopen && (endCol !== -1 || textStr)) {
+          if (linkOpt !== null) {
+            var objMeta = _parseObjPath(objfile, zBase);
+            var targetId = objMeta ? objMeta.id : state.id;
+            var targetZ  = objMeta ? objMeta.zStr : state.zStr;
+            output += "S^Xh" + targetId + targetZ + linkOpt + textStr + "--^S";
+            linkOpt = null;
+          } else {
+            output += "S^Vh" + textStr + "--^S";
+          }
+        } else {
+          linkOpt = null;
         }
         ifnot = false;
         break;

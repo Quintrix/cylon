@@ -2,7 +2,7 @@
   "format": "qandy-ramdrive",
   "version": 2,
   "drive": "queville",
-  "created": "2026-11-25T04:36:45.069Z",
+  "created": "2026-11-26T14:47:09.198Z",
   "entries": [
     {
       "name": "a",
@@ -86,11 +86,11 @@
     {
       "name": "a/gfxSector",
       "type": "file",
-      "content": "Cg",
+      "content": "Bc",
       "size": 2,
-      "timestamp": "20261113203302",
-      "owner": "system",
-      "session": "system",
+      "timestamp": "20261125185917",
+      "owner": "",
+      "session": "",
       "readOnly": false
     },
     {
@@ -106,7 +106,7 @@
     {
       "name": "a/gfxSpawnZ",
       "type": "file",
-      "content": "65",
+      "content": "Dx",
       "size": 2,
       "timestamp": "20261110222000",
       "owner": "system",
@@ -126,7 +126,7 @@
     {
       "name": "a/gfxZBase",
       "type": "file",
-      "content": "16",
+      "content": "52",
       "size": 2,
       "timestamp": "20261106212458",
       "owner": "system",
@@ -146,11 +146,11 @@
     {
       "name": "a/playerZ",
       "type": "file",
-      "content": "32",
+      "content": "21",
       "size": 2,
-      "timestamp": "20261113203304",
-      "owner": "system",
-      "session": "system",
+      "timestamp": "20261125185919",
+      "owner": "",
+      "session": "",
       "readOnly": false
     },
     {
@@ -532,13 +532,43 @@
       "readOnly": false
     },
     {
+      "name": "w/B2/CaCxZa",
+      "type": "file",
+      "content": "XnXiCa XrZaCa Vi VrCaCx",
+      "size": 23,
+      "timestamp": "20261126092548",
+      "owner": "",
+      "session": "",
+      "readOnly": false
+    },
+    {
+      "name": "w/B2/ZhCyZa",
+      "type": "file",
+      "content": "XiCa XrCaCb VpCb Vi Xc",
+      "size": 22,
+      "timestamp": "20261126092548",
+      "owner": "",
+      "session": "",
+      "readOnly": false
+    },
+    {
+      "name": "w/B2/ZiDyFc",
+      "type": "file",
+      "content": "",
+      "size": 0,
+      "timestamp": "20261126092548",
+      "owner": "",
+      "session": "",
+      "readOnly": false
+    },
+    {
       "name": "w/B2/m",
       "type": "file",
       "content": "U5U0U0U0U0U0U0U0U0U0U0U0U0U0U0U1A0A0A0A0A0A0A0A0A0A0A0A0U0A2G0G0G0G0G0G0G0G0G0G0G0G0U0A2C5C1C1C1C1C1C1C1C1C1C6G0U0A2C4C0C0C0C0C0C0C0C0C0C2G0U0A2C4C0C0C0C0C0C0C0C0C3C8G0U0A2C7C0C0C0C0C0C3C3C8G0G0G0U0U3A6C4C0C0C0C2G0G0G0G0Y4G0U5U0A2C7C3C3C0C2G0Y0Y0Y0Y0G0U5U0A2G0G0G0C4C2G0G0G0G0G0G0",
       "size": 280,
-      "timestamp": "20261106201710",
-      "owner": "system",
-      "session": "system",
+      "timestamp": "20261126092548",
+      "owner": "",
+      "session": "",
       "readOnly": false
     },
     {
@@ -684,23 +714,23 @@
       "readOnly": false
     },
     {
-      "name": "w/Bc/Ze65Za",
+      "name": "w/Bc/ZeDxZa",
       "type": "file",
       "content": "VtCgZe",
       "size": 6,
-      "timestamp": "20261113203225",
-      "owner": "system",
-      "session": "system",
+      "timestamp": "20261126022123",
+      "owner": "",
+      "session": "",
       "readOnly": false
     },
     {
-      "name": "w/Bc/Zm21Za",
+      "name": "w/Bc/ZmBhBh",
       "type": "file",
       "content": "Vc",
       "size": 2,
-      "timestamp": "20261113202945",
-      "owner": "system",
-      "session": "system",
+      "timestamp": "20261126022123",
+      "owner": "",
+      "session": "",
       "readOnly": false
     },
     {
@@ -708,9 +738,9 @@
       "type": "file",
       "content": "U7U6U6U5U0U0U0U0U0U0U5U6U6U7U6U6U5U1A0A0A0A0A0A0U2U5U6U6U6U5U0A2D2G0D3G0G0G0A3U0U5U6U5U5U1A4G1B0G1G0G0G0A5U2U5U5U5U0A2G1G1B4B1B6G0R2G0A3U0U5U5U0A2G1G1G1G1B0G0R0F4A3U0U5U0U1A4G0G1G1B5B3G1F4F4A5U2U0U0A2G0G0G0B5B3G0G1F4G1G0A3U0U0A2G0G0G0B4B6G0G0G1G1G0A3U0U0A2G0G0G0G0B0G0G0G0G0G0A3U0",
       "size": 280,
-      "timestamp": "20261106201710",
-      "owner": "system",
-      "session": "system",
+      "timestamp": "20261126022123",
+      "owner": "",
+      "session": "",
       "readOnly": false
     },
     {
@@ -875,7 +905,7 @@
       "readOnly": false
     },
     {
-      "name": "w/C2/Ze7AZa",
+      "name": "w/C2/ZeEsEs",
       "type": "file",
       "content": "VtCcZe",
       "size": 6,
@@ -1056,17 +1086,17 @@
       "readOnly": false
     },
     {
-      "name": "w/Cc/Tb26Za",
+      "name": "w/Cc/TbBmZa",
       "type": "file",
-      "content": "XnXg XnXiLd XrZaLd Vi Xc\nXnXg VhThanks_for_playing!-- Xc\nXg Vg Xc",
-      "size": 65,
+      "content": "Xg XeW@Za VhWould_you_like_a_hat_to-- Vhsave_your_player_file_in?-- Vh-- Xh01 VhYes!-- Xc\nXg XeW@01 Vg Xc\nXnXg XiLc VhThanks_for_playing!-- Xc\nXnXg XiLd VhThanks_for_playing!-- Xc\nXnXg XnXiLc XnXiLd  VhWhat_color_hat?-- Vh-- XhLc VhBlue-- XhLd VhPink-- Xc\nXnXg XeW@Lc XrZaLc Vi Xc\nXnXg XeW@Ld XrZaLd Vi Xc\n",
+      "size": 246,
       "timestamp": "20261124000036",
       "owner": "",
       "session": "",
       "readOnly": false
     },
     {
-      "name": "w/Cc/Ze7AZa",
+      "name": "w/Cc/ZeEsEs",
       "type": "file",
       "content": "VtC2Ze",
       "size": 6,
@@ -1152,7 +1182,7 @@
       "readOnly": false
     },
     {
-      "name": "w/Cg/Ze2FZa",
+      "name": "w/Cg/ZeBhZa",
       "type": "file",
       "content": "VtBcZe",
       "size": 6,
@@ -2435,9 +2465,9 @@
       "readOnly": false
     },
     {
-      "name": "w/Gb/Zm58Za",
+      "name": "w/Gb/ZmDkDk",
       "type": "file",
-      "content": "\\n",
+      "content": "Vc",
       "size": 2,
       "timestamp": "20261106230246",
       "owner": "system",

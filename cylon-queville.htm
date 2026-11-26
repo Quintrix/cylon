@@ -184,7 +184,7 @@
 
         /* --- Logged-in HUD (Inventory + Keypad + Username) --- */
         #qhud-game {
-            display: none;
+            display: flex;
             flex-direction: column;
             align-items: center;
             justify-content: space-between;
@@ -385,18 +385,7 @@
     </div>
 
     <div id="queville-controls">
-        <!-- Logged-out View -->
-        <div id="qhud-login">
-            <input id="qLoginUser" class="qlogin-input" type="text" maxlength="15" placeholder="Username" autocomplete="off" data-pop-passthrough="true">
-            <input id="qLoginPass" class="qlogin-input" type="password" maxlength="32" placeholder="Password" autocomplete="off" data-pop-passthrough="true">
-            <div class="qlogin-btn-row">
-                <button type="button" id="qBtnLogin" class="qlogin-btn primary" data-pop-passthrough="true">Login</button>
-            </div>
-            <div id="qLoginErr"></div>
-            <button type="button" id="qBtnGuest" data-pop-passthrough="true">Play as Guest!</button>
-        </div>
-
-        <!-- Logged-in HUD View -->
+        <!-- HUD View (empty inventory + keypad shown before and after login) -->
         <div id="qhud-game">
             <div id="qhud-inven">
                 <div id="qhud-inven-grid"></div>
@@ -415,6 +404,7 @@
             </div>
         </div>
     </div>
+
 </div>
 
 <script>
@@ -424,8 +414,10 @@ const QUEVILLE_SERVERS = [
     'https://cylon.onrender.com/qandyland.js'
 ];
 
+const SERVER_MESSAGE = 'v.3c Alpha Test Release';
 let selectedServerUrl = null;
 let selectingServer = false;
+const DEFAULT_INVEN_SLOTS = 16;
 
 function getItemLabel(id) {
     if (window.CylonGFX && typeof window.CylonGFX.getItemName === 'function') {
@@ -592,9 +584,13 @@ function escapeAttr(s) {
     return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-function setLoginError(msg) {
-    const errEl = document.getElementById('qLoginErr');
-    if (errEl) errEl.textContent = msg || '';
+function setSidebarLoggedIn(isLoggedIn) {
+    const userLabel = document.getElementById('qhud-username');
+    if (userLabel) userLabel.textContent = isLoggedIn ? (loggedInUser || '') : '';
+    if (!isLoggedIn) {
+        window.playerInven = '';
+        window.renderInventory('');
+    }
 }
 
 function setSidebarLoggedIn(isLoggedIn) {
@@ -605,15 +601,6 @@ function setSidebarLoggedIn(isLoggedIn) {
     if (loginPane) loginPane.style.display = isLoggedIn ? 'none' : 'flex';
     if (gamePane) gamePane.style.display = isLoggedIn ? 'flex' : 'none';
     if (userLabel) userLabel.textContent = isLoggedIn ? (loggedInUser || '') : '';
-}
-
-function focusSidebarLogin(msg) {
-    if (msg) setLoginError(msg);
-    const loginPane = document.getElementById('qhud-login');
-    if (loginPane) {
-        loginPane.classList.add('flash');
-        setTimeout(() => loginPane.classList.remove('flash'), 350);
-    }
 }
 
 const PREVIEW_SPAWN_TILES = 'U7U6U6U5U0U0U0U0U0U0U5U6U6U7U6U6U5U1A0A0A0A0A0A0U2U5U6U6U6U5U0A2D2G0D3G0G0G0A3U0U5U6U5U5U1A4G1B0G1G0G0G0A5U2U5U5U5U0A2G1G1B4B1B6G0R2G0A3U0U5U5U0A2G1G1G1G1B0G0R0F4A3U0U5U0U1A4G0G1G1B5B3G1F4F4A5U2U0U0A2G0G0G0B5B3G0G1F4G1G0A3U0U0A2G0G0G0B4B6G0G0G1G1G0A3U0U0A2G0G0G0G0B0G0G0G0G0G0A3U0';
@@ -656,7 +643,7 @@ function showServerMenuPopup(errorMsg) {
             label: url,
             action: () => selectServer(url)
         }));
-        popMgr.showContextMenu({ pos: 'topleft', view: window }, items);
+        popMgr.showContextMenu({ pos: 'topcenter', view: window }, items);
         return;
     }
 
@@ -789,15 +776,6 @@ async function selectServer(serverUrl) {
 
         await showSplashPopup();
         
-        window.CylonGFX.renderSectorStaticObjects(startSector);
-        fitDesktopToScreen();
-
-        const userInput = document.getElementById('qLoginUser');
-        if (userInput && window.CylonSDK && typeof window.CylonSDK.focusInput === 'function') {
-            window.CylonSDK.focusInput(userInput);
-        }
-        showSplashPopup();
-        
     } catch (err) {
         const errMsg = `Error: ${err && err.message ? err.message : String(err)}`;
         if (typeof print === 'function') print(errMsg + '\n');
@@ -899,7 +877,7 @@ function showSayPopup() {
         `</div>` +
         `</div>`;
 
-    if (typeof pop === 'function') pop(html, 'topleft');
+    if (typeof pop === 'function') pop(html, 'topcenter');
 }
 
 window.onload = async function() {
@@ -908,7 +886,6 @@ window.onload = async function() {
         return;
     }
 
-    initLoginControls();
     initQuevilleControls();
     setSidebarLoggedIn(false);
 
@@ -922,7 +899,7 @@ window.onload = async function() {
     window.addEventListener('resize', fitDesktopToScreen);
 
     renderPreviewMap();
-    
+
     // First action: open the topleft server selection popup with PopForce = visible
     showServerMenuPopup();
 };
@@ -943,7 +920,7 @@ function handleTileClick(z, clientX, clientY) {
         return;
     }
     if (!loggedInUser || (window.playerItem && window.playerItem.startsWith('Za'))) {
-        focusSidebarLogin('Please login or click Play Now!');
+        showSplashPopup('Please login or play as guest.');
         return;
     }
     if (!window.playerAvatar) {
@@ -978,10 +955,9 @@ function handleTileClick(z, clientX, clientY) {
     });
 
     if (z === window.playerZ && window.playerItem) {
-        const pId = window.playerItem.substring(0, 2);
         menuItems.push({
-            label: 'Inventory',
-            action: () => gfxClick(`ID${pId}${zStr}`)
+            label: 'Profile',
+            action: () => showProfilePopup()
         });
         menuItems.push({
             label: 'Say Something',
@@ -1066,6 +1042,13 @@ function gfxClick(bytecode) {
             break;
         case 'OD':
             window.objdown(data);
+            break;
+        case 'OC':
+            if (typeof setPopForce === 'function') setPopForce('hidden');
+            if (typeof hpop === 'function') hpop();
+            if (window.gfxDo === 'RF') window.gfxDo = '';
+            window.gfxDo += 'OC' + data;
+            flushNetworkNow();
             break;
         case 'SD':
             if (typeof hpop === 'function') hpop();
@@ -1243,9 +1226,43 @@ window.invdown = function(code) {
     pop(output, 'center');
 };
 
+function getMapPopupPos() {
+    const wrapper = document.getElementById('desktop-wrapper');
+    if (wrapper) {
+        const rect = wrapper.getBoundingClientRect();
+        if (rect.width > 0) {
+            return {
+                x: Math.round(rect.left + rect.width / 2),
+                y: 'topcenter',
+                center: true
+            };
+        }
+    }
+    return 'topcenter';
+}
+
+function removeObjectFromDOM(objId, objZStr) {
+    if (!objId || objId.length < 2 || !objZStr || objZStr.length < 2) return;
+    const objZ = decodeTileZ(objZStr);
+    const iconsLayer = document.getElementById('icons-layer');
+    if (!iconsLayer) return;
+
+    iconsLayer.querySelectorAll('.icon-wrap').forEach(el => {
+        const elZ = parseInt(el.getAttribute('data-z'), 10);
+        const elZStr = el.getAttribute('data-zstr');
+        if (elZ !== objZ && elZStr !== objZStr) return;
+
+        const elId = el.getAttribute('data-id') || (el.getAttribute('data-code') || '').substring(0, 2);
+        if (elId === objId) {
+            el.remove();
+        }
+    });
+}
+
 window.serverdown = function(code) {
     avatarWizardStep = null;
     avatarSubmitTicks = 0;
+    const dialogParts = [];
     let col = 0;
     while (col < code.length) {
         const verb = code.substring(col, col + 2);
@@ -1258,13 +1275,20 @@ window.serverdown = function(code) {
             if (verb === 'LC') {
                 pendingNewUser = name;
                 if (typeof print === 'function') print(`Account saved as ${name}. Please log in.\n`);
+                try {
+                    const splashMsgEl = window.parent && window.parent.document
+                        ? window.parent.document.getElementById('qSplashMsg')
+                        : null;
+                    if (splashMsgEl) {
+                        splashMsgEl.textContent = `Account created as ${name}! Click LOGIN.`;
+                        const cEl = window.parent.document.getElementById('confirm');
+                        if (cEl) cEl.value = '';
+                    }
+                } catch (e) {}
                 continue;
             }
 
             loggedInUser = name || (verb === 'LG' ? ('guest' + (window.playerId || '')) : 'Player');
-            const passEl = document.getElementById('qLoginPass');
-            if (passEl) passEl.value = '';
-            setLoginError('');
             setSidebarLoggedIn(true);
 
             if (!window.playerInven) {
@@ -1301,14 +1325,13 @@ window.serverdown = function(code) {
             setSidebarLoggedIn(false);
 
             if (pendingNewUser) {
-                const userEl = document.getElementById('qLoginUser');
-                if (userEl) userEl.value = pendingNewUser;
-                setLoginError('Account saved! Log in to continue.');
+                const savedUser = pendingNewUser;
                 pendingNewUser = null;
                 if (typeof print === 'function') print('Logged out. Log in with your new account.\n');
+                showSplashPopup('Account saved! Log in to continue.', savedUser);
             } else {
-                setLoginError('Logged out.');
                 if (typeof print === 'function') print('Logged out.\n');
+                showSplashPopup('Logged out.');
             }
         } else if (verb === 'LE') {
             const errCode = code.substring(col, col + 2);
@@ -1317,54 +1340,68 @@ window.serverdown = function(code) {
             if (typeof print === 'function') print(`Error: ${msg}\n`);
 
             let joinErrEl = null;
+            let splashMsgEl = null;
             try {
                 if (window.parent && window.parent.document) {
                     joinErrEl = window.parent.document.getElementById('qJoinErr');
+                    splashMsgEl = window.parent.document.getElementById('qSplashMsg');
                 }
             } catch (e) {}
 
             if (joinErrEl) {
                 joinErrEl.textContent = msg;
-            } else if (!loggedInUser) {
-                if (window.CylonGFX) {
-                    window.CylonGFX.resetSession();
-                }
+            } else if (splashMsgEl) {
+                if (window.CylonGFX) window.CylonGFX.resetSession();
                 setSidebarLoggedIn(false);
-                setLoginError(msg);
+                splashMsgEl.textContent = msg;
+            } else if (!loggedInUser) {
+                if (window.CylonGFX) window.CylonGFX.resetSession();
+                setSidebarLoggedIn(false);
+                showSplashPopup(msg);
             }
-        } else if (verb === 'Vg') {
-            showJoinModalPopup();
-        } else if (verb === 'Vi') {
-            if (typeof setPopForce === 'function') setPopForce('hidden');
-            let endIdx = code.indexOf('--', col);
-            if (endIdx < 0) endIdx = code.indexOf('..', col);
-            if (endIdx < 0) {
-                window.playerInven = code.substring(col);
-                col = code.length;
-            } else {
-                window.playerInven = code.substring(col, endIdx);
-                col = endIdx + 2;
-            }
-            window.invdown(window.playerInven);
         } else if (verb === 'Vh') {
             const endIdx = code.indexOf('--', col);
-            const htmlTarget = endIdx < 0 ? code.substring(col) : code.substring(col, endIdx);
+            const rawText = endIdx < 0 ? code.substring(col) : code.substring(col, endIdx);
             col = endIdx < 0 ? code.length : endIdx + 2;
-            const popMgr = window.parent && window.parent.CylonPopManager;
-            const menuOpen = popMgr && typeof popMgr.isMenuOpenForWindow === 'function' && popMgr.isMenuOpenForWindow(window);
-            if (htmlTarget && loggedInUser && !menuOpen) {
-                if (typeof setPopForce === 'function') setPopForce('hidden');
-                pop(htmlTarget, 'center');
+            const text = rawText.replace(/_/g, ' ');
+            dialogParts.push(escapeAttr(text) + '<br>');
+        } else if (verb === 'Xh') {
+            const objId = code.substring(col, col + 2);
+            const objZ = code.substring(col + 2, col + 4);
+            const opt = code.substring(col + 4, col + 6);
+            col += 6;
+            const endIdx = code.indexOf('--', col);
+            const rawLabel = endIdx < 0 ? code.substring(col) : code.substring(col, endIdx);
+            col = endIdx < 0 ? code.length : endIdx + 2;
+            const label = rawLabel.replace(/_/g, ' ');
+            const target = escapeAttr('OC' + objId + objZ + opt);
+            dialogParts.push(`<a href="gfx:${target}" style="color:var(--html-link,#00aaff); text-decoration:underline; cursor:pointer;">${escapeAttr(label)}</a>`);
+        } else if (verb === 'Vi') {
+            const endIdx = code.indexOf('--', col);
+            const inv = endIdx < 0 ? code.substring(col) : code.substring(col, endIdx);
+            col = endIdx < 0 ? code.length : endIdx + 2;
+            window.playerInven = inv;
+            if (typeof window.renderInventory === 'function') {
+                window.renderInventory(inv);
             }
-        } else if (verb === 'Vr') {
-            const noun = code.substring(col, col + 2); col += 2;
-            const zStr = code.substring(col, col + 2); col += 2;
-            const el = document.getElementById(`obj_${noun}_${decodeTileZ(zStr)}`);
-            if (el) el.remove();
         } else if (verb === 'Va') {
             const endIdx = code.indexOf('--', col);
             col = endIdx < 0 ? code.length : endIdx + 2;
+        } else if (verb === 'Vr') {
+            const objId = code.substring(col, col + 2);
+            const objZStr = code.substring(col + 2, col + 4);
+            col += 4;
+            removeObjectFromDOM(objId, objZStr);
+        } else if (verb === 'Vg') {
+            showJoinModalPopup();
         }
+    }
+
+    if (dialogParts.length > 0) {
+        const bodyHtml = dialogParts.join('').replace(/<br>$/, '');
+        const html = `<div style="padding:10px 14px; text-align:center; font-family:var(--font-face,monospace); line-height:1.5;">${bodyHtml}</div>`;
+        if (typeof setPopForce === 'function') setPopForce('hidden');
+        if (typeof pop === 'function') pop(html, getMapPopupPos());
     }
 };
 
@@ -1415,6 +1452,11 @@ window.keydown = function(key, e) {
 
     if (lower === 'enter') {
         if (e) e.preventDefault();
+        if (popMgr && typeof popMgr.isPopupVisible === 'function' && popMgr.isPopupVisible() &&
+            (!window.parent || window.parent.PopForce !== 'visible')) {
+            if (typeof hpop === 'function') hpop();
+            return;
+        }
         handleTileClick(window.playerZ);
         return;
     }
@@ -1682,6 +1724,15 @@ window.renderInventory = function(invenStr) {
     hideHoverTooltip();
     grid.innerHTML = '';
 
+    if (!code) {
+        for (let i = 0; i < DEFAULT_INVEN_SLOTS; i++) {
+            const emptySlot = document.createElement('div');
+            emptySlot.className = 'qhud-inven-slot empty';
+            grid.appendChild(emptySlot);
+        }
+        return;
+    }
+
     let col = 0;
     while (col < code.length) {
         const verb = code.substring(col, col + 2);
@@ -1735,6 +1786,27 @@ window.renderInventory = function(invenStr) {
     }
 };
 
+function showProfilePopup() {
+    const name = escapeAttr(loggedInUser || '(unknown)');
+    const sector = escapeAttr(window.map || '??');
+    const zNum = Number.isFinite(window.playerZ) ? window.playerZ : 0;
+    const zCode = escapeAttr(encodeTileZ(zNum));
+    const avatar = escapeAttr(window.playerAvatar || '(none)');
+
+    const html =
+        `<div style="padding:10px 14px; font-family:var(--font-face,monospace); line-height:1.5; text-align:left;">` +
+        `<div style="font-weight:bold; text-align:center; margin-bottom:6px;">Profile</div>` +
+        `<div>Name: <strong>${name}</strong></div>` +
+        `<div>Sector: <strong>${sector}</strong></div>` +
+        `<div>Z-Location: <strong>${zNum}</strong> (${zCode})</div>` +
+        `<div>Avatar: <code>${avatar}</code></div>` +
+        `<div style="margin-top:8px; text-align:center;"><a href="gfx:LO">Logout</a></div>` +
+        `</div>`;
+
+    if (typeof setPopForce === 'function') setPopForce('hidden');
+    if (typeof pop === 'function') pop(html, getMapPopupPos());
+}
+
 function toLogoDataUri(raw) {
     if (!raw) return '';
     const trimmed = String(raw).trim();
@@ -1771,14 +1843,14 @@ async function loadLogoImageInfo() {
     });
 }
 
-async function showSplashPopup() {
+async function showSplashPopup(statusMsg, prefillUser) {
     if (typeof setPopForce === 'function') setPopForce('visible');
 
     const logo = await loadLogoImageInfo();
     let logoHtml = '';
     if (logo && logo.src) {
         const maxW = Math.max(160, Math.floor(window.innerWidth * 0.55));
-        const maxH = Math.max(80, Math.floor(window.innerHeight * 0.35));
+        const maxH = Math.max(64, Math.floor(window.innerHeight * 0.25));
         let w = logo.width || maxW;
         let h = logo.height || maxH;
         const scale = Math.min(1, maxW / w, maxH / h);
@@ -1786,18 +1858,85 @@ async function showSplashPopup() {
         h = Math.max(1, Math.round(h * scale));
 
         logoHtml =
-            `<div style="margin:8px 0;">` +
+            `<div style="margin:6px 0;">` +
             `<img src="${logo.src}" width="${w}" height="${h}" alt="Queville" style="display:block; margin:0 auto; image-rendering:pixelated;">` +
             `</div>`;
     }
 
+    const safeMsg = escapeAttr(statusMsg || SERVER_MESSAGE);
+    const safeUser = escapeAttr(prefillUser || '');
+
+    const loginScript =
+        `(function(){` +
+        `var u=(document.getElementById('username').value||'').trim();` +
+        `var p=document.getElementById('password').value||'';` +
+        `var msg=document.getElementById('qSplashMsg');` +
+        `if(!u||!p){if(msg)msg.textContent='Enter username and password.';return;}` +
+        `if(msg)msg.textContent='Logging in...';` +
+        `window.proxyInputInPopup=false;window.proxyInputMask=false;` +
+        `if(window.setOSMode)window.setOSMode('app');` +
+        `if(window.hideFullKeyboard)window.hideFullKeyboard();` +
+        `var f=document.querySelector('.page-frame.active');` +
+        `var target=(f&&f.contentWindow)?f.contentWindow:window;` +
+        `target.postMessage({type:'QANDY_GFX_CMD',cmd:'login',data:{user:u,pass:p}},` +
+        `(window.location.origin&&window.location.origin!=='null'?window.location.origin:'*'));` +
+        `})()`;
+
+    const createScript =
+        `(function(){` +
+        `var u=(document.getElementById('username').value||'').trim();` +
+        `var p=document.getElementById('password').value||'';` +
+        `var c=document.getElementById('confirm').value||'';` +
+        `var msg=document.getElementById('qSplashMsg');` +
+        `if(!u||!p||!c){if(msg)msg.textContent='Enter username, password, and confirm.';return;}` +
+        `if(p!==c){if(msg)msg.textContent='Passwords do not match.';return;}` +
+        `if(msg)msg.textContent='Creating account...';` +
+        `window.proxyInputInPopup=false;window.proxyInputMask=false;` +
+        `if(window.setOSMode)window.setOSMode('app');` +
+        `if(window.hideFullKeyboard)window.hideFullKeyboard();` +
+        `var f=document.querySelector('.page-frame.active');` +
+        `var target=(f&&f.contentWindow)?f.contentWindow:window;` +
+        `target.postMessage({type:'QANDY_GFX_CMD',cmd:'new',data:{user:u,pass:p}},` +
+        `(window.location.origin&&window.location.origin!=='null'?window.location.origin:'*'));` +
+        `})()`;
+
+    const inputStyle =
+        `width:130px; box-sizing:border-box; padding:3px 5px; font-family:inherit; ` +
+        `background:var(--input-bg,#000); color:var(--input-fg,#0f0); border:1px solid var(--fg-color,#0f0); border-radius:3px;`;
+
+    const btnStyle =
+        `padding:4px 10px; font-family:inherit; font-weight:bold; cursor:pointer; ` +
+        `background:var(--sel-bg,#333); color:var(--sel-fg,#0f0); border:1px solid var(--fg-color,#0f0); border-radius:3px;`;
+
     const html =
-        `<div style="padding:10px 16px; text-align:center; font-family:var(--font-face,monospace); line-height:1.5;">` +
-        `<div>An epic tale of Romance and Adventure...</div>` +
-        logoHtml +
-        `<div style="margin-top:6px;">` +
-        `<a href="gfx:GUEST">Play Now as a Guest Player!</a>` +
-        `</div>` +
+        `<div style="padding:10px 16px; text-align:center; font-family:var(--font-face,monospace); line-height:1.4;">` +
+            `<div>An epic tale of Romance and Adventure...</div>` +
+            logoHtml +
+            `<div style="margin:4px 0;"><a href="gfx:GUEST">Play Now as a Guest Player!</a></div>` +
+            `<div id="qSplashMsg" style="color:#ff5555; font-weight:bold; font-size:12px; min-height:1.2em; margin:6px 0 8px;">${safeMsg}</div>` +
+            `<div style="display:inline-grid; grid-template-columns:auto auto auto; align-items:center; gap:5px 6px; text-align:left;">` +
+                `<label for="username" style="text-align:right;">Username:</label>` +
+                `<input id="username" type="text" maxlength="15" value="${safeUser}" autocomplete="off" ` +
+                    `onkeydown="if(event.key==='Enter'){event.preventDefault();if(document.getElementById('password').value){${loginScript}}}" ` +
+                    `style="${inputStyle}">` +
+                `<span></span>` +
+
+                `<label for="password" style="text-align:right;">Password:</label>` +
+                `<input id="password" type="password" maxlength="32" autocomplete="off" ` +
+                    `onkeydown="if(event.key==='Enter'){event.preventDefault();${loginScript}}" ` +
+                    `style="${inputStyle}">` +
+                `<span></span>` +
+
+                `<div style="grid-column:1 / -1; text-align:center; padding:3px 0;">` +
+                    `<button type="button" id="qSplashLoginBtn" onclick="${loginScript}" style="${btnStyle}">LOGIN</button>` +
+                `</div>` +
+
+                `<label for="confirm" style="text-align:right;">Confirm:</label>` +
+                `<input id="confirm" type="password" maxlength="32" autocomplete="off" ` +
+                    `onkeydown="if(event.key==='Enter'){event.preventDefault();${createScript}}" ` +
+                    `style="${inputStyle}">` +
+                `<button type="button" id="qSplashCreateBtn" onclick="${createScript}" style="${btnStyle}">CREATE</button>` +
+            `</div>` +
         `</div>`;
 
     const wrapper = document.getElementById('desktop-wrapper');

@@ -61,7 +61,6 @@
         :root {
             --bar-height: 60px;
             --kb-height: 55vh;
-            --kb-pan: 0px; /* how far the app layer is panned up to keep a focused field clear of the keyboard */
         }
 
         /* --- MAIN SCREEN LAYER (DYNAMIC MONITOR) --- */
@@ -127,8 +126,6 @@
             border: none;
             background: #000;
             display: none;
-            transform: translateY(calc(-1 * var(--kb-pan)));
-            transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1);
         }
         .page-frame.active {
             display: block;
@@ -188,6 +185,7 @@
             left: 0; 
             right: 0;
             height: 160px; /* ~5 Rows of text overlay */
+            max-height: calc(100vh - var(--kb-height) - var(--bar-height) - 48px);
             background: rgba(8, 12, 8, 0.98);
             border: 1px solid #0a0;
             border-radius: 4px 4px 0 0;
@@ -315,9 +313,7 @@
             background: var(--case-bg, rgba(8, 8, 8, 0.98)); 
             border-top: 1px solid var(--case-fg, #0a0);
             z-index: 999;        	
-            position: absolute; bottom: 0; left: 0; right: 0; height: var(--kb-height);
             display: flex; flex-direction: column; box-sizing: border-box;
-            border-top: 1px solid #0a0;
             transform: translateY(100%); transition: transform 0.4s cubic-bezier(0.22, 1, 0.36, 1);
         }
         #kb-overlay.is-open { transform: translateY(0); }
@@ -430,7 +426,7 @@ body.app-mode #input-bar {
     background-color: var(--bg-color, #000);
 }
 
-/* Hide app tabs while typing to give the input bar full width 
+/* Hide app tabs while typing to give the input bar full width */ 
 body.app-mode.kb-open #app-taskbar {
     display: none !important;
 }

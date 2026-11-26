@@ -752,11 +752,11 @@ async function plugboard(req, stacker, plugs, drive, session) {
     }
   }
 
-  function runfile(filepath) {
+  function runfile(filepath, extraOpts) {
     if (typeof UNIVAC === 'function') {
-      let uResult = UNIVAC(drive, player.fullPath, filepath, session, {
+      let uResult = UNIVAC(drive, player.fullPath, filepath, session, Object.assign({
         playerStatus: getPlayerStatus(player)
-      });
+      }, extraOpts || {}));
       if (uResult) {
         player.map      = uResult.sector;
         player.z        = uResult.z;
@@ -769,6 +769,7 @@ async function plugboard(req, stacker, plugs, drive, session) {
     }
   }
 
+  var player = playerIndex.get(session);
   var player = playerIndex.get(session);
   
   if (!player) {
@@ -822,7 +823,7 @@ async function plugboard(req, stacker, plugs, drive, session) {
             await upstashSaveUser(drive, player.userKey);
           } else if (muteCheck.type === 'mute') {
             let untilText = muteCheck.until ? (' until ' + formatTsReadable(muteCheck.until)) : ' permanently';
-            output += 'S^Vh<div style="text-align:center;padding:8px;">You are muted' + untilText + '.</div>--^S';
+            output += 'S^VhYou are muted' + untilText + '.--^S';
             break;
           }
         }
@@ -873,9 +874,10 @@ async function plugboard(req, stacker, plugs, drive, session) {
         tape += code + item;
         break;
 
-      case 'OD':
+      case 'OD': {
         if (tape) { runtape(tape); tape = ""; }
         let objfile = null;
+        let objdata = 'Za';
         let objid = plugs.slice(column, column + 2);
         let objz  = plugs.slice(column + 2, column + 4);
         column += 4;
@@ -898,29 +900,78 @@ async function plugboard(req, stacker, plugs, drive, session) {
                 matchedBase.length === 6 &&
                 matchedBase.startsWith(objid + pZStr)) {
               objfile = entryName;
+              objdata = matchedBase.substring(4, 6);
               break;
             }
           }
         }
 
-
-        if (objfile != null) {
-          if (typeof UNIVAC === 'function') {
-            let uResult = UNIVAC(drive, player.fullPath, objfile, session, {
-              playerStatus: getPlayerStatus(player)
-            });
-            if (uResult) {
-              player.map = uResult.sector;
-              player.z = uResult.z;
-              player.avatar = uResult.avatar;
-              if (uResult.playerid) player.pubId = uResult.playerid;
-              if (uResult.item) player.item = uResult.item + player.pubId;
-              player.fullPath = uResult.fullPath;
-              output += uResult.output;
-            }
+        if (objfile != null && typeof UNIVAC === 'function') {
+          let uResult = UNIVAC(drive, player.fullPath, objfile, session, {
+            playerStatus: getPlayerStatus(player),
+            opt: objdata
+          });
+          if (uResult) {
+            player.map = uResult.sector;
+            player.z = uResult.z;
+            player.avatar = uResult.avatar;
+            if (uResult.playerid) player.pubId = uResult.playerid;
+            if (uResult.item) player.item = uResult.item + player.pubId;
+            player.fullPath = uResult.fullPath;
+            output += uResult.output;
           }
         }
         break;
+      }
+
+      case 'OC': {
+        if (tape) { runtape(tape); tape = ""; }
+        let objfile = null;
+        let objid  = plugs.slice(column, column + 2);
+        let objz   = plugs.slice(column + 2, column + 4);
+        let objopt = plugs.slice(column + 4, column + 6);
+        column += 6;
+
+        if (!player.item || player.item.startsWith('Za')) {
+          if (objid.charAt(0) === 'S') {
+            player.z = decodeZ(objz, gfxZBase);
+          }
+        }
+
+        let pZStr = encodeZ(player.z, gfxZBase);
+        let ocSearchPattern = 'w/' + player.map + '/' + objid + pZStr + '??';
+        let ocFilesResponse = DOS.fileSearch(drive, ocSearchPattern);
+
+        if (ocFilesResponse.success && ocFilesResponse.results.length > 0) {
+          for (let i = 0; i < ocFilesResponse.results.length; i++) {
+            let entryName = ocFilesResponse.results[i].name;
+            let matchedBase = entryName.substring(entryName.lastIndexOf('/') + 1);
+            if (entryName === 'w/' + player.map + '/' + matchedBase &&
+                matchedBase.length === 6 &&
+                matchedBase.startsWith(objid + pZStr)) {
+              objfile = entryName;
+              break;
+            }
+          }
+        }
+
+        if (objfile != null && typeof UNIVAC === 'function') {
+          let uResult = UNIVAC(drive, player.fullPath, objfile, session, {
+            playerStatus: getPlayerStatus(player),
+            opt: objopt
+          });
+          if (uResult) {
+            player.map = uResult.sector;
+            player.z = uResult.z;
+            player.avatar = uResult.avatar;
+            if (uResult.playerid) player.pubId = uResult.playerid;
+            if (uResult.item) player.item = uResult.item + player.pubId;
+            player.fullPath = uResult.fullPath;
+            output += uResult.output;
+          }
+        }
+        break;
+      }
 
       case 'ID':
         if (tape) { runtape(tape); tape = ""; }
@@ -1464,8 +1515,7 @@ async function plugboard(req, stacker, plugs, drive, session) {
         let attackVal = tagRes.content.substring(4, 6);
         DOS.fileDelete(drive, '/', tagPath, session);
         if (DOS.fileExists(drive, '/', 'w/t').exists) {
-          runtape('XsW@' + attackVal);
-          runfile('w/t');
+          runfile('w/t', { opt: attackVal });
         }
       }
     }

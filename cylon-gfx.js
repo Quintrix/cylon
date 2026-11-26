@@ -741,6 +741,16 @@ window.CylonGFX = {
 
         let col = 0;
         let serverPlayerZ = null;
+        let sPlugsBuffer = "";
+
+        const flushServerPlugs = () => {
+            if (!sPlugsBuffer) return;
+            let batch = sPlugsBuffer;
+            sPlugsBuffer = "";
+            if (typeof window.serverdown === 'function') {
+                window.serverdown(batch);
+            }
+        };
 
         while (col < response.length) {
             let cmd = response.substring(col, col + 2);
@@ -757,12 +767,8 @@ window.CylonGFX = {
                 if (sPlugs.indexOf('LO--') !== -1) {
                     this.resetSession();
                 }
-                if (typeof window.serverdown === 'function') {
-                    window.serverdown(sPlugs);
-                }
-            }
-
-            else if (cmd === 'PI') {
+                sPlugsBuffer += sPlugs;
+            } else if (cmd === 'PI') {
                 if (this.gfxTickRate !== 0) {
                     let newItem = response.substring(col + 2, col + 4);
                     let zStr = response.substring(col + 4, col + 6);
@@ -819,8 +825,9 @@ window.CylonGFX = {
             }
             else {
                 col++;
-            }
-        }
+            }        }
+
+        flushServerPlugs();
     },
 
     // Load sector terrain ('m') and static 6-char objects once from CylonDOS into memory
@@ -1038,12 +1045,11 @@ window.CylonGFX = {
         }
         this.lastRenderedItems = itemsStr;
 
-        // Re-sync baseline tiles/objects with a DIFF (no wipe-and-rebuild, so no flicker).
-        // Expired V/X markers are reverted below, after we know which ones are still active.
-        if (!sectorChanged) {
-            this.syncSectorTiles(sector);
-            this.syncSectorStaticObjects(sector);
-        }
+        // this is not needed, objects and tiles only change on scroll on/off
+        // if (!sectorChanged) {
+        //     this.syncSectorTiles(sector);
+        //     this.syncSectorStaticObjects(sector);
+        // }
 
         const iconsLayer = document.getElementById('icons-layer');
 

@@ -624,8 +624,6 @@ window.addEventListener('message', function(e) {
         if (e.data.rect) window.panToRect(e.data.rect);
     } else if (e.data.type === 'CYLON_PRINT') {
         if (typeof print === 'function') print(e.data.text);
-    } else if (e.data.type === 'QANDY_INPUT_RECT') {
-        window.panToRect(e.data.rect);
     } else if (e.data.type === 'QANDY_SET_MODE') {
         window.setOSMode(e.data.mode);
         if (osMode === 'terminal') { window.showFullKeyboard(); }
@@ -702,6 +700,9 @@ window.addEventListener('cut', function(e) {
             cursorPos = start;
             selAnchor = null;
             if (window.renderInputLine) window.renderInputLine();
+            if (osMode === 'app-edit' || osMode === 'app-textarea') {
+                window.applyProxyInputToTarget('QANDY_UPDATE_INPUT', proxyInputId, inputBuffer);
+            }
         }
     }
 });
