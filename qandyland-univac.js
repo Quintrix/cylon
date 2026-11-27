@@ -467,8 +467,9 @@ function UNIVAC(driveName, itemfile, objfile, sessionToken, options) {
           column += 2;
         }
 
-        if (!switchopen && state.playerid && /^[ABEF][0-9][CDGH][0-9]$/.test(avatarStr)) {
-          state.avatar = avatarStr;          
+        if (!switchopen && state.playerid &&
+            /^[ABEF][0-9][CDGH][0-9]([LMN][a-z0-9_()[\]{}^,:;+\-=%@])*$/.test(avatarStr)) {
+          state.avatar = avatarStr;
         }
         break;
       }
@@ -655,7 +656,7 @@ function UNIVAC(driveName, itemfile, objfile, sessionToken, options) {
         var noun = tape.slice(column, column + 2); column += 2;
         if (!switchopen) {
           if (noun.charAt(0) === 'W') {
-            state.avatar += '-' + register[noun];
+            state.avatar += '-' + (register[noun] || 'Za');
           } else {
             state.avatar += '-' + noun;
           }

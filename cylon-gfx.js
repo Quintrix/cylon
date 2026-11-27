@@ -1000,6 +1000,51 @@ window.CylonGFX = {
         }
     },
 
+    extractOverlayTag: function(avatarStr) {
+        let s = String(avatarStr || '');
+        let suffix = '';
+        while (s) {
+            let regMatch = s.match(/(\-[0-9]{2})$/);
+            if (regMatch) {
+                suffix = regMatch[1] + suffix;
+                s = s.substring(0, s.length - 3);
+                continue;
+            }
+            let itemMatch = s.match(/\-([A-Z][A-Za-z0-9])$/);
+            if (itemMatch) {
+                return {
+                    overlayId: itemMatch[1],
+                    cleanAvatar: s.substring(0, s.length - 3) + suffix
+                };
+            }
+            break;
+        }
+        return { overlayId: null, cleanAvatar: String(avatarStr || '') };
+    },
+
+    showHeadPopup: function(container, overlayId) {
+        if (!container || !overlayId) return;
+        container.querySelectorAll('.vp-overlay-item').forEach(el => el.remove());
+
+        let el = document.createElement('img');
+        el.className = 'vp-overlay-item';
+        el.src = this.gfxIconDir + overlayId + '.png';
+        el.style.position = 'absolute';
+        el.style.width = '75%';
+        el.style.height = '75%';
+        el.style.bottom = '210%';
+        el.style.left = '12.5%';
+        el.style.objectFit = 'contain';
+        el.style.pointerEvents = 'none';
+        el.style.zIndex = '20';
+        el.style.imageRendering = 'pixelated';
+        container.appendChild(el);
+
+        setTimeout(() => {
+            if (el.parentNode) el.parentNode.removeChild(el);
+        }, 800);
+    },
+
     gfxRefresh: async function(sector, zStr, itemsStr) {
         let drive = window.desktopDrive || this.currentPath.split(':')[0] || 'capflag';
         let sectorChanged = (this._loadedSector !== sector);
@@ -1066,10 +1111,10 @@ window.CylonGFX = {
         }
         let touchedStatic = new Set();
 
-
         let entries = itemsStr ? itemsStr.split('~').filter(Boolean) : [];
         let hasStaticObjs = new Set(this.mapObjs[sector] || []);
         let chatBubbles = [];
+        let localVpOverlay = null;
 
         for (let entry of entries) {
             if (entry.length < 4) continue;
@@ -1160,12 +1205,17 @@ window.CylonGFX = {
                 moves = historyStr.match(/Q[nsew]/g) || [];
             }
 
+            let parsedAv = this.extractOverlayTag(avatar);
+            let cleanAvatar = parsedAv.cleanAvatar;
+            let vpOverlayId = parsedAv.overlayId;
+
             let isLocalPlayer = (iId === window.playerItem && (pubId === window.playerId || !window.playerId));
             if (isLocalPlayer) {
-                let avatarChanged = (window.playerAvatar !== avatar);
-                window.playerAvatar = avatar;
+                let avatarChanged = (window.playerAvatar !== cleanAvatar);
+                window.playerAvatar = cleanAvatar;
+                if (vpOverlayId) localVpOverlay = vpOverlayId;
                 if (nextMovingItems[window.playerItem]) {
-                    nextMovingItems[window.playerItem].avatar = avatar;
+                    nextMovingItems[window.playerItem].avatar = cleanAvatar;
                 }
                 if (avatarChanged && typeof window.renderInventory === 'function') {
                     window.renderInventory();
@@ -1176,7 +1226,7 @@ window.CylonGFX = {
             let uniqueId = pubId ? (iId + pubId) : (entry);
             let renderZ = destZ;
 
-            if (avatar && moves.length > 0) {
+            if (cleanAvatar && moves.length > 0) {
                 for (let k = moves.length - 1; k >= 0; k--) {
                     renderZ = this.reverseMoveZ(renderZ, moves[k]);
                 }
@@ -1184,20 +1234,16 @@ window.CylonGFX = {
                     z: renderZ,
                     destZ: destZ,
                     queue: moves,
-                    avatar: avatar
+                    avatar: cleanAvatar
                 };
             }
 
             let x = renderZ % this.gridWide;
             let y = Math.floor(renderZ / this.gridWide);
-            let labelText = this.getItemName(iId); // was: this.getItemName(iconId)
-
+            let labelText = this.getItemName(iId);
             let fullDosPath = `${drive}:/w/${sector}/${entry}`;
 
-            // Reuse an existing sprite if it looks the same (same item, label & avatar).
-            // Multi-tile T*/U* items are only reused when the entry is byte-identical,
-            // because their size/offset is applied once in img.onload.
-            let sig = iId + '|' + labelText + '|' + avatar;
+            let sig = iId + '|' + labelText + '|' + cleanAvatar;
             let prev = dynPool.get(uniqueId);
             let isMulti = (iId.charAt(0) === 'T' || iId.charAt(0) === 'U');
             if (prev && !claimedDyn.has(prev) && prev.getAttribute('data-sig') === sig &&
@@ -1210,16 +1256,18 @@ window.CylonGFX = {
                     prev.style.left = ((x / this.gridWide) * 100) + '%';
                     prev.style.top = ((y / this.gridTall) * 100) + '%';
                 }
+                if (vpOverlayId) this.showHeadPopup(prev, vpOverlayId);
                 continue;
             }
 
-            let wrap = this.buildSprite(iId, x, y, renderZ, labelText, fullDosPath, avatar);
+            let wrap = this.buildSprite(iId, x, y, renderZ, labelText, fullDosPath, cleanAvatar);
             if (wrap) {
                 wrap.classList.add('dyn-sprite');
                 wrap.setAttribute('data-code', entry);
                 wrap.setAttribute('data-unique-id', uniqueId);
                 wrap.setAttribute('data-sig', sig);
                 claimedDyn.add(wrap);
+                if (vpOverlayId) this.showHeadPopup(wrap, vpOverlayId);
             }
         }
 
@@ -1241,8 +1289,10 @@ window.CylonGFX = {
 
         window.movingItems = nextMovingItems;
         this.renderCursor();
-        this.syncChatBubbles(chatBubbles);
-        
+        if (localVpOverlay) {
+            this.showHeadPopup(document.getElementById('gfx-sys-cursor'), localVpOverlay);
+        }
+        this.syncChatBubbles(chatBubbles);        
     },
 
     // ========================================================================
@@ -2238,14 +2288,14 @@ window.CylonGFX = {
             el.style.position = 'absolute';
             el.style.width = '100%';
             el.style.height = '100%';
-            el.style.bottom = '100%';
+            el.style.bottom = '210%';
             el.style.left = '0';
             el.style.objectFit = 'contain';
             el.style.zIndex = '20';
             el.style.imageRendering = 'pixelated';
             container.appendChild(el);
         }
-
+        
         if (registerVal !== null) {
             let meterEl = document.createElement('div');
             meterEl.style.position = 'absolute';

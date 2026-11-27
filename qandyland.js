@@ -615,6 +615,8 @@ function saveUserSnapshot(player, session, overrides) {
   var uPath = 'u/' + player.userKey;
   var gfxZBase = getDriveZBase(drive);
   var sp = getSpawnDefaults(drive, gfxZBase);
+  
+  var cleanAvatar = String(player.avatar != null ? player.avatar : (existing.avatar || '')).split('-')[0];
 
   var existing = {};
   var exLoad = DOS.fileLoad(drive, '/', uPath, 'system');
@@ -640,7 +642,7 @@ function saveUserSnapshot(player, session, overrides) {
     username:  player.username || existing.username || player.userKey,
     password:  (overrides && overrides.password !== undefined) ? overrides.password : (existing.password || ''),
     item:      itemId,
-    avatar:    player.avatar != null ? player.avatar : (existing.avatar || ''),
+    avatar:    cleanAvatar,
     sector:    player.map || existing.sector || sp.sector,
     z:         zStr,
     status:    (overrides && overrides.status !== undefined) ? overrides.status : (player.status || existing.status || 'player'),
@@ -1190,6 +1192,7 @@ async function plugboard(req, stacker, plugs, drive, session) {
         }
 
         if (!player.item || player.item === "") break;
+        if (!/^[ABEF][0-9][CDGH][0-9]$/.test(vaAvatar)) break;
         if (vaAvatar !== player.avatar) {
           runtape("Va" + vaAvatar + "--");
           if (player.userKey) saveUserSnapshot(player, session);
@@ -1512,7 +1515,9 @@ async function plugboard(req, stacker, plugs, drive, session) {
 
   if (tape) { runtape(tape); tape = ""; }
 
-  if (!skipPostTick && session && player.userKey && player.avatar !== avatarBeforeTape) {
+  var baseBefore = String(avatarBeforeTape || '').split('-')[0];
+  var baseAfter  = String(player.avatar || '').split('-')[0];
+  if (!skipPostTick && session && player.userKey && baseAfter !== baseBefore) {
     saveUserSnapshot(player, session);
   }
 
