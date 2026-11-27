@@ -1902,16 +1902,31 @@ window.CylonGFX = {
                 this.printTerminal(`[.4]gfx ${cmd} is only available in remote server mode.[.]`);
                 break;
 
-            case 'id':
-            case 'mod': {
-                if (window.remoteQandylandUrl) {
-                    await this.sendRemoteGfxCommand(cmd + (data ? (' ' + data.trim()) : ''));
-                    break;
+    case 'id':
+    case 'mod': {
+        if (window.remoteQandylandUrl) {
+            let res = await this.sendRemoteGfxCommand(cmd + (data ? (' ' + data.trim()) : ''));
+            if (res && res.ok && res.mods !== undefined) {
+                this.itemIDOverrides = res.mods || {};
+                let dos = this.getDOS();
+                if (dos) {
+                    let drive = this.getLocalDrive();
+                     let modPath = `${drive}:/a/gfxItemID`;
+                     if (Object.keys(this.itemIDOverrides).length === 0) {
+                        if (await dos.exists(modPath)) await dos.delete(modPath);
+                    } else {
+                        await this.ensureLocalDir(`${drive}:/a`);
+                        await dos.save(modPath, JSON.stringify(this.itemIDOverrides));
+                    }
                 }
-                let res = await this.handleGfxId(data, null);
-                this.printTerminal(res.output);
-                break;
+                if (window.map) this.renderSectorStaticObjects(window.map);
             }
+            break;
+        }
+        let res = await this.handleGfxId(data, null);
+        this.printTerminal(res.output);
+        break;
+    }
             
             case 'export': {
                 if (!window.remoteQandylandUrl) {

@@ -1053,7 +1053,7 @@ async function handleCylonCommand(line) {
               fileName = args[0];
           }
 
-          result = await dos.exportDrive(targetDrive);
+          result = await dos.exportDrive(targetDrive, { compact: true });
           
           if (fileName === '<c>') {
               if (!navigator.clipboard) return { handled: true, output: 'Error: [.4]Clipboard API not supported in this environment.[.]' };

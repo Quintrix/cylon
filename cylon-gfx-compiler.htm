@@ -249,8 +249,61 @@
 
     .punchcode-space { width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; background: transparent; }
     .punchcode-text { display: inline-flex; align-items: center; justify-content: center; background-color: var(--sel-bg, #006600); color: var(--sel-fg, #fff); font-family: monospace; font-size: 16px; font-weight: bold; border-radius: 4px; width: 32px; height: 32px; vertical-align: middle; margin: 1px; }
-    .punchcode-img { width: 32px; height: 32px; display: inline-block; vertical-align: middle; margin: 1px; background-size: cover; }
+    .punchcode-img { width: 32px; height: 32px; display: inline-block; vertical-align: middle; margin: 1px; background-size: cover; box-sizing: border-box; }
     .punchcode-img img { width: 32px; height: 32px; display: block; image-rendering: pixelated; }
+    .punchcode-not-fallback { outline: 1px solid var(--text-fg3, #ff4444); outline-offset: -1px; }
+
+    /* Half-width (16px = 2 chars per 32px punch code) text & numerals */
+    .punchcode-half-group {
+        display: inline-flex;
+        flex-wrap: wrap;
+        align-items: center;
+        vertical-align: middle;
+        margin: 1px;
+        max-width: 100%;
+    }
+    .punchcode-half {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 16px;
+        height: 32px;
+        background-color: var(--sel-bg, #006600);
+        color: var(--sel-fg, #fff);
+        font-family: monospace;
+        font-size: 15px;
+        font-weight: bold;
+        border-right: 1px solid rgba(0, 0, 0, 0.25);
+        box-sizing: border-box;
+        user-select: none;
+    }
+    .punchcode-half:first-child { border-radius: 4px 0 0 4px; }
+    .punchcode-half:last-child  { border-radius: 0 4px 4px 0; border-right: none; }
+    .punchcode-half:only-child  { border-radius: 4px; border-right: none; }
+    .punchcode-half.is-space {
+        background-color: var(--case-bg, #080808);
+        border: 1px dashed var(--sel-bg, #333);
+    }
+    .punchcode-half.is-end {
+        background-color: var(--menu-bg, #222);
+        color: var(--fg-color, #0f0);
+    }
+    .punchcode-half.is-unterminated {
+        background-color: var(--text-fg3, #770000);
+        color: #fff;
+    }
+
+    /* Server Plug S^...^S container */
+    .punchcode-plug {
+        display: inline-flex;
+        flex-wrap: wrap;
+        align-items: center;
+        border: 1px dashed var(--text-fg2, #ff0);
+        border-radius: 4px;
+        padding: 1px 3px;
+        margin: 1px 2px;
+        background: rgba(255, 255, 0, 0.04);
+    }
 
     /* QPC Macro Visual Blocks */
     .punchcode-macro {
@@ -353,6 +406,7 @@ window.activeDrive = null;
 let hostOrigin = '';
 let driveIconDir = 'i/';
 let driveTileDir = 't/';
+let driveCharDir = 'c/';
 let driveItemOverrides = {};
 
 // Editor state
@@ -541,7 +595,6 @@ async function preloadQpcTags() {
         for (const entry of entries) {
             if (entry.type !== 'file') continue;
             const tagName = entry.name.substring(entry.name.lastIndexOf('/') + 1);
-            // Enforce >= 3 chars and lowercase alphanumeric only
             if (!VALID_QPC_TAG_RE.test(tagName)) continue;
 
             const content = await dos.load(`${qDir}/${tagName}`);
@@ -566,6 +619,7 @@ async function selectDrive(driveName, opts) {
     const dos = getDos();
     driveIconDir = 'i/';
     driveTileDir = 't/';
+    driveCharDir = 'c/';
     if (dos) {
         try {
             if (await dos.exists(`${driveName}:/a/gfxIconDir`)) {
@@ -575,6 +629,10 @@ async function selectDrive(driveName, opts) {
             if (await dos.exists(`${driveName}:/a/gfxTileDir`)) {
                 const v = (await dos.load(`${driveName}:/a/gfxTileDir`)).trim();
                 if (v) driveTileDir = v;
+            }
+            if (await dos.exists(`${driveName}:/a/gfxCharDir`)) {
+                const v = (await dos.load(`${driveName}:/a/gfxCharDir`)).trim();
+                if (v) driveCharDir = v;
             }
         } catch (e) {}
     }
@@ -586,9 +644,13 @@ async function selectDrive(driveName, opts) {
         if (!driveTileDir.match(/^https?:\/\//i) && !driveTileDir.startsWith('data:')) {
             driveTileDir = hostOrigin + driveTileDir.replace(/^\/+/, '');
         }
+        if (!driveCharDir.match(/^https?:\/\//i) && !driveCharDir.startsWith('data:')) {
+            driveCharDir = hostOrigin + driveCharDir.replace(/^\/+/, '');
+        }
     }
     if (!driveIconDir.endsWith('/')) driveIconDir += '/';
     if (!driveTileDir.endsWith('/')) driveTileDir += '/';
+    if (!driveCharDir.endsWith('/')) driveCharDir += '/';
 
     driveItemOverrides = {};
     if (dos) {
@@ -694,7 +756,7 @@ function getFileVisualInfo(name, fullPath) {
         const iconId = name.substring(0, 2);
         const zCode = name.substring(2, 4);
         const dataCode = name.length >= 6 ? name.substring(4, 6) : '';
-        const itemLabel = (typeof gfxItemID === 'function') ? gfxItemID(iconId) : iconId;
+        const itemLabel = resolveItemName(iconId);
         const displayLabel = `${name} — ${itemLabel} (Z:${zCode}${dataCode ? ', D:' + dataCode : ''})`;
         return { iconSrc: `${driveIconDir}${iconId}.png`, label: displayLabel, invalid: false };
     }
@@ -928,7 +990,7 @@ function formatTargetHeadline(targetPath) {
         if (filename !== 'm' && filename.length >= 4) {
             const iconId = filename.substring(0, 2);
             const zCode = filename.substring(2, 4);
-            const itemLabel = (typeof gfxItemID === 'function') ? gfxItemID(iconId) : iconId;
+            const itemLabel = resolveItemName(iconId);
             return `Sector ${sector} ${zCode} "${itemLabel}" (${filename})`;
         }
     }
@@ -1059,7 +1121,6 @@ async function saveLogic() {
             const json = await res.json();
             if (!json.ok) throw new Error(json.output || 'Remote save failed');
 
-            // Keep local RAM cache in sync
             if (dos && remoteTarget.path) {
                 try { await dos.save(remoteTarget.path, currentCode); } catch (e) {}
             }
@@ -1115,14 +1176,23 @@ async function saveLogic() {
 }
 
 // ============================================================================
-// VISUAL DECOMPILER ENGINE (with [tag] QPC Macro Resolution)
+// MINI-VAC SEQUENTIAL DECOMPILER ENGINE (with [tag] QPC Macro Resolution)
 // ============================================================================
 
 function getCodeDescription(code) {
     if (code === "Za") return "nothing (null)";
-    const itemText = typeof gfxItemID === "function" ? gfxItemID(code) : "Unknown";
+    const itemText = resolveItemName(code);
     if (itemText !== "Item " + code && itemText !== "Unknown") return itemText;
     return `code "${code}"`;
+}
+
+function resolveNotBranch(desc, isNot) {
+    if (!desc) return desc;
+    const hasBranch = /\[[^\[\]\/]+\/[^\[\]\/]+\]/.test(desc);
+    const resolved = desc.replace(/\[([^\[\]\/]+)\/([^\[\]\/]+)\]/g, (_, normalText, notText) => {
+        return isNot ? notText : normalText;
+    });
+    return (isNot && !hasBranch) ? ("If Not: " + resolved) : resolved;
 }
 
 function decompilepunchcode(initialCode) {
@@ -1161,39 +1231,229 @@ function decompilepunchcode(initialCode) {
         let ifnot = false;
         let ifnotStartIdx = null;
 
-        while (col < srcString.length) {
-            const startIdx = mapIndices ? col : fixedStart;
-            const char = srcString.charAt(col);
+        function spanStart(idx) { return mapIndices ? idx : fixedStart; }
+        function spanEnd(idx)   { return mapIndices ? idx : fixedEnd; }
 
-            if (char === ' ' || char === '\t') {
-                const spacer = document.createElement('div');
-                spacer.className = 'punchcode-space';
-                targetEl.appendChild(spacer);
+        function appendSpace() {
+            const spacer = document.createElement('div');
+            spacer.className = 'punchcode-space';
+            targetEl.appendChild(spacer);
+        }
+
+        function appendLineBreak() {
+            const br = document.createElement('div');
+            br.style.flexBasis = '100%';
+            br.style.height = '0';
+            targetEl.appendChild(br);
+        }
+
+        function consumeLayoutBetweenTokens() {
+            while (col < srcString.length) {
+                const ch = srcString.charAt(col);
+                if (ch === ' ' || ch === '\t') {
+                    appendSpace();
+                    col++;
+                } else if (ch === '\n' || ch === '\r') {
+                    appendLineBreak();
+                    if (ch === '\r' && srcString.charAt(col + 1) === '\n') col++;
+                    col++;
+                } else {
+                    break;
+                }
+            }
+        }
+
+        function renderHalfText(textVal, startIdx, endIdx, desc, extraClass, mountEl) {
+            const wrap = document.createElement('div');
+            wrap.className = 'punchcode-half-group';
+            for (let i = 0; i < textVal.length; i++) {
+                const ch = textVal.charAt(i);
+                const cell = document.createElement('div');
+                cell.className = 'punchcode-half' +
+                    (ch === ' ' ? ' is-space' : '') +
+                    (extraClass ? (' ' + extraClass) : '');
+                cell.textContent = (ch === ' ') ? '\u00A0' : ch;
+                const s = mapIndices ? (startIdx + i) : fixedStart;
+                const e = mapIndices ? (startIdx + i + 1) : fixedEnd;
+                bindHover(cell, desc, s, e);
+                wrap.appendChild(cell);
+            }
+            (mountEl || targetEl).appendChild(wrap);
+            return wrap;
+        }
+
+        function renderSpriteBox(code, imgDir, desc, startIdx, endIdx, isNot) {
+            const box = document.createElement('div');
+            box.className = 'punchcode-img';
+            box.style.backgroundImage = `url('${driveTileDir}Za.png')`;
+
+            const img = document.createElement('img');
+            const normalSrc = `${imgDir}${code}.png`;
+            if (isNot) {
+                img.src = `${imgDir}Xn${code}.png`;
+                img.onerror = function() {
+                    if (this.dataset.fellBack) {
+                        this.style.opacity = '0.25';
+                        return;
+                    }
+                    this.dataset.fellBack = '1';
+                    this.src = normalSrc;
+                    box.classList.add('punchcode-not-fallback');
+                };
+            } else {
+                img.src = normalSrc;
+                img.onerror = function() { this.style.opacity = '0.25'; };
+            }
+
+            box.appendChild(img);
+            bindHover(box, desc, startIdx, endIdx);
+            targetEl.appendChild(box);
+            return box;
+        }
+
+        // Read next 2-char token (for opcode operands) without crossing '--', '^S', or '['
+        function readOperand2() {
+            consumeLayoutBetweenTokens();
+            if (col >= srcString.length) return null;
+            if (srcString.startsWith('--', col) || srcString.startsWith('^S', col) || srcString.charAt(col) === '[') {
+                return null;
+            }
+            const start = col;
+            const len = Math.min(2, srcString.length - col);
+            const tok = srcString.substring(col, col + len);
+            col += len;
+            return { tok, start, end: col };
+        }
+
+        function renderOperand(op, kind) {
+            if (!op) return;
+            const { tok, start, end } = op;
+
+            if (tok.length < 2) {
+                renderHalfText(tok, start, end, `Incomplete operand "${tok}"`, 'is-unterminated');
+                return;
+            }
+            if (tok === '%%' || tok === '$$' || tok === '##') {
+                const param = readOperand2();
+                if (!param) {
+                    renderHalfText(tok, start, end, 'Parameter Marker', '');
+                    return;
+                }
+                if (tok === '##') {
+                    renderHalfText(param.tok, start, param.end, `Number: ${param.tok}`, '');
+                } else if (kind === 'tile') {
+                    renderSpriteBox(param.tok, driveTileDir, `Tile: ${param.tok}`, spanStart(start), spanEnd(param.end), false);
+                } else {
+                    renderSpriteBox(param.tok, driveIconDir, (tok === '%%' ? 'Param: ' : 'Item: ') + getCodeDescription(param.tok), spanStart(start), spanEnd(param.end), false);
+                }
+                return;
+            }
+
+            const s = spanStart(start);
+            const e = spanEnd(end);
+
+            if (kind === 'tile') {
+                renderSpriteBox(tok, driveTileDir, `Tile: ${tok}`, s, e, false);
+                return;
+            }
+
+            if (kind === 'sector') {
+                if (tok.charAt(0) === 'W') {
+                    renderSpriteBox(tok, driveIconDir, `Register: ${getCodeDescription(tok)}`, s, e, false);
+                } else {
+                    renderHalfText(tok, start, end, `Sector: ${tok}`, '');
+                }
+                return;
+            }
+
+            if (kind === 'z') {
+                if (tok.charAt(0) === 'W') {
+                    renderSpriteBox(tok, driveIconDir, `Register: ${getCodeDescription(tok)}`, s, e, false);
+                } else {
+                    renderHalfText(tok, start, end, `Z-Location: ${tok}`, '');
+                }
+                return;
+            }
+
+            if (kind === 'zOrItem') {
+                if (tok.charAt(0) === 'W') {
+                    renderSpriteBox(tok, driveIconDir, `Register: ${getCodeDescription(tok)}`, s, e, false);
+                } else if (/^\d{2}$/.test(tok)) {
+                    renderHalfText(tok, start, end, `Z-Location: ${tok}`, '');
+                } else {
+                    const known = resolveItemName(tok);
+                    if (known !== 'Unknown' && known !== 'Item ' + tok) {
+                        renderSpriteBox(tok, driveIconDir, `Target Item: ${known}`, s, e, false);
+                    } else {
+                        renderHalfText(tok, start, end, `Z-Location: ${tok}`, '');
+                    }
+                }
+                return;
+            }
+
+            // Default: 'value' / 'item' / 'reg'
+            if (/^\d{2}$/.test(tok) || /^\d/.test(tok)) {
+                renderHalfText(tok, start, end, `Number: ${tok}`, '');
+                return;
+            }
+
+            if (kind === 'opt' && resolveItemName(tok) === 'Unknown') {
+                renderHalfText(tok, start, end, `Option: ${tok}`, '');
+                return;
+            }
+
+            renderSpriteBox(tok, driveIconDir, getCodeDescription(tok), s, e, false);
+        }
+
+        // Read '--'-terminated raw text in half-width boxes (Vh, Vb)
+        function readTextUntilDash() {
+            const strStart = col;
+            const termIdx = srcString.indexOf('--', strStart);
+            const strEnd = (termIdx !== -1) ? termIdx : srcString.length;
+            const textVal = srcString.substring(strStart, strEnd);
+
+            if (textVal.length > 0) {
+                renderHalfText(textVal, strStart, strEnd, `Text: "${textVal}"`, '');
+            }
+
+            if (termIdx !== -1) {
+                renderHalfText('--', termIdx, termIdx + 2, `End text: "${textVal}"`, 'is-end');
+                col = termIdx + 2;
+            } else {
+                renderHalfText('?', strEnd, strEnd, 'Missing "--" terminator', 'is-unterminated');
+                col = strEnd;
+            }
+        }
+
+        while (col < srcString.length) {
+            const ch = srcString.charAt(col);
+
+            if (ch === ' ' || ch === '\t') {
+                appendSpace();
                 col++;
                 continue;
-            } else if (char === '\n' || char === '\r') {
-                const br = document.createElement('div');
-                br.style.flexBasis = '100%';
-                br.style.height = '0';
-                targetEl.appendChild(br);
-                if (char === '\r' && srcString.charAt(col + 1) === '\n') col++;
+            }
+            if (ch === '\n' || ch === '\r') {
+                appendLineBreak();
+                if (ch === '\r' && srcString.charAt(col + 1) === '\n') col++;
                 col++;
                 continue;
             }
 
-            // Detect [tag] QPC macro syntax
-            if (char === '[') {
+            // QPC [tag] Macro Expansion
+            if (ch === '[') {
                 const closeIdx = srcString.indexOf(']', col + 1);
                 if (closeIdx !== -1) {
+                    const tagStart = col;
                     const tagName = srcString.substring(col + 1, closeIdx);
-                    const tagEnd = mapIndices ? closeIdx + 1 : fixedEnd;
-                    col = closeIdx + 1;
+                    const tagEnd = closeIdx + 1;
+                    col = tagEnd;
 
                     if (!VALID_QPC_TAG_RE.test(tagName)) {
                         const badBadge = document.createElement('div');
                         badBadge.className = 'punchcode-tag-badge punchcode-tag-invalid';
                         badBadge.textContent = `[${tagName}]`;
-                        bindHover(badBadge, `Invalid QPC tag "[${tagName}]" (must be 3+ lowercase a-z / 0-9)`, startIdx, tagEnd);
+                        bindHover(badBadge, `Invalid QPC tag "[${tagName}]" (must be 3+ lowercase a-z / 0-9)`, spanStart(tagStart), spanEnd(tagEnd));
                         targetEl.appendChild(badBadge);
                         ifnot = false;
                         continue;
@@ -1203,7 +1463,7 @@ function decompilepunchcode(initialCode) {
                         const nestedBadge = document.createElement('div');
                         nestedBadge.className = 'punchcode-tag-badge punchcode-tag-missing';
                         nestedBadge.textContent = `[${tagName}]`;
-                        bindHover(nestedBadge, `Nested tag "[${tagName}]" (UNIVAC expands tags single-pass only)`, startIdx, tagEnd);
+                        bindHover(nestedBadge, `Nested tag "[${tagName}]" (UNIVAC expands tags single-pass only)`, spanStart(tagStart), spanEnd(tagEnd));
                         targetEl.appendChild(nestedBadge);
                         ifnot = false;
                         continue;
@@ -1213,7 +1473,7 @@ function decompilepunchcode(initialCode) {
                         const missBadge = document.createElement('div');
                         missBadge.className = 'punchcode-tag-badge punchcode-tag-missing';
                         missBadge.textContent = `[${tagName}]`;
-                        bindHover(missBadge, `Missing QPC tag: /q/${tagName} not found`, startIdx, tagEnd);
+                        bindHover(missBadge, `Missing QPC tag: /q/${tagName} not found`, spanStart(tagStart), spanEnd(tagEnd));
                         targetEl.appendChild(missBadge);
                         ifnot = false;
                         continue;
@@ -1226,13 +1486,12 @@ function decompilepunchcode(initialCode) {
                     const badge = document.createElement('div');
                     badge.className = 'punchcode-tag-badge';
                     badge.textContent = `[${tagName}]`;
-                    bindHover(badge, `QPC Macro /q/${tagName}: ${macroCode || '(empty)'}`, startIdx, tagEnd);
+                    bindHover(badge, `QPC Macro /q/${tagName}: ${macroCode || '(empty)'}`, spanStart(tagStart), spanEnd(tagEnd));
                     macroGroup.appendChild(badge);
 
-                    // Expand visual icons of /q/<tag> inline (single-pass)
                     renderSequence(macroCode, macroGroup, {
                         allowTags: false,
-                        fixedRange: [startIdx, tagEnd]
+                        fixedRange: [spanStart(tagStart), spanEnd(tagEnd)]
                     });
 
                     targetEl.appendChild(macroGroup);
@@ -1241,74 +1500,266 @@ function decompilepunchcode(initialCode) {
                 }
             }
 
-            const len = Math.min(2, srcString.length - col);
-            const item = srcString.substring(col, col + len);
-            const endIdx = mapIndices ? (col + len) : fixedEnd;
-            col = col + len;
+            // Read 2-char opcode word
+            const wordStart = col;
+            const wordLen = Math.min(2, srcString.length - col);
+            const word = srcString.substring(col, col + wordLen);
+            col += wordLen;
 
-            const rawDesc = getCodeDescription(item);
-
-            if (item === "Xn") {
-                ifnot = true;
-                ifnotStartIdx = startIdx;
+            if (wordLen < 2) {
+                renderHalfText(word, wordStart, col, `Incomplete code "${word}"`, 'is-unterminated');
+                ifnot = false;
                 continue;
             }
 
-            const blockEl = document.createElement('div');
-            blockEl.className = 'punchcode-img';
-            blockEl.style.backgroundImage = `url('${driveTileDir}Za.png')`;
-
-            const img = document.createElement('img');
-            img.onerror = function() { this.style.opacity = '0.25'; };
-
-            if (item === "Xc") {
-                img.src = `${driveIconDir}Xc.png`;
-                bindHover(blockEl, rawDesc, startIdx, endIdx);
-            } else if (item.startsWith("##") || item.startsWith("%%") || item.startsWith("$$")) {
-                blockEl.className = 'punchcode-text';
-                blockEl.textContent = item;
-                bindHover(blockEl, "Parameter Marker", startIdx, endIdx);
-            } else {
-                img.src = ifnot ? `${driveIconDir}${item}n.png` : `${driveIconDir}${item}.png`;
-                const tooltipDesc = ifnot ? ("If Not: " + rawDesc) : rawDesc;
-                const finalStart = (ifnot && ifnotStartIdx != null) ? ifnotStartIdx : startIdx;
-                bindHover(blockEl, tooltipDesc || item, finalStart, endIdx);
-            }
-
-            if (blockEl.className === 'punchcode-img') blockEl.appendChild(img);
-            targetEl.appendChild(blockEl);
-
-            while (col < srcString.length && (
-                srcString.substring(col, col + 2) === "%%" ||
-                srcString.substring(col, col + 2) === "$$" ||
-                srcString.substring(col, col + 2) === "##"
-            )) {
-                const prefix = srcString.substring(col, col + 2);
-                col += 2;
-                const paramText = srcString.substring(col, col + 2);
-                col += 2;
-
-                const paramBlock = document.createElement('div');
-                let paramDesc = "";
-
-                if (prefix === "##") {
-                    paramBlock.className = 'punchcode-text';
-                    paramBlock.textContent = paramText;
-                    paramDesc = "Number: " + paramText;
+            // Literal template markers (%%, $$, ##)
+            if (word === '%%' || word === '$$' || word === '##') {
+                const param = readOperand2();
+                if (!param) {
+                    renderHalfText(word, wordStart, col, 'Parameter Marker', '');
+                } else if (word === '##') {
+                    renderHalfText(param.tok, wordStart, param.end, `Number: ${param.tok}`, '');
                 } else {
-                    paramBlock.className = 'punchcode-img';
-                    paramBlock.style.backgroundImage = `url('${driveTileDir}Za.png')`;
-                    const pImg = document.createElement('img');
-                    pImg.src = `${driveIconDir}${paramText}.png`;
-                    pImg.onerror = function() { this.style.opacity = '0.25'; };
-                    paramBlock.appendChild(pImg);
-                    paramDesc = (prefix === "%%" ? "Param: " : "Item: ") + getCodeDescription(paramText);
+                    renderSpriteBox(param.tok, driveIconDir, (word === '%%' ? 'Param: ' : 'Item: ') + getCodeDescription(param.tok), spanStart(wordStart), spanEnd(param.end), false);
                 }
-                targetEl.appendChild(paramBlock);
-                bindHover(paramBlock, paramDesc, mapIndices ? (col - 4) : fixedStart, mapIndices ? col : fixedEnd);
+                ifnot = false;
+                continue;
             }
 
-            ifnot = false;
+            // Pure 2-digit numeral outside an opcode operand
+            if (/^\d{2}$/.test(word)) {
+                renderHalfText(word, wordStart, col, `Number: ${word}`, '');
+                ifnot = false;
+                continue;
+            }
+
+            // Prefix NOT gate: sets ifnot for the next opcode
+            if (word === 'Xn') {
+                ifnot = true;
+                ifnotStartIdx = wordStart;
+                continue;
+            }
+
+            const opStart = (ifnot && ifnotStartIdx != null) ? ifnotStartIdx : wordStart;
+            const opEnd = col;
+            const rawDesc = getCodeDescription(word);
+            const opDesc = resolveNotBranch(rawDesc, ifnot);
+
+            switch (word) {
+                case 'Xc':
+                    renderSpriteBox('Xc', driveIconDir, rawDesc, spanStart(wordStart), spanEnd(opEnd), false);
+                    ifnot = false;
+                    break;
+
+                case 'Xx':
+                case 'Xg':
+                case 'Vc':
+                case 'Vg':
+                case 'Vi':
+                case 'Vl':
+                case 'Vn':
+                case 'Vs':
+                case 'Ve':
+                case 'Vw':
+                    renderSpriteBox(word, driveIconDir, opDesc, spanStart(opStart), spanEnd(opEnd), ifnot);
+                    ifnot = false;
+                    break;
+
+                // 1-operand opcodes
+                case 'Xi':
+                case 'Vd':
+                case 'Vm':
+                case 'Vr':
+                case 'Vu':
+                case 'Vp':
+                case 'Vx':
+                    renderSpriteBox(word, driveIconDir, opDesc, spanStart(opStart), spanEnd(opEnd), ifnot);
+                    ifnot = false;
+                    renderOperand(readOperand2(), 'item');
+                    break;
+
+                case 'Vy':
+                case 'Vz':
+                    renderSpriteBox(word, driveIconDir, opDesc, spanStart(opStart), spanEnd(opEnd), ifnot);
+                    ifnot = false;
+                    renderOperand(readOperand2(), 'z');
+                    break;
+
+                case 'Xh':
+                    renderSpriteBox(word, driveIconDir, opDesc, spanStart(opStart), spanEnd(opEnd), ifnot);
+                    ifnot = false;
+                    renderOperand(readOperand2(), 'opt');
+                    break;
+
+                // 2-operand opcodes
+                case 'Xs':
+                case 'Xd':
+                case 'Xm':
+                case 'Xl':
+                case 'Xe':
+                    renderSpriteBox(word, driveIconDir, opDesc, spanStart(opStart), spanEnd(opEnd), ifnot);
+                    ifnot = false;
+                    renderOperand(readOperand2(), 'value');
+                    renderOperand(readOperand2(), 'value');
+                    break;
+
+                case 'Xr':
+                    renderSpriteBox(word, driveIconDir, opDesc, spanStart(opStart), spanEnd(opEnd), ifnot);
+                    ifnot = false;
+                    renderOperand(readOperand2(), 'item');
+                    renderOperand(readOperand2(), 'item');
+                    break;
+
+                // Teleport: Vt <sector> <zOrItem>
+                case 'Vt':
+                    renderSpriteBox(word, driveIconDir, opDesc, spanStart(opStart), spanEnd(opEnd), ifnot);
+                    ifnot = false;
+                    renderOperand(readOperand2(), 'sector');
+                    renderOperand(readOperand2(), 'zOrItem');
+                    break;
+
+                // Tag: Xt <4-char playerId>
+                case 'Xt': {
+                    renderSpriteBox(word, driveIconDir, opDesc, spanStart(opStart), spanEnd(opEnd), ifnot);
+                    ifnot = false;
+                    const p1 = readOperand2();
+                    const p2 = readOperand2();
+                    if (p1 && p2) {
+                        const pid = p1.tok + p2.tok;
+                        renderHalfText(pid, p1.start, p2.end, `Player ID: ${pid}`, '');
+                    } else if (p1) {
+                        renderHalfText(p1.tok, p1.start, p1.end, `Incomplete Player ID: ${p1.tok}`, 'is-unterminated');
+                    }
+                    break;
+                }
+
+                // Modify tile: Xz <sector> <z> <tile>
+                case 'Xz':
+                    renderSpriteBox(word, driveIconDir, opDesc, spanStart(opStart), spanEnd(opEnd), ifnot);
+                    ifnot = false;
+                    renderOperand(readOperand2(), 'sector');
+                    renderOperand(readOperand2(), 'z');
+                    renderOperand(readOperand2(), 'tile');
+                    break;
+
+                // Text string until '--'
+                case 'Vh':
+                case 'Vb':
+                    renderSpriteBox(word, driveIconDir, opDesc, spanStart(opStart), spanEnd(opEnd), ifnot);
+                    ifnot = false;
+                    readTextUntilDash();
+                    break;
+
+                // Avatar string until '--'
+                case 'Va': {
+                    renderSpriteBox(word, driveIconDir, opDesc, spanStart(opStart), spanEnd(opEnd), ifnot);
+                    ifnot = false;
+                    const termIdx = srcString.indexOf('--', col);
+                    const limit = (termIdx !== -1) ? termIdx : srcString.length;
+                    while (col < limit) {
+                        consumeLayoutBetweenTokens();
+                        if (col >= limit) break;
+                        const pStart = col;
+                        const partLen = Math.min(2, limit - col);
+                        const part = srcString.substring(col, col + partLen);
+                        col += partLen;
+                        if (partLen < 2) {
+                            renderHalfText(part, pStart, col, `Incomplete avatar part "${part}"`, 'is-unterminated');
+                        } else {
+                            const box = document.createElement('div');
+                            box.className = 'punchcode-img';
+                            box.style.backgroundImage = `url('${driveTileDir}Za.png')`;
+                            const aImg = document.createElement('img');
+                            aImg.src = `${driveCharDir}${part}.png`;
+                            aImg.onerror = function() {
+                                box.replaceWith(renderHalfText(part, pStart, pStart + 2, `Avatar Part: ${part}`, ''));
+                            };
+                            box.appendChild(aImg);
+                            bindHover(box, `Avatar Part: ${part}`, spanStart(pStart), spanEnd(col));
+                            targetEl.appendChild(box);
+                        }
+                    }
+                    if (termIdx !== -1) {
+                        renderHalfText('--', termIdx, termIdx + 2, 'End avatar string', 'is-end');
+                        col = termIdx + 2;
+                    } else {
+                        renderHalfText('?', col, col, 'Missing "--" terminator', 'is-unterminated');
+                    }
+                    break;
+                }
+
+                // Claim player item + inventory until '--'
+                case 'Xa': {
+                    renderSpriteBox(word, driveIconDir, opDesc, spanStart(opStart), spanEnd(opEnd), ifnot);
+                    ifnot = false;
+                    renderOperand(readOperand2(), 'item');
+                    const termIdx = srcString.indexOf('--', col);
+                    const limit = (termIdx !== -1) ? termIdx : srcString.length;
+                    while (col < limit) {
+                        consumeLayoutBetweenTokens();
+                        if (col >= limit) break;
+                        const iStart = col;
+                        const iLen = Math.min(2, limit - col);
+                        const tok = srcString.substring(col, col + iLen);
+                        col += iLen;
+                        if (iLen < 2) {
+                            renderHalfText(tok, iStart, col, `Incomplete inventory item "${tok}"`, 'is-unterminated');
+                        } else if (/^\d{2}$/.test(tok) || /^\d/.test(tok)) {
+                            renderHalfText(tok, iStart, col, `Number: ${tok}`, '');
+                        } else {
+                            renderSpriteBox(tok, driveIconDir, getCodeDescription(tok), spanStart(iStart), spanEnd(col), false);
+                        }
+                    }
+                    if (termIdx !== -1) {
+                        renderHalfText('--', termIdx, termIdx + 2, 'End inventory list', 'is-end');
+                        col = termIdx + 2;
+                    } else {
+                        renderHalfText('?', col, col, 'Missing "--" terminator', 'is-unterminated');
+                    }
+                    break;
+                }
+
+                // Server plug wrapper: S^ ... ^S
+                case 'S^': {
+                    const endIdx = srcString.indexOf('^S', col);
+                    const innerEnd = (endIdx !== -1) ? endIdx : srcString.length;
+                    const inner = srcString.substring(col, innerEnd);
+
+                    const plugWrap = document.createElement('div');
+                    plugWrap.className = 'punchcode-plug';
+                    renderHalfText('S^', wordStart, opEnd, 'Server Plug Start', 'is-end', plugWrap);
+
+                    if (inner.length > 0) {
+                        renderSequence(inner, plugWrap, {
+                            allowTags: false,
+                            fixedRange: [spanStart(col), spanEnd(innerEnd)]
+                        });
+                    }
+
+                    if (endIdx !== -1) {
+                        renderHalfText('^S', endIdx, endIdx + 2, 'Server Plug End', 'is-end', plugWrap);
+                        col = endIdx + 2;
+                    } else {
+                        renderHalfText('?', innerEnd, innerEnd, 'Missing "^S" terminator', 'is-unterminated', plugWrap);
+                        col = innerEnd;
+                    }
+
+                    targetEl.appendChild(plugWrap);
+                    ifnot = false;
+                    break;
+                }
+
+                default: {
+                    renderSpriteBox(word, driveIconDir, opDesc, spanStart(opStart), spanEnd(opEnd), ifnot);
+                    ifnot = false;
+                    break;
+                }
+            }
+        }
+
+        // Dangling Xn at the very end while user is still typing
+        if (ifnot && ifnotStartIdx != null) {
+            renderSpriteBox('Xn', driveIconDir, 'NOT (waiting for next code)', spanStart(ifnotStartIdx), spanEnd(ifnotStartIdx + 2), false);
         }
     }
 

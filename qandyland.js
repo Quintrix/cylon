@@ -1782,7 +1782,7 @@ function handleGfxDevCommand(req, res, rawCmd, drive, session) {
       if (!saveObj.success) return sendDev(false, 'Error: [.4]' + saveObj.error + '[.]');
 
       return sendDev(true, 'Saved object ' + sector + '/' + objFilename, {
-        sector: sector, z: curZ, zStr: zStr, filename: objFilename
+        sector: sector, z: curZ, zStr: zStr, filename: objFilename, code: objCode
       });
     }
 
@@ -1963,7 +1963,9 @@ function handleGfxDevCommand(req, res, rawCmd, drive, session) {
       }
       var eSave = DOS.fileSave(drive, '/', ePath, newExits, session, player.username);
       if (!eSave.success) return sendDev(false, 'Error: [.4]' + eSave.error + '[.]');
-      return sendDev(true, 'Exits for ' + sector + ' set to: ' + (newExits || '(none)'));
+      return sendDev(true, 'Exits for ' + sector + ' set to: ' + (newExits || '(none)'), {
+        sector: sector, exits: newExits
+      });
     }
 
     case 'sector': {
@@ -1979,9 +1981,12 @@ function handleGfxDevCommand(req, res, rawCmd, drive, session) {
       }
       var mkSec = DOS.dirMake(drive, '/', 'w/' + newSec, session);
       if (!mkSec.success) return sendDev(false, 'Error: [.4]' + mkSec.error + '[.]');
-      DOS.fileSave(drive, '/', 'w/' + newSec + '/m', 'Za'.repeat(maxTiles), session, player.username);
+      var blankTiles = 'Za'.repeat(maxTiles);
+      DOS.fileSave(drive, '/', 'w/' + newSec + '/m', blankTiles, session, player.username);
       DOS.fileSave(drive, '/', 'w/' + newSec + '/e', '', session, player.username);
-      return sendDev(true, 'Created sector ' + newSec + ' (' + gridWide + 'x' + gridTall + ').');
+      return sendDev(true, 'Created sector ' + newSec + ' (' + gridWide + 'x' + gridTall + ').', {
+        sector: newSec, tiles: blankTiles, exits: ''
+      });
     }
 
     case 'tele': {
